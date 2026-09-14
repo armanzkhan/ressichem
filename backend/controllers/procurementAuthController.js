@@ -151,6 +151,15 @@ exports.login = async (req, res) => {
     });
   } catch (err) {
     console.error("Procurement login error:", err);
+    const name = err?.name || "";
+    const code = err?.cause?.code || err?.code || "";
+    if (name.includes("MongoNetwork") || code === "ETIMEDOUT" || code === "ECONNREFUSED") {
+      return res.status(503).json({
+        success: false,
+        message:
+          "Cannot reach the database (MongoDB Atlas). Check your internet connection and MongoDB Atlas IP whitelist, then restart the backend.",
+      });
+    }
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };

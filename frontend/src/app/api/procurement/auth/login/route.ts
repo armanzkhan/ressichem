@@ -12,19 +12,38 @@ export async function POST(request: NextRequest) {
       company_id: companyId,
     };
 
-    const response = await fetch(`${apiBase}/api/procurement/auth/login`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-company-id": companyId,
-      },
-      body: JSON.stringify(payload),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+    let response: Response;
+    try {
+      response = await fetch(`${apiBase}/api/procurement/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-company-id": companyId,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const data = await response.json().catch(() => ({}));
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
     console.error("Frontend API - /api/procurement/auth/login error:", error);
+    if ((error as { name?: string })?.name === "AbortError") {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Login timed out. The backend or database is not responding — ensure backend is running and MongoDB Atlas is reachable.",
+        },
+        { status: 504 }
+      );
+    }
     const cause = (error as { cause?: { code?: string } })?.cause;
     if (cause?.code === "ECONNREFUSED") {
       return NextResponse.json(
