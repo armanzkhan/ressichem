@@ -56,13 +56,19 @@ class RealtimeService {
   }
 
   authenticateConnection(ws, data) {
-    const { token, userType, userId } = data;
-    
-    // Store connection with user info
+    const { token, userType, userId, userIds } = data;
+    const idSet = new Set(
+      [userId, ...(Array.isArray(userIds) ? userIds : [])]
+        .filter(Boolean)
+        .map((id) => String(id))
+    );
+
+    // Store connection with user info (support mongo _id + business user_id)
     this.connections.set(ws, {
       token,
       userType,
-      userId,
+      userId: userId ? String(userId) : null,
+      userIds: [...idSet],
       subscriptions: new Set()
     });
 
@@ -96,26 +102,45 @@ class RealtimeService {
     this.connections.delete(ws);
   }
 
-  // Send updates to specific users
+  // Send updates to specific users (matches primary userId or any alias ids)
   sendToUser(userId, data) {
-    console.log(`🔍 Attempting to send realtime message to user ${userId}`);
+    const target = String(userId || "");
+    console.log(`🔍 Attempting to send realtime message to user ${target}`);
     console.log(`🔍 Active connections:`, this.connections.size);
-    
+
     let sent = false;
     for (const [ws, connection] of this.connections) {
+      const aliases = new Set(
+        [connection.userId, ...(connection.userIds || [])]
+          .filter(Boolean)
+          .map((id) => String(id))
+      );
       console.log(`🔍 Checking connection for user ${connection.userId}, state: ${ws.readyState}`);
-      if (connection.userId === userId && ws.readyState === WebSocket.OPEN) {
+      if (target && aliases.has(target) && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(data));
-        console.log(`📤 Sent realtime message to user ${userId}:`, data);
+        console.log(`📤 Sent realtime message to user ${target}:`, data);
         sent = true;
       }
     }
-    
+
     if (!sent) {
-      console.log(`❌ No active connection found for user ${userId}`);
+      console.log(`❌ No active connection found for user ${target}`);
     }
-    
+
     return sent;
+  }
+
+  isUserConnected(userId) {
+    const target = String(userId || "");
+    for (const [ws, connection] of this.connections) {
+      const aliases = new Set(
+        [connection.userId, ...(connection.userIds || [])]
+          .filter(Boolean)
+          .map((id) => String(id))
+      );
+      if (target && aliases.has(target) && ws.readyState === WebSocket.OPEN) return true;
+    }
+    return false;
   }
 
   // Send updates to managers

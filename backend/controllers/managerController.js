@@ -821,6 +821,10 @@ exports.updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params; // Get orderId from URL parameter
     const { status, comments, categoryStatuses, discountAmount } = req.body;
+    const normalizedStatus = String(status || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
     const userId = req.user.user_id;
     const companyId = req.user.company_id;
     
@@ -878,9 +882,38 @@ exports.updateOrderStatus = async (req, res) => {
       return res.status(403).json({ message: "You don't have permission to update this order" });
     }
 
+    // Logistics phase-1: only allow hold/dispatch states
+    const logisticsStatusPermissions = {
+      on_hold: "orders.hold",
+      dispatched: "orders.dispatch",
+    };
+
+    if (!Object.prototype.hasOwnProperty.call(logisticsStatusPermissions, normalizedStatus)) {
+      return res.status(400).json({
+        message: "Invalid status. Only 'On Hold' and 'Dispatched' are allowed.",
+      });
+    }
+
+    const requiredPermission = logisticsStatusPermissions[normalizedStatus];
+    const userPermissions = (req.user?.permissions || [])
+      .map((perm) => {
+        if (typeof perm === "string") return perm;
+        return perm?.key || null;
+      })
+      .filter(Boolean);
+
+    const hasRequiredPermission =
+      req.user?.isSuperAdmin === true || userPermissions.includes(requiredPermission);
+
+    if (!hasRequiredPermission) {
+      return res.status(403).json({
+        message: `Permission denied. Missing required permission: ${requiredPermission}`,
+      });
+    }
+
     // Update order status
-    if (status) {
-      order.status = status;
+    if (normalizedStatus) {
+      order.status = normalizedStatus;
     }
 
     // Update category-specific statuses
@@ -945,7 +978,7 @@ exports.updateOrderStatus = async (req, res) => {
         data: {
           orderId: order._id,
           orderNumber: order.orderNumber,
-          status: status,
+          status: normalizedStatus,
           categoryStatuses: categoryStatuses,
           manager: req.user.email
         },

@@ -1,0 +1,24 @@
+{
+  "name": "ressichem-monorepo",
+  "private": true,
+  "scripts": {
+    "clean:frontend": "node -e \"require('fs').rmSync('frontend/.next',{recursive:true,force:true}); console.log('✅ deleted frontend/.next')\"",
+    "clean:backend": "node -e \"require('fs').rmSync('backend/.next',{recursive:true,force:true}); console.log('✅ deleted backend/.next (if existed)')\"",
+
+    "qc:perms": "npm --prefix backend run -s qc:perms",
+    "qc:seed:drymortar:tests": "npm --prefix backend run -s qc:seed:drymortar:tests",
+    "qc:seed:drymortar:plan": "npm --prefix backend run -s qc:seed:drymortar:plan",
+
+    "procurement:perms": "npm --prefix backend run -s procurement:perms",
+
+    "dev:backend": "npm --prefix backend run -s dev",
+    "start:backend": "npm --prefix backend run -s start",
+    "dev:frontend": "npm --prefix frontend run -s dev",
+    "start:frontend": "npm --prefix frontend run -s start",
+
+    "lint:frontend": "npm --prefix frontend run -s lint",
+    "build:frontend": "npm --prefix frontend run -s build"
+  }
+}
+
+

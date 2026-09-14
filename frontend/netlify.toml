@@ -1,0 +1,17 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "18"
+
+# Use Netlify Next.js plugin for optimal Next.js support
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Next.js handles routing, but we need this for fallback
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+

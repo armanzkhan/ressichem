@@ -12,6 +12,8 @@ const UserSchema = new mongoose.Schema({
   avatarUrl: { type: String },
   role: { type: String },
   department: { type: String },
+  // Optional module tags for faster filtering in dedicated portals (e.g. QC Site vs QC Hub)
+  modules: [{ type: String, index: true }], // e.g. ["QC_SITE", "QC_HUB"]
   roles: [{ type: mongoose.Schema.Types.ObjectId, ref: "Role" }],
   permissions: [{ type: mongoose.Schema.Types.ObjectId, ref: "Permission" }], // Direct permissions
   isActive: { type: Boolean, default: true },
@@ -59,7 +61,45 @@ const UserSchema = new mongoose.Schema({
       lowStock: { type: Boolean, default: true },
       categoryReports: { type: Boolean, default: true }
     }
-  }
+  },
+
+  // QC & R&D Layer Model (SRS Section 2.3)
+  qcRndProfile: {
+    layer: {
+      type: String,
+      enum: ["QC", "R&D", "MANAGEMENT"],
+      index: true,
+    },
+    // Layer 1 - QC (Execution & Compliance)
+    qcRole: {
+      type: String,
+      enum: ["QC_LAB_TECHNICIAN", "QC_SUPERVISOR"],
+    },
+    // Layer 2 - R&D (Innovation & Development)
+    rndRole: {
+      type: String,
+      enum: ["R&D_CHEMIST", "SENIOR_R&D_SCIENTIST"],
+    },
+    // Layer 3 - Management (Governance & Approval)
+    managementRole: {
+      type: String,
+      enum: ["TECHNICAL_MANAGER_RND", "PLANT_HEAD", "CEO", "DIRECTOR"],
+    },
+    // Access control flags
+    canAccessRndData: { type: Boolean, default: false }, // Management only
+    canReleaseToQC: { type: Boolean, default: false }, // Management only
+    canFreezeFormulations: { type: Boolean, default: false }, // Management only
+    canDefineAcceptanceLimits: { type: Boolean, default: false }, // Management only
+    canCloseCAPA: { type: Boolean, default: false }, // Management only
+    canConductMRM: { type: Boolean, default: false }, // Management only
+  },
+
+  // Formulation 2-step verification (SRS 4.2)
+  formulation2fa: {
+    codeHash: { type: String, default: "" },
+    expiresAt: { type: Date },
+    verifiedAt: { type: Date },
+  },
 });
 
 UserSchema.index({ company_id: 1, user_id: 1 }, { unique: true });

@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ressichem Procurement System — User Manual</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+      color: #1a2332;
+      line-height: 1.45;
+      font-size: 10.5pt;
+      margin: 0;
+      padding: 0;
+    }
+    h1 {
+      font-size: 22pt;
+      color: #1e3a8a;
+      margin: 0 0 6px;
+      border-bottom: 3px solid #1e3a8a;
+      padding-bottom: 8px;
+    }
+    h2 {
+      font-size: 14pt;
+      color: #1e40af;
+      margin: 22px 0 8px;
+      border-bottom: 1px solid #bfdbfe;
+      padding-bottom: 4px;
+      page-break-after: avoid;
+    }
+    h3 {
+      font-size: 11.5pt;
+      color: #1e3a8a;
+      margin: 14px 0 6px;
+      page-break-after: avoid;
+    }
+    p, li { margin: 0 0 6px; }
+    .subtitle { color: #475569; font-size: 11pt; margin-bottom: 4px; }
+    .meta { color: #64748b; font-size: 9pt; margin-bottom: 18px; }
+    .cover-box {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 14px 0 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0 14px;
+      font-size: 9.5pt;
+      page-break-inside: avoid;
+    }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #1e3a8a;
+      color: #fff;
+      font-weight: 600;
+    }
+    tr:nth-child(even) td { background: #f8fafc; }
+    code, .mono {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 9pt;
+      background: #f1f5f9;
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+    .flow {
+      background: #f8fafc;
+      border-left: 4px solid #2563eb;
+      padding: 10px 12px;
+      margin: 8px 0 14px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 9pt;
+      white-space: pre-wrap;
+      page-break-inside: avoid;
+    }
+    .note {
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin: 8px 0 12px;
+      font-size: 9.5pt;
+    }
+    .toc ol { margin: 6px 0 0 18px; padding: 0; }
+    .toc li { margin-bottom: 3px; }
+    ul { margin: 4px 0 10px 18px; padding: 0; }
+    .footer-note {
+      margin-top: 28px;
+      padding-top: 10px;
+      border-top: 1px solid #cbd5e1;
+      color: #64748b;
+      font-size: 8.5pt;
+    }
+    .badge {
+      display: inline-block;
+      background: #dbeafe;
+      color: #1e40af;
+      border-radius: 999px;
+      padding: 1px 8px;
+      font-size: 8.5pt;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Ressichem Procurement System</h1>
+  <p class="subtitle">User Manual — Complete Workflow &amp; How to Use</p>
+  <p class="meta">Version 1.0 · Prepared for Ressichem internal use · July 2026</p>
+
+  <div class="cover-box">
+    <strong>Purpose.</strong> This manual describes the end-to-end procurement workflow in the Ressichem
+    Procurement portal: Local buying, Import buying, and Export documentation — including purchase
+    requisitions, purchase orders, purchase receipts, supplier invoices, payments, PFI, and costing.
+  </div>
+
+  <h2>1. Table of contents</h2>
+  <div class="toc">
+    <ol>
+      <li>System overview</li>
+      <li>Roles &amp; access</li>
+      <li>Master data (Suppliers &amp; Items)</li>
+      <li>Local &amp; Import buying cycle</li>
+      <li>Purchase Requisition (PR)</li>
+      <li>Purchase Order (PO)</li>
+      <li>Purchase Receipts</li>
+      <li>Supplier Invoices &amp; matching</li>
+      <li>Payments</li>
+      <li>Landed costing</li>
+      <li>Import PFI path</li>
+      <li>Export workflow</li>
+      <li>Status reference</li>
+      <li>Quick reference URLs</li>
+    </ol>
+  </div>
+
+  <h2>2. System overview</h2>
+  <p>The portal is divided into three trade areas:</p>
+  <table>
+    <thead>
+      <tr><th>Area</th><th>Purpose</th><th>Main modules</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Local</strong></td>
+        <td>Domestic (Pakistan) purchasing</td>
+        <td>Suppliers, Items, Requisitions, Purchase orders, Purchase receipts, Supplier invoices, Payments, PR Reports, Landed costing</td>
+      </tr>
+      <tr>
+        <td><strong>Import</strong></td>
+        <td>Foreign purchasing</td>
+        <td>Same as Local, plus Upload PFI &amp; Document</td>
+      </tr>
+      <tr>
+        <td><strong>Export</strong></td>
+        <td>Outbound sales documentation</td>
+        <td>Create PFI, Received PFI, Documents Upload, Shipment Details</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <strong>Note:</strong> Local/Import cover the buy cycle (procure-to-pay). Export is documentation-only and does not use PR / PO / receipts / invoices / payments.
+  </div>
+
+  <h2>3. Roles &amp; access</h2>
+  <table>
+    <thead>
+      <tr><th>Role</th><th>Typical actions</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Requester</td><td>Create and submit purchase requisitions; view PR status</td></tr>
+      <tr><td>Approver</td><td>Approve, reject, or hold submitted PRs for assigned departments</td></tr>
+      <tr><td>Buyer</td><td>Manage suppliers/items; create PO from PR; issue PO; receive goods; invoices; payments; PFI; costing</td></tr>
+      <tr><td>Admin</td><td>Full access, including Users and PR Approvers mapping</td></tr>
+    </tbody>
+  </table>
+  <p>Department → approver routing is configured under <strong>PR Approvers</strong> (admin).</p>
+
+  <h2>4. Master data (Suppliers &amp; Items)</h2>
+  <h3>4.1 Suppliers</h3>
+  <ul>
+    <li>Create and maintain vendor records before raising POs.</li>
+    <li>Country determines Local vs Import (Pakistan suppliers appear under Local).</li>
+  </ul>
+  <h3>4.2 Items</h3>
+  <ul>
+    <li>Maintain the procurement item catalog.</li>
+    <li>Each item has a trade scope (local / import) used when building PR/PO lines.</li>
+  </ul>
+
+  <h2>5. Local &amp; Import buying cycle (complete)</h2>
+  <p>This is the standard procure-to-pay flow:</p>
+  <div class="flow">PR draft
+  → Submit (submitted)
+  → Approve / Reject / Hold
+  → Create PO (draft) from approved PR
+  → Issue PO (issued)
+  → Purchase receipt (partial or received)
+  → Supplier invoice → Match
+  → Payment (partial or paid)
+  → Optional: Close PO / Landed costing sheet</div>
+
+  <h2>6. Purchase Requisition (PR)</h2>
+  <p><span class="badge">Module: Requisitions</span></p>
+  <table>
+    <thead>
+      <tr><th>Step</th><th>Status</th><th>Who</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1. Create</td><td><code>draft</code></td><td>Requester</td><td>Add department (title), lines, save</td></tr>
+      <tr><td>2. Submit</td><td><code>submitted</code></td><td>Requester</td><td>Sends PR to department approver; notification sent</td></tr>
+      <tr><td>3a. Approve</td><td><code>approved</code></td><td>Approver</td><td>PR ready for PO conversion</td></tr>
+      <tr><td>3b. Reject</td><td><code>rejected</code></td><td>Approver</td><td>Reason required; requester may edit &amp; resubmit</td></tr>
+      <tr><td>3c. Hold</td><td><code>held</code></td><td>Approver</td><td>Reason required; can Release back to submitted, or Approve/Reject</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    Editing is blocked while status is submitted, held, or approved.
+  </div>
+
+  <h2>7. Purchase Order (PO)</h2>
+  <p><span class="badge">Module: Purchase orders</span></p>
+  <h3>7.1 Create from approved PR</h3>
+  <ol>
+    <li>Open an <strong>approved</strong> PR.</li>
+    <li>Click <strong>Create PO</strong>.</li>
+    <li>Select the <strong>supplier</strong> (required — PRs do not store supplier).</li>
+    <li>System creates a <strong>draft</strong> PO with PR lines and links (<code>prNumber</code> / requisition).</li>
+  </ol>
+  <p>POs can also be created manually, or (Import) converted from a received PFI.</p>
+  <h3>7.2 Issue</h3>
+  <p>From draft, click <strong>Issue</strong> → status becomes <code>issued</code>. This is the official purchase order.</p>
+  <h3>7.3 Receive</h3>
+  <p>On an issued (or partially received) PO, click <strong>Receive</strong>:</p>
+  <ul>
+    <li>Enter quantity received per line (remaining qty is pre-filled).</li>
+    <li>Post purchase receipt.</li>
+    <li>PO becomes <code>partial</code> if any lines remain open, or <code>received</code> when all quantities are received.</li>
+  </ul>
+  <h3>7.4 Close</h3>
+  <p>After receive, use <strong>Close</strong> to set status <code>closed</code> when the order is complete operationally.</p>
+
+  <h2>8. Purchase Receipts</h2>
+  <p><span class="badge">Module: Purchase receipts</span></p>
+  <ul>
+    <li>Each receive action posts a purchase receipt document (number like <code>GRN-YYYY-#####</code>).</li>
+    <li>Receipts list shows receipt #, linked PO, supplier, date, lines, and value.</li>
+    <li>Supports full and partial receipts against the same PO over time.</li>
+  </ul>
+
+  <h2>9. Supplier Invoices &amp; matching</h2>
+  <p><span class="badge">Module: Supplier invoices</span></p>
+  <ol>
+    <li>Create a supplier invoice (optionally link to a PO).</li>
+    <li>Enter supplier invoice number, date, and total (or inherit PO total).</li>
+    <li>Click <strong>Match</strong> to compare invoice total with PO total / received value.</li>
+  </ol>
+  <table>
+    <thead>
+      <tr><th>Match result</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>matched</code></td><td>Invoice aligns with PO / received amounts</td></tr>
+      <tr><td><code>variance</code></td><td>Amounts differ — review before paying</td></tr>
+      <tr><td><code>unmatched</code></td><td>Not yet matched / no PO linked</td></tr>
+    </tbody>
+  </table>
+
+  <h2>10. Payments</h2>
+  <p><span class="badge">Module: Payments</span></p>
+  <ol>
+    <li>Open <strong>Payments</strong> → add payment.</li>
+    <li>Select supplier invoice; remaining balance is suggested.</li>
+    <li>Enter amount, date, method (bank transfer, cheque, cash, LC, other), and reference.</li>
+    <li>Post payment → invoice becomes <code>partially_paid</code> or <code>paid</code>.</li>
+  </ol>
+
+  <h2>11. Landed costing</h2>
+  <p><span class="badge">Module: Landed costing</span></p>
+  <ul>
+    <li>Separate cost sheet for duties, charges, FX, and landed cost calculations (especially Import).</li>
+    <li>This is <strong>not</strong> the same as recording a supplier payment.</li>
+    <li>Use after/alongside import purchases for cost analysis and print/export.</li>
+  </ul>
+
+  <h2>12. Import PFI path</h2>
+  <p><span class="badge">Module: Upload PFI &amp; Document</span></p>
+  <div class="flow">Upload received PFI
+  → Review / accept as ready
+  → Convert to PO (draft)
+  → Issue → Purchase receipt → Invoice → Payment
+  (+ Landed costing as needed)</div>
+  <p>Import can also skip PFI and use the standard <strong>PR → Create PO</strong> path.</p>
+
+  <h2>13. Export workflow</h2>
+  <p>Export is independent of the buy cycle:</p>
+  <div class="flow">Create PFI
+  → Received PFI (as needed)
+  → Documents Upload
+  → Shipment Details</div>
+  <p>Use Export for outbound commercial documents and shipment tracking — not for purchasing stock.</p>
+
+  <h2>14. Status reference</h2>
+  <h3>14.1 Purchase Requisition</h3>
+  <p><code>draft</code> → <code>submitted</code> → <code>approved</code> | <code>rejected</code> | <code>held</code></p>
+  <h3>14.2 Purchase Order</h3>
+  <p><code>draft</code> → <code>issued</code> → <code>partial</code> → <code>received</code> → <code>closed</code></p>
+  <h3>14.3 Purchase Receipt</h3>
+  <p><code>posted</code></p>
+  <h3>14.4 Supplier Invoice</h3>
+  <p>Workflow: <code>draft</code> → <code>matched</code> → <code>partially_paid</code> → <code>paid</code><br/>
+  Match flag: <code>unmatched</code> | <code>matched</code> | <code>variance</code></p>
+  <h3>14.5 Payment</h3>
+  <p><code>posted</code></p>
+  <h3>14.6 PFI</h3>
+  <p><code>draft</code> / <code>sent</code> / <code>accepted</code> / <code>converted</code> / <code>rejected</code> / <code>cancelled</code></p>
+
+  <h2>15. Quick reference URLs</h2>
+  <p>Replace host with your server (e.g. <code>http://192.168.13.166:3000</code>):</p>
+  <table>
+    <thead>
+      <tr><th>Screen</th><th>Local path</th><th>Import path</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Dashboard</td><td colspan="2"><code>/procurement</code></td></tr>
+      <tr><td>Requisitions (PR)</td><td><code>/procurement/local/pr</code></td><td><code>/procurement/import/pr</code></td></tr>
+      <tr><td>Purchase orders</td><td><code>/procurement/local/po</code></td><td><code>/procurement/import/po</code></td></tr>
+      <tr><td>Purchase receipts</td><td><code>/procurement/local/grn</code></td><td><code>/procurement/import/grn</code></td></tr>
+      <tr><td>Supplier invoices</td><td><code>/procurement/local/invoices</code></td><td><code>/procurement/import/invoices</code></td></tr>
+      <tr><td>Payments</td><td><code>/procurement/local/payments</code></td><td><code>/procurement/import/payments</code></td></tr>
+      <tr><td>Landed costing</td><td><code>/procurement/local/costing</code></td><td><code>/procurement/import/costing</code></td></tr>
+      <tr><td>PR Reports</td><td><code>/procurement/local/reports</code></td><td><code>/procurement/import/reports</code></td></tr>
+      <tr><td>Upload PFI</td><td>—</td><td><code>/procurement/import/pfi-received</code></td></tr>
+      <tr><td>Export PFI</td><td colspan="2"><code>/procurement/export/pfi</code></td></tr>
+      <tr><td>PR Approvers (admin)</td><td colspan="2"><code>/procurement/department-approvers</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>16. End-to-end examples</h2>
+  <h3>16.1 Local purchase</h3>
+  <ol>
+    <li>Requester creates &amp; submits PR (Local).</li>
+    <li>Department approver approves.</li>
+    <li>Buyer clicks <strong>Create PO</strong>, selects Pakistan supplier, issues PO.</li>
+    <li>On delivery, buyer <strong>Receives</strong> (full or partial) → purchase receipt posted.</li>
+    <li>Buyer records <strong>Supplier invoice</strong>, runs <strong>Match</strong>.</li>
+    <li>Accounts/buyer posts <strong>Payment</strong> until invoice is paid.</li>
+    <li>Optionally <strong>Close</strong> the PO.</li>
+  </ol>
+  <h3>16.2 Import purchase via PFI</h3>
+  <ol>
+    <li>Upload received PFI under Import.</li>
+    <li>Convert PFI to draft PO → Issue.</li>
+    <li>Receive shipments (partial OK) → invoices → match → payments.</li>
+    <li>Maintain landed costing sheet for duties/charges/FX.</li>
+  </ol>
+  <h3>16.3 Export</h3>
+  <ol>
+    <li>Create export PFI.</li>
+    <li>Upload documents and maintain shipment details as goods leave.</li>
+  </ol>
+
+  <div class="footer-note">
+    <strong>Ressichem Procurement System — User Manual</strong><br/>
+    Internal document. Workflow reflects the system as implemented (PR → PO → Purchase receipt → Invoice → Payment for Local/Import; Export is documentation-only).
+    For access issues, contact a Procurement Admin.
+  </div>
+
+</body>
+</html>

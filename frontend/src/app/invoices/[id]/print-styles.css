@@ -1,0 +1,403 @@
+@media print {
+  @page {
+    margin: 0.75in;
+    size: A4;
+  }
+  
+  body * {
+    visibility: hidden;
+  }
+  
+  .print-area, .print-area * {
+    visibility: visible;
+  }
+  
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: white !important;
+    color: #1f2937 !important;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+  
+  /* Professional Header */
+  .print-header {
+    display: block !important;
+    text-align: center;
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 4px solid #2563eb;
+    position: relative;
+  }
+  
+  .print-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100px;
+    height: 4px;
+    background: linear-gradient(90deg, #2563eb, #7c3aed, #2563eb);
+  }
+  
+  .print-header h1 {
+    font-size: 3rem;
+    font-weight: 800;
+    color: #1e40af;
+    margin: 0 0 0.5rem 0;
+    letter-spacing: 2px;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  
+  .print-header .invoice-number {
+    font-size: 1.5rem;
+    color: #374151;
+    font-weight: 600;
+    margin: 0.5rem 0;
+  }
+  
+  .print-header .invoice-dates {
+    font-size: 1rem;
+    color: #6b7280;
+    margin: 0.5rem 0 0 0;
+    font-style: italic;
+  }
+  
+  /* Company Header */
+  .print-company-header {
+    display: block !important;
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+    border-radius: 12px;
+    border: 2px solid #e2e8f0;
+  }
+  
+  .print-company-header h2 {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #1e40af;
+    margin: 0 0 1rem 0;
+    text-align: center;
+  }
+  
+  .print-company-header .company-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  
+  .print-company-header .from-section,
+  .print-company-header .to-section {
+    flex: 1;
+    padding: 0 1rem;
+  }
+  
+  .print-company-header .section-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 2px solid #d1d5db;
+  }
+  
+  .print-company-header .company-name,
+  .print-company-header .customer-name {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 0.5rem;
+  }
+  
+  .print-company-header .company-details,
+  .print-company-header .customer-details {
+    font-size: 0.95rem;
+    color: #4b5563;
+    line-height: 1.5;
+  }
+  
+  /* Status Badges */
+  .print-status-badges {
+    display: block !important;
+    text-align: center;
+    margin: 1.5rem 0;
+  }
+  
+  .print-status-badge {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    margin: 0 0.5rem;
+    border-radius: 25px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  
+  .print-status-badge.draft {
+    background-color: #fef3c7;
+    color: #92400e;
+    border: 2px solid #f59e0b;
+  }
+  
+  .print-status-badge.unpaid {
+    background-color: #fee2e2;
+    color: #991b1b;
+    border: 2px solid #ef4444;
+  }
+  
+  .print-status-badge.paid {
+    background-color: #dcfce7;
+    color: #166534;
+    border: 2px solid #22c55e;
+  }
+  
+  /* Items Table */
+  .print-items-section {
+    display: block !important;
+    margin: 2rem 0;
+  }
+  
+  .print-items-section h3 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #1e40af;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 3px solid #2563eb;
+  }
+  
+  .print-items-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  
+  .print-items-table th {
+    background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+    color: white;
+    font-weight: 700;
+    padding: 1rem;
+    text-align: left;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  
+  .print-items-table td {
+    padding: 1rem;
+    border-bottom: 1px solid #e5e7eb;
+    color: #374151;
+    font-size: 0.95rem;
+  }
+  
+  .print-items-table tr:nth-child(even) {
+    background-color: #f9fafb;
+  }
+  
+  .print-items-table tr:hover {
+    background-color: #f3f4f6;
+  }
+  
+  .print-items-table .item-name {
+    font-weight: 600;
+    color: #1f2937;
+  }
+  
+  .print-items-table .item-price,
+  .print-items-table .item-total {
+    font-weight: 600;
+    color: #059669;
+    text-align: right;
+  }
+  
+  /* Financial Summary */
+  .print-financial-summary {
+    display: block !important;
+    margin: 2rem 0;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+    border-radius: 12px;
+    border: 2px solid #e2e8f0;
+  }
+  
+  .print-financial-summary h3 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #1e40af;
+    margin-bottom: 1rem;
+    text-align: center;
+  }
+  
+  .print-financial-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #d1d5db;
+  }
+  
+  .print-financial-row.total-row {
+    border-top: 3px solid #2563eb;
+    border-bottom: none;
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: #1e40af;
+    margin-top: 1rem;
+    padding-top: 1rem;
+  }
+  
+  .print-financial-row.remaining-row {
+    background-color: #fef3c7;
+    border-radius: 8px;
+    margin-top: 1rem;
+    padding: 1rem;
+    font-weight: 600;
+    color: #92400e;
+  }
+  
+  .print-financial-label {
+    font-weight: 600;
+    color: #374151;
+  }
+  
+  .print-financial-value {
+    font-weight: 600;
+    color: #059669;
+  }
+  
+  .print-financial-value.discount {
+    color: #dc2626;
+  }
+  
+  .print-financial-value.total {
+    color: #1e40af;
+    font-size: 1.2rem;
+  }
+  
+  /* Notes Section */
+  .print-notes-section {
+    display: block !important;
+    margin: 2rem 0;
+    padding: 1.5rem;
+    background-color: #f9fafb;
+    border-radius: 8px;
+    border-left: 4px solid #2563eb;
+  }
+  
+  .print-notes-section h3 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 0.75rem;
+  }
+  
+  .print-notes-content {
+    color: #4b5563;
+    font-style: italic;
+    line-height: 1.6;
+  }
+  
+  /* Invoice Details */
+  .print-invoice-details {
+    display: block !important;
+    margin: 2rem 0;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border-radius: 12px;
+    border: 2px solid #0ea5e9;
+  }
+  
+  .print-invoice-details h3 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #0c4a6e;
+    margin-bottom: 1rem;
+    text-align: center;
+  }
+  
+  .print-detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #bae6fd;
+  }
+  
+  .print-detail-label {
+    font-weight: 600;
+    color: #0c4a6e;
+  }
+  
+  .print-detail-value {
+    font-weight: 500;
+    color: #0369a1;
+  }
+  
+  /* Footer */
+  .print-footer {
+    display: block !important;
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 2px solid #e5e7eb;
+    text-align: center;
+    color: #6b7280;
+    font-size: 0.9rem;
+  }
+  
+  /* Hide all non-print elements */
+  .print-area .bg-gradient-to-br {
+    background: white !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  
+  .print-area .dark\\:bg-gray-800 {
+    background: white !important;
+  }
+  
+  .print-area .dark\\:text-white {
+    color: #1f2937 !important;
+  }
+  
+  .print-area .dark\\:text-gray-400 {
+    color: #6b7280 !important;
+  }
+  
+  .print-area .dark\\:text-gray-300 {
+    color: #6b7280 !important;
+  }
+  
+  .print-area .dark\\:border-gray-700 {
+    border-color: #e5e7eb !important;
+  }
+  
+  .print-area .dark\\:border-gray-600 {
+    border-color: #d1d5db !important;
+  }
+  
+  /* Ensure proper spacing */
+  .print-area .space-y-3 > * + * {
+    margin-top: 0.75rem;
+  }
+  
+  .print-area .space-y-4 > * + * {
+    margin-top: 1rem;
+  }
+  
+  .print-area .space-y-6 > * + * {
+    margin-top: 1.5rem;
+  }
+}

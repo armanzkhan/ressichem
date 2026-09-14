@@ -15,7 +15,15 @@
     "seed:notifications": "node scripts/seedNotificationPermissions.js",
     "seed:managers": "node scripts/seedManagers.js",
     "seed:companies": "node scripts/seed-companies.js",
-    "assign:sales-categories": "node scripts/assignCategoriesToSalesUser.js"
+    "assign:sales-categories": "node scripts/assignCategoriesToSalesUser.js",
+    "qc:perms": "node scripts/migrations/setup-qc-permissions.js RESSICHEM",
+    "qc:seed:drymortar:tests": "node scripts/migrations/seed-qc-dry-mortar-tests.js RESSICHEM",
+    "qc:seed:drymortar:plan": "node scripts/migrations/seed-qc-hub-dry-mortar-plan.js RESSICHEM",
+    "qc:seed:drymortar:demo": "node scripts/migrations/seed-qc-hub-dry-mortar-demo.js RESSICHEM",
+    "qc:create:hub-arsalan": "node scripts/migrations/create-qc-hub-user-arsalan.js RESSICHEM",
+    "qc:export:hub": "node scripts/run-qc-hub-export.js RESSICHEM",
+    "qc:seed:site:test-data": "node scripts/migrations/seed-qc-site-test-data.js RESSICHEM",
+    "procurement:perms": "node scripts/migrations/setup-procurement-permissions.js RESSICHEM"
   },
   "dependencies": {
     "axios": "^1.12.2",
@@ -32,7 +40,8 @@
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
     "web-push": "^3.6.6",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

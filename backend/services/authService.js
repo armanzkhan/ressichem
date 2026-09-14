@@ -25,22 +25,22 @@ async function getUserPermissions(userId, companyId) {
   const permissionGroups = [];
   const permissions = [];
 
+  const roleDocs = Array.isArray(user.roles) ? user.roles.filter(Boolean) : [];
+  const directPerms = Array.isArray(user.permissions) ? user.permissions.filter(Boolean) : [];
+
   // Get permissions from roles
-  user.roles.forEach((role) => {
-    roles.push(role.name);
-    if (role.permissions) {
-      role.permissions.forEach((p) => {
-        if (!permissions.includes(p.key)) permissions.push(p.key);
-      });
-    }
+  roleDocs.forEach((role) => {
+    if (role?.name) roles.push(role.name);
+    const rolePerms = Array.isArray(role?.permissions) ? role.permissions : [];
+    rolePerms.forEach((p) => {
+      if (p?.key && !permissions.includes(p.key)) permissions.push(p.key);
+    });
   });
 
   // Get direct permissions
-  if (user.permissions) {
-    user.permissions.forEach((p) => {
-      if (!permissions.includes(p.key)) permissions.push(p.key);
-    });
-  }
+  directPerms.forEach((p) => {
+    if (p?.key && !permissions.includes(p.key)) permissions.push(p.key);
+  });
 
   return { roles, permissionGroups, permissions };
 }

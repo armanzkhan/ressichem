@@ -67,10 +67,13 @@ async function login(req, res) {
     if (!user)
       return res.status(404).json({ success: false, message: "User not found" });
 
+    const roleDocs = Array.isArray(user.roles) ? user.roles.filter(Boolean) : [];
+    const permDocs = Array.isArray(user.permissions) ? user.permissions.filter(Boolean) : [];
+
     console.log("🔍 User found:", {
       email: user.email,
-      roles: user.roles,
-      permissions: user.permissions
+      roles: roleDocs,
+      permissions: permDocs
     });
 
     const validPassword = await bcrypt.compare(password, user.password);
@@ -78,10 +81,11 @@ async function login(req, res) {
       return res.status(401).json({ success: false, message: "Invalid credentials" });
 
     // ✅ Check if user is super admin
-    const isSuperAdmin = user.isSuperAdmin === true || 
-                        user.user_id === "super_admin_001" ||
-                        user.email === "superadmin@ressichem.com" ||
-                        user.roles.some(r => r.name === "Super Admin");
+    const isSuperAdmin =
+      user.isSuperAdmin === true ||
+      user.user_id === "super_admin_001" ||
+      user.email === "superadmin@ressichem.com" ||
+      roleDocs.some((r) => r?.name === "Super Admin");
 
     const token = await generateToken(user, "15m");
     const refreshToken = await generateToken(user, "7d", true);
@@ -116,8 +120,8 @@ async function login(req, res) {
         isManager: user.isManager,
         userType,
         company_id: user.company_id,
-        permissions: user.permissions?.map(p => p.key || p) || [],
-        roles: user.roles?.map(r => r.name || r) || []
+        permissions: permDocs.map((p) => p.key || p),
+        roles: roleDocs.map((r) => r.name || r)
       }
     });
   } catch (err) {
@@ -153,10 +157,12 @@ async function refresh(req, res) {
       return res.status(404).json({ success: false, message: "User not found" });
 
     // ✅ Check if user is super admin
-    const isSuperAdmin = user.isSuperAdmin === true || 
-                        user.user_id === "super_admin_001" ||
-                        user.email === "superadmin@ressichem.com" ||
-                        user.roles.some(r => r.name === "Super Admin");
+    const roleDocs = Array.isArray(user.roles) ? user.roles.filter(Boolean) : [];
+    const isSuperAdmin =
+      user.isSuperAdmin === true ||
+      user.user_id === "super_admin_001" ||
+      user.email === "superadmin@ressichem.com" ||
+      roleDocs.some((r) => r?.name === "Super Admin");
 
     const newToken = await generateToken(user, "15m");
     return res.json({ success: true, token: newToken });
@@ -186,20 +192,32 @@ async function getCurrentUser(req, res) {
     if (!user)
       return res.status(404).json({ success: false, message: "User not found" });
 
-    // ✅ Check both database flag and role-based super admin
-    const isSuperAdmin = user.isSuperAdmin === true || 
-                        user.user_id === "super_admin_001" ||
-                        user.email === "superadmin@ressichem.com" ||
-                        user.roles.some(r => r.name === "Super Admin");
+    const roleDocs = Array.isArray(user.roles) ? user.roles.filter(Boolean) : [];
+    const permDocs = Array.isArray(user.permissions) ? user.permissions.filter(Boolean) : [];
 
-    const roleNames = user.roles.map(r => r.name);
+    // Fallback: users may have legacy `role` string without populated `roles` array
+    if (roleDocs.length === 0 && user.role) {
+      const Role = require("../models/Role");
+      const roleByName = await Role.findOne({ company_id, name: user.role })
+        .populate({ path: "permissions", model: "Permission" })
+        .lean();
+      if (roleByName) roleDocs.push(roleByName);
+    }
+
+    // ✅ Check both database flag and role-based super admin
+    const isSuperAdmin =
+      user.isSuperAdmin === true ||
+      user.user_id === "super_admin_001" ||
+      user.email === "superadmin@ressichem.com" ||
+      roleDocs.some((r) => r?.name === "Super Admin");
+    const roleNames = roleDocs.map((r) => r.name);
     
     // ✅ Get permissions from roles
-    let rolePermissions = user.roles.flatMap(r => r.permissions || []);
-    let permissionGroups = user.roles.flatMap(r => r.permissionGroups || []);
+    let rolePermissions = roleDocs.flatMap((r) => r.permissions || []);
+    let permissionGroups = roleDocs.flatMap((r) => r.permissionGroups || []);
     
     // ✅ Get direct permissions assigned to user
-    let directPermissions = user.permissions || [];
+    let directPermissions = permDocs;
     
     // ✅ Combine role permissions and direct permissions
     let permissions = [...rolePermissions, ...directPermissions];

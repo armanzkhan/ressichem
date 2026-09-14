@@ -9,7 +9,7 @@ router.post("/", authMiddleware, permissionMiddleware(["orders.create"]), orderC
 router.get("/", authMiddleware, permissionMiddleware(["orders.read"]), orderController.getOrders);
 router.get("/:id", authMiddleware, permissionMiddleware(["orders.read"]), orderController.getOrderById);
 router.put("/:id", authMiddleware, permissionMiddleware(["orders.update"]), orderController.updateOrder);
-router.put("/:id/status", authMiddleware, permissionMiddleware(["orders.update"]), orderController.updateOrderStatus);
+router.put("/:id/status", authMiddleware, orderController.updateOrderStatus);
 router.delete("/:id", authMiddleware, permissionMiddleware(["orders.delete"]), orderController.deleteOrder);
 
 // Approval workflow routes (OLD SYSTEM - kept for backward compatibility)

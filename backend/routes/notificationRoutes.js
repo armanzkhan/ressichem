@@ -21,13 +21,17 @@ router.get('/recent', authMiddleware, async (req, res) => {
     console.log('User isCustomer:', req.user.isCustomer);
 
     // Get notifications for the user
-    let query = {
+    const query = {
       $or: [
         { targetType: 'all' },
-        { targetType: 'user', targetIds: userId },
-        { targetType: 'role', targetIds: { $in: req.user.roles || [] } },
-        { targetType: 'company', targetIds: req.user.company_id },
-        { targetType: 'company', targetIds: { $in: [req.user.company_id, 'RESSICHEM'] } }
+        ...(userId
+          ? [
+              { targetType: 'user', targetIds: userId },
+              { targetType: 'role', targetIds: { $in: req.user.roles || [] } },
+              { targetType: 'company', targetIds: req.user.company_id },
+              { targetType: 'company', targetIds: { $in: [req.user.company_id, 'RESSICHEM'] } },
+            ]
+          : []),
       ],
       company_id: { $in: [req.user.company_id, 'system', 'RESSICHEM'] }
     };

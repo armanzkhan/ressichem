@@ -639,11 +639,44 @@ exports.getOrderById = async (req, res) => {
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { status, comments, discountAmount } = req.body;
+    const normalizedStatus = String(status || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+
+    const logisticsStatusPermissions = {
+      on_hold: "orders.hold",
+      dispatched: "orders.dispatch",
+    };
+
+    if (!Object.prototype.hasOwnProperty.call(logisticsStatusPermissions, normalizedStatus)) {
+      return res.status(400).json({
+        message: "Invalid status. Only 'On Hold' and 'Dispatched' are allowed.",
+      });
+    }
+
+    const requiredPermission = logisticsStatusPermissions[normalizedStatus];
+    const userPermissions = (req.user?.permissions || [])
+      .map((perm) => {
+        if (typeof perm === "string") return perm;
+        return perm?.key || null;
+      })
+      .filter(Boolean);
+
+    const hasRequiredPermission =
+      req.user?.isSuperAdmin === true || userPermissions.includes(requiredPermission);
+
+    if (!hasRequiredPermission) {
+      return res.status(403).json({
+        message: `Permission denied. Missing required permission: ${requiredPermission}`,
+      });
+    }
+
     const oldOrder = await Order.findById(req.params.id);
     if (!oldOrder) return res.status(404).json({ message: "Order not found" });
 
     // Prepare update data
-    const updateData = { status };
+    const updateData = { status: normalizedStatus };
     
     // Handle discount amount if provided
     if (discountAmount && discountAmount > 0) {
@@ -673,7 +706,7 @@ exports.updateOrderStatus = async (req, res) => {
         email: req.user.email,
         name: req.user.firstName && req.user.lastName ? `${req.user.firstName} ${req.user.lastName}` : req.user.email
       } : { _id: 'system', name: 'System', email: 'system@ressichem.com' };
-      realtimeService.sendOrderStatusUpdate(order, oldOrder.status, status, updatedBy);
+      realtimeService.sendOrderStatusUpdate(order, oldOrder.status, normalizedStatus, updatedBy);
     } catch (realtimeError) {
       console.error("Realtime notification error:", realtimeError);
     }
@@ -687,7 +720,7 @@ exports.updateOrderStatus = async (req, res) => {
         email: req.user.email,
         name: req.user.firstName && req.user.lastName ? `${req.user.firstName} ${req.user.lastName}` : req.user.email
       } : { _id: 'system', name: 'System', email: 'system@ressichem.com' };
-      await notificationTriggerService.triggerOrderStatusChanged(order, updatedBy, oldOrder.status, status);
+      await notificationTriggerService.triggerOrderStatusChanged(order, updatedBy, oldOrder.status, normalizedStatus);
     } catch (notificationError) {
       console.error("Failed to send order status change notification:", notificationError);
       // Don't fail the order update if notification fails

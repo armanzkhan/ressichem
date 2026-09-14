@@ -1,5 +1,5 @@
 //services/mobilePushService.js
-const admin = require('firebase-admin');
+const { getAdmin, isFirebaseConfigured, initializeFirebaseAdmin } = require("./firebaseAdmin");
 
 class MobilePushService {
   constructor() {
@@ -8,44 +8,21 @@ class MobilePushService {
   }
 
   initializeFirebase() {
-    try {
-      // Check if Firebase environment variables are set
-      if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
-        console.warn('Firebase environment variables not set. Mobile push notifications will be disabled.');
-        this.initialized = false;
-        return;
-      }
-
-      // Initialize Firebase Admin SDK
-      if (!admin.apps.length) {
-        const serviceAccount = {
-          type: "service_account",
-          project_id: process.env.FIREBASE_PROJECT_ID,
-          private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-          private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-          client_email: process.env.FIREBASE_CLIENT_EMAIL,
-          client_id: process.env.FIREBASE_CLIENT_ID,
-          auth_uri: "https://accounts.google.com/o/oauth2/auth",
-          token_uri: "https://oauth2.googleapis.com/token",
-          auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-          client_x509_cert_url: `https://www.googleapis.com/robot/v1/metadata/x509/${process.env.FIREBASE_CLIENT_EMAIL}`
-        };
-
-        admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount),
-          projectId: process.env.FIREBASE_PROJECT_ID
-        });
-      }
-      this.initialized = true;
-      console.log('Firebase Admin SDK initialized successfully');
-    } catch (error) {
-      console.error('Error initializing Firebase Admin SDK:', error);
+    if (!isFirebaseConfigured()) {
+      console.warn("Firebase environment variables not set. Mobile push notifications will be disabled.");
       this.initialized = false;
+      return;
     }
+    this.initialized = initializeFirebaseAdmin();
+  }
+
+  get messaging() {
+    const admin = getAdmin();
+    return admin ? admin.messaging() : null;
   }
 
   async sendNotification(token, notification, platform = 'android') {
-    if (!this.initialized) {
+    if (!this.initialized || !this.messaging) {
       return { success: false, error: 'Firebase not initialized' };
     }
 
@@ -85,7 +62,7 @@ class MobilePushService {
         }
       };
 
-      const response = await admin.messaging().send(message);
+      const response = await this.messaging.send(message);
       return { success: true, messageId: response };
     } catch (error) {
       console.error('Error sending mobile push notification:', error);
@@ -94,7 +71,7 @@ class MobilePushService {
   }
 
   async sendToMultipleTokens(tokens, notification, platform = 'android') {
-    if (!this.initialized) {
+    if (!this.initialized || !this.messaging) {
       return { success: false, error: 'Firebase not initialized' };
     }
 
@@ -133,7 +110,7 @@ class MobilePushService {
         }
       };
 
-      const response = await admin.messaging().sendMulticast(message);
+      const response = await this.messaging.sendMulticast(message);
       return { 
         success: true, 
         successCount: response.successCount,
@@ -171,16 +148,18 @@ class MobilePushService {
   }
 
   async validateToken(token) {
-    if (!this.initialized) {
+    if (!this.initialized || !this.messaging) {
       return false;
     }
 
     try {
-      // Try to send a test message to validate the token
-      await admin.messaging().send({
-        token: token,
-        data: { test: 'true' }
-      }, true); // dry run
+      await this.messaging.send(
+        {
+          token: token,
+          data: { test: "true" },
+        },
+        true
+      );
       return true;
     } catch (error) {
       return false;
