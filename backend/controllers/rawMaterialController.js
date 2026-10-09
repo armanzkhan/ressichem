@@ -1,3 +1,4 @@
+const { makeSoftDeleteHandlers } = require("../utils/qcSoftDeleteHandlers");
 const RawMaterial = require("../models/RawMaterial");
 const RawMaterialBatch = require("../models/RawMaterialBatch");
 const { upsertRawMaterialBatchToResults } = require("../utils/syncModuleToQCResult");
@@ -126,7 +127,7 @@ exports.getBatches = async (req, res) => {
     const company_id = getCompanyId(req);
     const { materialId, status, expiringSoon } = req.query;
 
-    const query = { company_id };
+    const query = { company_id, isActive: true };
     if (materialId) query.rawMaterial = materialId;
     if (status) query.status = status;
     if (expiringSoon === "true") {
@@ -233,3 +234,9 @@ exports.getBatchById = async (req, res) => {
   }
 };
 
+
+const __rmSoftDelete = makeSoftDeleteHandlers(RawMaterial, "RawMaterial");
+exports.bulkSoftDelete = __rmSoftDelete.bulkSoftDelete;
+const __rmBatchSoftDelete = makeSoftDeleteHandlers(RawMaterialBatch, "RawMaterialBatch");
+exports.softDeleteBatch = __rmBatchSoftDelete.softDelete;
+exports.bulkSoftDeleteBatches = __rmBatchSoftDelete.bulkSoftDelete;

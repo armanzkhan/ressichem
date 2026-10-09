@@ -128,11 +128,7 @@ export default function QCLayout({ children }: { children: React.ReactNode }) {
       { name: "CAPA", href: "/qc/hub/capa", icon: "✅" },
       { name: "Complaints", href: "/qc/hub/complaints", icon: "📞" },
       { name: "MRM", href: "/qc/hub/mrm", icon: "📊" },
-      { name: "Predictive Analytics", href: "/qc/hub/predictive-analytics", icon: "📈" },
       { name: "Reporting", href: "/qc/hub/reporting", icon: "📑" },
-      { name: "Document Index", href: "/qc/hub/documents", icon: "📄" },
-      { name: "QC Plan", href: "/qc/hub/plan", icon: "🗂️" },
-      { name: "Raw Data Forms", href: "/qc/hub/forms", icon: "🧾" },
       { name: "Power BI Exports", href: "/qc/hub/exports", icon: "⬇️" },
     ];
 

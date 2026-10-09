@@ -34,6 +34,31 @@ function getHeaders(tokenOverride?: string | null): HeadersInit {
   return headers;
 }
 
+async function softDeleteRequest(path: string, extraHeaders?: HeadersInit) {
+  const response = await fetch(`${apiBase()}${path}`, {
+    method: 'DELETE',
+    headers: { ...getHeaders(), ...(extraHeaders || {}) },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.message || 'Failed to delete');
+  }
+  return response.json();
+}
+
+async function bulkSoftDeleteRequest(path: string, ids: string[], extraHeaders?: HeadersInit) {
+  const response = await fetch(`${apiBase()}${path}`, {
+    method: 'POST',
+    headers: { ...getHeaders(), ...(extraHeaders || {}) },
+    body: JSON.stringify({ ids }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.message || 'Failed to delete selected records');
+  }
+  return response.json();
+}
+
 async function getAuthHeaders(): Promise<HeadersInit> {
   const token = await ensureQcAccessToken();
   return getHeaders(token);
@@ -128,6 +153,13 @@ export const rawMaterialApi = {
     if (!response.ok) throw new Error('Failed to delete raw material');
     return response.json();
   },
+
+  bulkDelete: async (ids: string[]) => bulkSoftDeleteRequest('/api/qc/raw-materials/bulk-delete', ids),
+
+  deleteBatch: async (id: string) => softDeleteRequest(`/api/qc/raw-materials/batches/${id}`),
+
+  bulkDeleteBatches: async (ids: string[]) =>
+    bulkSoftDeleteRequest('/api/qc/raw-materials/batches/bulk-delete', ids),
 
   getBatches: async (materialId?: string, params?: { status?: string; expiringSoon?: boolean }) => {
     const query = new URLSearchParams();
@@ -248,6 +280,12 @@ export const formulationApi = {
     return response.json();
   },
 
+  remove: async (id: string, extraHeaders?: HeadersInit) =>
+    softDeleteRequest(`/api/qc/formulations/${id}`, extraHeaders),
+
+  bulkRemove: async (ids: string[], extraHeaders?: HeadersInit) =>
+    bulkSoftDeleteRequest('/api/qc/formulations/bulk-delete', ids, extraHeaders),
+
   generateBOM: async (id: string, quantity?: number) => {
     const query = quantity ? `?quantity=${quantity}` : '';
     const response = await fetch(`${API_BASE}/api/qc/formulations/${id}/bom${query}`, {
@@ -344,6 +382,11 @@ export const rdExperimentApi = {
     if (!response.ok) throw new Error('Failed to complete experiment');
     return response.json();
   },
+
+  remove: async (id: string) => softDeleteRequest(`/api/qc/rnd/experiments/${id}`),
+
+  bulkRemove: async (ids: string[]) =>
+    bulkSoftDeleteRequest('/api/qc/rnd/experiments/bulk-delete', ids),
 };
 
 // ========== Complaints API ==========
@@ -443,6 +486,11 @@ export const complaintApi = {
     if (!response.ok) throw new Error('Failed to close complaint');
     return response.json();
   },
+
+  remove: async (id: string) => softDeleteRequest(`/api/qc/complaints/${id}`),
+
+  bulkRemove: async (ids: string[]) =>
+    bulkSoftDeleteRequest('/api/qc/complaints/bulk-delete', ids),
 };
 
 // ========== CAPA API ==========
@@ -560,6 +608,10 @@ export const capaApi = {
     if (!response.ok) throw new Error('Failed to close CAPA');
     return response.json();
   },
+
+  remove: async (id: string) => softDeleteRequest(`/api/qc/capa/${id}`),
+
+  bulkRemove: async (ids: string[]) => bulkSoftDeleteRequest('/api/qc/capa/bulk-delete', ids),
 };
 
 // ========== MRM API ==========
@@ -592,7 +644,10 @@ export const mrmApi = {
       headers: getHeaders(),
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to create MRM');
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.message || 'Failed to create MRM');
+    }
     return response.json();
   },
 
@@ -634,6 +689,10 @@ export const mrmApi = {
     if (!response.ok) throw new Error('Failed to approve MRM');
     return response.json();
   },
+
+  remove: async (id: string) => softDeleteRequest(`/api/qc/mrm/${id}`),
+
+  bulkRemove: async (ids: string[]) => bulkSoftDeleteRequest('/api/qc/mrm/bulk-delete', ids),
 };
 
 // ========== Reporting API ==========
@@ -962,6 +1021,29 @@ export const qcHubBatchApi = {
     if (!response.ok) throw new Error('Failed to update batch record');
     return response.json();
   },
+  remove: async (id: string) => {
+    const response = await fetch(`${API_BASE}/api/qc/hub/batch-records/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.message || 'Failed to delete batch record');
+    }
+    return response.json();
+  },
+  bulkRemove: async (ids: string[]) => {
+    const response = await fetch(`${API_BASE}/api/qc/hub/batch-records/bulk-delete`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ ids }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.message || 'Failed to delete batch records');
+    }
+    return response.json();
+  },
   submit: async (id: string) => {
     const response = await fetch(`${API_BASE}/api/qc/hub/batch-records/${id}/submit`, { method: 'POST', headers: getHeaders() });
     if (!response.ok) throw new Error('Failed to submit batch record');
@@ -1110,6 +1192,8 @@ export const ncrApi = {
     if (!response.ok) throw new Error('Failed to close NCR');
     return response.json();
   },
+  remove: async (id: string) => softDeleteRequest(`/api/qc/hub/ncr/${id}`),
+  bulkRemove: async (ids: string[]) => bulkSoftDeleteRequest('/api/qc/hub/ncr/bulk-delete', ids),
 };
 
 // ========== QC Hub Calibration ==========
@@ -1135,6 +1219,8 @@ export const calibrationApi = {
     if (!response.ok) throw new Error('Failed to update calibration record');
     return response.json();
   },
+  remove: async (id: string) => softDeleteRequest(`/api/qc/hub/calibration/${id}`),
+  bulkRemove: async (ids: string[]) => bulkSoftDeleteRequest('/api/qc/hub/calibration/bulk-delete', ids),
 };
 
 // ========== QC Hub Internal Audits ==========
@@ -1160,21 +1246,60 @@ export const internalAuditApi = {
     if (!response.ok) throw new Error('Failed to approve audit');
     return response.json();
   },
+  remove: async (id: string) => softDeleteRequest(`/api/qc/hub/audits/${id}`),
+  bulkRemove: async (ids: string[]) => bulkSoftDeleteRequest('/api/qc/hub/audits/bulk-delete', ids),
 };
 
 // ========== Packaging Material QC ==========
 export const packagingMaterialApi = {
-  getAll: async (params?: { materialType?: string; status?: string; search?: string }) => {
+  getAll: async (params?: { materialType?: string; status?: string; search?: string; limit?: number }) => {
     const query = new URLSearchParams();
-    Object.entries(params || {}).forEach(([k, v]) => { if (v) query.append(k, v); });
-    const response = await fetch(`${API_BASE}/api/qc/site/packaging-material?${query}`, { headers: getHeaders() });
-    if (!response.ok) throw new Error('Failed to fetch packaging QC records');
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") query.append(k, String(v));
+    });
+    if (!query.has("limit")) query.append("limit", "200");
+    const response = await fetch(`${apiBase()}/api/qc/site/packaging-material?${query}`, {
+      headers: getHeaders(),
+    });
+    if (!response.ok) throw new Error("Failed to fetch packaging QC records");
     return response.json();
   },
   create: async (data: any) => {
-    const response = await fetch(`${API_BASE}/api/qc/site/packaging-material`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(data) });
-    if (!response.ok) throw new Error('Failed to create packaging QC record');
+    const response = await fetch(`${apiBase()}/api/qc/site/packaging-material`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.message || "Failed to create packaging QC record");
+    }
     return response.json();
   },
+  update: async (id: string, data: any) => {
+    const response = await fetch(`${apiBase()}/api/qc/site/packaging-material/${id}`, {
+      method: "PUT",
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.message || "Failed to update packaging QC record");
+    }
+    return response.json();
+  },
+  remove: async (id: string) => {
+    const response = await fetch(`${apiBase()}/api/qc/site/packaging-material/${id}`, {
+      method: "DELETE",
+      headers: getHeaders(),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.message || "Failed to delete packaging QC record");
+    }
+    return response.json();
+  },
+  bulkRemove: async (ids: string[]) =>
+    bulkSoftDeleteRequest("/api/qc/site/packaging-material/bulk-delete", ids),
 };
 

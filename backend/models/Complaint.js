@@ -57,6 +57,7 @@ const ComplaintSchema = new mongoose.Schema(
     formulation: { type: mongoose.Schema.Types.ObjectId, ref: "Formulation" },
 
     // Complaint details
+    title: { type: String, default: "" },
     complaintType: {
       type: String,
       enum: ["QUALITY", "PERFORMANCE", "PACKAGING", "DELIVERY", "OTHER"],
@@ -88,8 +89,18 @@ const ComplaintSchema = new mongoose.Schema(
     // Status & workflow
     status: {
       type: String,
-      enum: ["RECEIVED", "UNDER_INVESTIGATION", "MANAGEMENT_REVIEW", "CAPA_INITIATED", "RESOLVED", "CLOSED"],
-      default: "RECEIVED",
+      enum: [
+        "OPEN",
+        "IN_PROCESS",
+        "CLOSED",
+        // legacy workflow statuses
+        "RECEIVED",
+        "UNDER_INVESTIGATION",
+        "MANAGEMENT_REVIEW",
+        "CAPA_INITIATED",
+        "RESOLVED",
+      ],
+      default: "OPEN",
       index: true,
     },
 

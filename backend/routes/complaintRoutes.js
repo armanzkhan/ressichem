@@ -12,7 +12,9 @@ router.use(enrichUserQcProfile);
 router.get("/", requireCustomerDataAccess, complaintController.getAll);
 router.get("/:id", requireCustomerDataAccess, complaintController.getById);
 router.post("/", requireCustomerDataAccess, complaintController.create);
+router.post("/bulk-delete", requireManagementLayer, complaintController.bulkSoftDelete);
 router.put("/:id", requireCustomerDataAccess, complaintController.update);
+router.delete("/:id", requireManagementLayer, complaintController.softDelete);
 
 // Workflow
 router.post("/:id/investigate", requireQCLayer, complaintController.startInvestigation);

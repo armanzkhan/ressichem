@@ -1,3 +1,4 @@
+const { makeSoftDeleteHandlers } = require("../utils/qcSoftDeleteHandlers");
 const MRM = require("../models/MRM");
 const QCResult = require("../models/QCResult");
 const Complaint = require("../models/Complaint");
@@ -195,6 +196,20 @@ exports.create = async (req, res) => {
     const existing = await MRM.findOne({ company_id, mrmNo: body.mrmNo });
     if (existing) {
       return res.status(409).json({ success: false, message: "MRM number already exists" });
+    }
+
+    // Hub create form may omit chairperson — default to current user
+    if (!body.chairperson && user?._id) {
+      body.chairperson = user._id;
+    }
+    if (!body.periodStart && body.meetingDate) {
+      body.periodStart = body.meetingDate;
+    }
+    if (!body.periodEnd && body.meetingDate) {
+      body.periodEnd = body.meetingDate;
+    }
+    if (!body.reviewPeriod) {
+      body.reviewPeriod = "MONTHLY";
     }
 
     const mrm = await MRM.create({
@@ -429,3 +444,7 @@ exports.approve = async (req, res) => {
   }
 };
 
+
+const __softDeleteHandlers = makeSoftDeleteHandlers(require("../models/MRM"), "MRM");
+exports.softDelete = __softDeleteHandlers.softDelete;
+exports.bulkSoftDelete = __softDeleteHandlers.bulkSoftDelete;

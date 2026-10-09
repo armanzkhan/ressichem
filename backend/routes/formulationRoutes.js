@@ -17,7 +17,9 @@ router.post("/2fa/verify", formulation2faController.verifyCode);
 router.get("/", formulationController.getAll);
 router.get("/:id", formulationController.getById);
 router.post("/", requireFormulation2FA, formulationController.create);
+router.post("/bulk-delete", requireFormulation2FA, requireManagementLayer, formulationController.bulkSoftDelete);
 router.put("/:id", requireFormulation2FA, formulationController.update);
+router.delete("/:id", requireFormulation2FA, requireManagementLayer, formulationController.softDelete);
 
 // Version control
 router.post("/:parentId/version", requireFormulation2FA, requireRDLayer, formulationController.createVersion);

@@ -1,3 +1,4 @@
+const { makeSoftDeleteHandlers } = require("../utils/qcSoftDeleteHandlers");
 const RDExperiment = require("../models/RDExperiment");
 const Formulation = require("../models/Formulation");
 const { writeAudit } = require("../utils/qcAudit");
@@ -371,3 +372,7 @@ exports.complete = async (req, res) => {
   }
 };
 
+
+const __softDeleteHandlers = makeSoftDeleteHandlers(require("../models/RDExperiment"), "RDExperiment");
+exports.softDelete = __softDeleteHandlers.softDelete;
+exports.bulkSoftDelete = __softDeleteHandlers.bulkSoftDelete;

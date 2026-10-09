@@ -33,14 +33,19 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
   const [trends, setTrends] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<BatchRecord | null>(null);
   const [form, setForm] = useState<any>({ parameters: {} });
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
   const [selectedTrendParam, setSelectedTrendParam] = useState(
     moduleDef.parameters.find((p) => p.trend)?.key || moduleDef.parameters[0]?.key
   );
 
   const trendParams = useMemo(() => moduleDef.parameters.filter((p) => p.trend), [moduleDef]);
+  const allSelected = records.length > 0 && selectedIds.size === records.length;
+  const someSelected = selectedIds.size > 0;
 
   const load = useCallback(async () => {
     try {
@@ -52,6 +57,7 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
       ]);
       setRecords(listRes.data || []);
       setTrends(trendRes.data || {});
+      setSelectedIds(new Set());
     } catch (e: any) {
       setError(e.message || "Failed to load");
     } finally {
@@ -127,6 +133,60 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
     }
   };
 
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (allSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(records.map((r) => r._id)));
+  };
+
+  const deleteOne = async (r: BatchRecord) => {
+    if (!window.confirm(`Delete batch "${r.batchNo}"? This cannot be undone from the list.`)) return;
+    setDeleting(true);
+    setError("");
+    setMessage("");
+    try {
+      await qcHubBatchApi.remove(r._id);
+      setMessage(`Deleted batch ${r.batchNo}`);
+      await load();
+    } catch (err: any) {
+      setError(err.message || "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const deleteSelected = async () => {
+    const ids = Array.from(selectedIds);
+    if (!ids.length) return;
+    if (
+      !window.confirm(
+        `Delete ${ids.length} selected batch record(s)? This cannot be undone from the list.`
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    setError("");
+    setMessage("");
+    try {
+      const res = await qcHubBatchApi.bulkRemove(ids);
+      setMessage(res.message || `Deleted ${ids.length} record(s)`);
+      await load();
+    } catch (err: any) {
+      setError(err.message || "Bulk delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (loading) return <div className="py-8 text-center text-sm text-gray-500">Loading {moduleDef.label}…</div>;
 
   return (
@@ -134,14 +194,34 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{moduleDef.label}</h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">Batch-wise QC data entry, approval, attachments & trend graphs (SRS 3.1)</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Batch-wise QC data entry, approval, attachments &amp; trend graphs (SRS 3.1)
+          </p>
         </div>
-        <button onClick={openCreate} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700">
-          + New Batch Record
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {someSelected && (
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={deleteSelected}
+              className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60"
+            >
+              {deleting ? "Deleting…" : `Delete selected (${selectedIds.size})`}
+            </button>
+          )}
+          <button
+            onClick={openCreate}
+            className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700"
+          >
+            + New Batch Record
+          </button>
+        </div>
       </div>
 
       {error && <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>}
+      {message && (
+        <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-sm text-blue-700">{message}</div>
+      )}
 
       {trendParams.length > 0 && (
         <div className="rounded-2xl bg-white/80 dark:bg-gray-800/80 border shadow p-5 space-y-4">
@@ -153,7 +233,9 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
               className="rounded-lg border px-3 py-1.5 text-sm dark:bg-gray-900"
             >
               {trendParams.map((p) => (
-                <option key={p.key} value={p.key}>{p.label}</option>
+                <option key={p.key} value={p.key}>
+                  {p.label}
+                </option>
               ))}
             </select>
           </div>
@@ -163,7 +245,11 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
                 key={p.key}
                 title={p.label}
                 unit={p.unit}
-                data={(trends[p.key] || []).map((pt: any) => ({ date: pt.date, batchNo: pt.batchNo, value: pt.value }))}
+                data={(trends[p.key] || []).map((pt: any) => ({
+                  date: pt.date,
+                  batchNo: pt.batchNo,
+                  value: pt.value,
+                }))}
               />
             ))}
           </div>
@@ -176,37 +262,72 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-semibold mb-1">Category</label>
-              <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full rounded-lg border px-3 py-2 text-sm">
-                {moduleDef.categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              <select
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+              >
+                {moduleDef.categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
               <label className="block text-xs font-semibold mb-1">Product Name *</label>
-              <input required value={form.productName} onChange={(e) => setForm({ ...form, productName: e.target.value })} className="w-full rounded-lg border px-3 py-2 text-sm" />
+              <input
+                required
+                value={form.productName}
+                onChange={(e) => setForm({ ...form, productName: e.target.value })}
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+              />
             </div>
             <div>
               <label className="block text-xs font-semibold mb-1">Grade</label>
-              <input value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} className="w-full rounded-lg border px-3 py-2 text-sm" />
+              <input
+                value={form.grade}
+                onChange={(e) => setForm({ ...form, grade: e.target.value })}
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+              />
             </div>
             <div>
               <label className="block text-xs font-semibold mb-1">Batch No *</label>
-              <input required value={form.batchNo} onChange={(e) => setForm({ ...form, batchNo: e.target.value })} className="w-full rounded-lg border px-3 py-2 text-sm" />
+              <input
+                required
+                value={form.batchNo}
+                onChange={(e) => setForm({ ...form, batchNo: e.target.value })}
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+              />
             </div>
             <div>
               <label className="block text-xs font-semibold mb-1">Test Date</label>
-              <input type="date" value={form.testDate} onChange={(e) => setForm({ ...form, testDate: e.target.value })} className="w-full rounded-lg border px-3 py-2 text-sm" />
+              <input
+                type="date"
+                value={form.testDate}
+                onChange={(e) => setForm({ ...form, testDate: e.target.value })}
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+              />
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {moduleDef.parameters.map((p) => (
               <div key={p.key}>
-                <label className="block text-xs font-semibold mb-1">{p.label}{p.unit ? ` (${p.unit})` : ""}</label>
+                <label className="block text-xs font-semibold mb-1">
+                  {p.label}
+                  {p.unit ? ` (${p.unit})` : ""}
+                </label>
                 <input
                   type={p.type === "number" ? "number" : "text"}
                   step={p.type === "number" ? "any" : undefined}
                   value={form.parameters[p.key] ?? ""}
-                  onChange={(e) => setForm({ ...form, parameters: { ...form.parameters, [p.key]: e.target.value } })}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      parameters: { ...form.parameters, [p.key]: e.target.value },
+                    })
+                  }
                   className="w-full rounded-lg border px-3 py-2 text-sm"
                 />
               </div>
@@ -215,12 +336,21 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
 
           <div>
             <label className="block text-xs font-semibold mb-1">Remarks</label>
-            <textarea value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className="w-full rounded-lg border px-3 py-2 text-sm" rows={2} />
+            <textarea
+              value={form.remarks}
+              onChange={(e) => setForm({ ...form, remarks: e.target.value })}
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              rows={2}
+            />
           </div>
 
           <div className="flex gap-2">
-            <button type="submit" className="px-4 py-2 rounded-xl bg-sky-600 text-white text-sm font-semibold">Save Draft</button>
-            <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 rounded-xl border text-sm">Cancel</button>
+            <button type="submit" className="px-4 py-2 rounded-xl bg-sky-600 text-white text-sm font-semibold">
+              Save Draft
+            </button>
+            <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 rounded-xl border text-sm">
+              Cancel
+            </button>
           </div>
         </form>
       )}
@@ -229,6 +359,15 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 dark:bg-gray-900/50">
             <tr>
+              <th className="px-3 py-2 text-left w-10">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  aria-label="Select all batch records"
+                  disabled={!records.length || deleting}
+                />
+              </th>
               <th className="px-3 py-2 text-left">Batch</th>
               <th className="px-3 py-2 text-left">Product</th>
               <th className="px-3 py-2 text-left">Category</th>
@@ -240,38 +379,91 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
           <tbody>
             {records.map((r) => (
               <tr key={r._id} className="border-t border-gray-100 dark:border-gray-700">
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(r._id)}
+                    onChange={() => toggleOne(r._id)}
+                    aria-label={`Select batch ${r.batchNo}`}
+                    disabled={deleting}
+                  />
+                </td>
                 <td className="px-3 py-2 font-mono">{r.batchNo}</td>
-                <td className="px-3 py-2">{r.productName}{r.grade ? ` (${r.grade})` : ""}</td>
+                <td className="px-3 py-2">
+                  {r.productName}
+                  {r.grade ? ` (${r.grade})` : ""}
+                </td>
                 <td className="px-3 py-2">{r.category}</td>
                 <td className="px-3 py-2">{isoDate(r.testDate)}</td>
                 <td className="px-3 py-2">
-                  <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                    r.status === "approved" ? "bg-green-100 text-green-800" :
-                    r.status === "rejected" ? "bg-red-100 text-red-800" :
-                    r.status === "submitted" ? "bg-amber-100 text-amber-800" : "bg-gray-100 text-gray-700"
-                  }`}>{r.status}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                      r.status === "approved"
+                        ? "bg-green-100 text-green-800"
+                        : r.status === "rejected"
+                          ? "bg-red-100 text-red-800"
+                          : r.status === "submitted"
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-gray-100 text-gray-700"
+                    }`}
+                  >
+                    {r.status}
+                  </span>
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-1">
                     {r.status !== "approved" && (
-                      <button onClick={() => openEdit(r)} className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200">Edit</button>
+                      <button
+                        onClick={() => openEdit(r)}
+                        className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200"
+                      >
+                        Edit
+                      </button>
                     )}
                     {r.status === "draft" && (
-                      <button onClick={() => workflow(r._id, "submit")} className="text-xs px-2 py-1 rounded bg-sky-100 text-sky-800">Submit</button>
+                      <button
+                        onClick={() => workflow(r._id, "submit")}
+                        className="text-xs px-2 py-1 rounded bg-sky-100 text-sky-800"
+                      >
+                        Submit
+                      </button>
                     )}
                     {r.status === "submitted" && (
                       <>
-                        <button onClick={() => workflow(r._id, "approve")} className="text-xs px-2 py-1 rounded bg-green-100 text-green-800">Approve</button>
-                        <button onClick={() => workflow(r._id, "reject")} className="text-xs px-2 py-1 rounded bg-red-100 text-red-800">Reject</button>
+                        <button
+                          onClick={() => workflow(r._id, "approve")}
+                          className="text-xs px-2 py-1 rounded bg-green-100 text-green-800"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => workflow(r._id, "reject")}
+                          className="text-xs px-2 py-1 rounded bg-red-100 text-red-800"
+                        >
+                          Reject
+                        </button>
                       </>
                     )}
                     <label className="text-xs px-2 py-1 rounded bg-indigo-100 text-indigo-800 cursor-pointer">
                       Attach
-                      <input type="file" className="hidden" accept=".pdf,.xlsx,.xls,.csv,.png,.jpg,.jpeg" onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) uploadFile(r._id, f);
-                      }} />
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept=".pdf,.xlsx,.xls,.csv,.png,.jpg,.jpeg"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) uploadFile(r._id, f);
+                        }}
+                      />
                     </label>
+                    <button
+                      type="button"
+                      disabled={deleting}
+                      onClick={() => deleteOne(r)}
+                      className="text-xs px-2 py-1 rounded bg-red-100 text-red-800 hover:bg-red-200 disabled:opacity-60"
+                    >
+                      Delete
+                    </button>
                   </div>
                   {(r.attachments || []).length > 0 && (
                     <div className="mt-1 text-xs text-gray-500">{r.attachments!.length} file(s)</div>
@@ -280,7 +472,11 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
               </tr>
             ))}
             {!records.length && (
-              <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500">No batch records yet.</td></tr>
+              <tr>
+                <td colSpan={7} className="px-3 py-6 text-center text-gray-500">
+                  No batch records yet.
+                </td>
+              </tr>
             )}
           </tbody>
         </table>

@@ -1,5 +1,6 @@
 const PackagingMaterialQC = require("../models/PackagingMaterialQC");
 const { writeAudit } = require("../utils/qcAudit");
+const { makeSoftDeleteHandlers } = require("../utils/qcSoftDeleteHandlers");
 const { upsertPackagingToResults } = require("../utils/syncModuleToQCResult");
 
 function getCompanyId(req) {
@@ -129,7 +130,7 @@ exports.update = async (req, res) => {
     const before = await PackagingMaterialQC.findOne({ _id: id, company_id, isActive: true });
     if (!before) return res.status(404).json({ success: false, message: "Packaging Material QC record not found" });
 
-    if (before.status === "approved" || before.status === "rejected") {
+    if ((before.status === "approved" || before.status === "rejected") && body.isActive !== false) {
       return res.status(400).json({ success: false, message: `Cannot update ${before.status} record` });
     }
 
@@ -241,3 +242,44 @@ exports.reject = async (req, res) => {
   }
 };
 
+/** Soft-delete packaging inspection (Hub UI Delete) */
+exports.remove = async (req, res) => {
+  try {
+    const company_id = getCompanyId(req);
+    const user = req.user;
+    const { id } = req.params;
+
+    const before = await PackagingMaterialQC.findOne({ _id: id, company_id, isActive: true });
+    if (!before) {
+      return res.status(404).json({ success: false, message: "Packaging Material QC record not found" });
+    }
+
+    const after = await PackagingMaterialQC.findOneAndUpdate(
+      { _id: id, company_id },
+      { isActive: false, updatedBy: user?._id },
+      { new: true }
+    ).lean();
+
+    await writeAudit({
+      req,
+      company_id,
+      entityType: "PackagingMaterialQC",
+      entityId: after._id,
+      action: "DELETE",
+      before: before.toObject(),
+      after,
+    });
+
+    res.json({ success: true, data: after, message: "Packaging inspection deleted" });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: "Error deleting Packaging Material QC record",
+      error: err.message,
+    });
+  }
+};
+
+
+const __pkgSoftDelete = makeSoftDeleteHandlers(PackagingMaterialQC, "PackagingMaterialQC");
+exports.bulkSoftDelete = __pkgSoftDelete.bulkSoftDelete;

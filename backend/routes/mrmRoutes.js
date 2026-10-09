@@ -12,7 +12,9 @@ router.use(enrichUserQcProfile);
 router.get("/", requireManagementLayer, mrmController.getAll);
 router.get("/:id", requireManagementLayer, mrmController.getById);
 router.post("/", requireManagementLayer, mrmController.create);
+router.post("/bulk-delete", requireManagementLayer, mrmController.bulkSoftDelete);
 router.put("/:id", requireManagementLayer, mrmController.update);
+router.delete("/:id", requireManagementLayer, mrmController.softDelete);
 
 // MRM workflow
 router.post("/:id/pull-data", requireManagementLayer, mrmController.pullData);

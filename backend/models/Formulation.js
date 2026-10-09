@@ -48,6 +48,26 @@ const FormulationSchema = new mongoose.Schema(
     quantityUnit: { type: String, default: "kg" },
     ingredients: { type: [FormulationIngredientSchema], default: [] },
 
+    /** Free-form formulation composition lines (Hub UI — no RawMaterial ObjectId required) */
+    composition: [
+      {
+        materialName: { type: String, default: "" },
+        quantity: { type: Number },
+        unit: { type: String, default: "kg" },
+        percentage: { type: Number },
+        notes: { type: String, default: "" },
+      },
+    ],
+
+    /** Lab / QC testing results captured against this formulation */
+    testResults: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+
+    /** Short formulation summary / conclusion */
+    summary: { type: String, default: "" },
+
     // Version control
     version: { type: String, default: "1.0", index: true },
     parentVersion: { type: mongoose.Schema.Types.ObjectId, ref: "Formulation" }, // for version history

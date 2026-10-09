@@ -1,3 +1,4 @@
+const { makeSoftDeleteHandlers } = require("../utils/qcSoftDeleteHandlers");
 const Formulation = require("../models/Formulation");
 const RawMaterial = require("../models/RawMaterial");
 const RawMaterialBatch = require("../models/RawMaterialBatch");
@@ -503,3 +504,7 @@ exports.generateBOM = async (req, res) => {
   }
 };
 
+
+const __softDeleteHandlers = makeSoftDeleteHandlers(require("../models/Formulation"), "Formulation");
+exports.softDelete = __softDeleteHandlers.softDelete;
+exports.bulkSoftDelete = __softDeleteHandlers.bulkSoftDelete;

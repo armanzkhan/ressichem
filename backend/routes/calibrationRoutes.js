@@ -9,6 +9,8 @@ router.get("/", calibrationController.getAll);
 router.get("/due-soon", calibrationController.getDueSoon);
 router.get("/:id", calibrationController.getById);
 router.post("/", calibrationController.create);
+router.post("/bulk-delete", calibrationController.bulkSoftDelete);
 router.put("/:id", calibrationController.update);
+router.delete("/:id", calibrationController.softDelete);
 
 module.exports = router;

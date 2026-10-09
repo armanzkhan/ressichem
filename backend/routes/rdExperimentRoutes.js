@@ -12,7 +12,9 @@ router.use(enrichUserQcProfile);
 router.get("/", rdExperimentController.getAll);
 router.get("/:id", rdExperimentController.getById);
 router.post("/", requireRDLayer, rdExperimentController.create);
+router.post("/bulk-delete", requireRDLayer, rdExperimentController.bulkSoftDelete);
 router.put("/:id", requireRDLayer, rdExperimentController.update);
+router.delete("/:id", requireRDLayer, rdExperimentController.softDelete);
 
 // Trial management
 router.post("/:id/trials", requireRDLayer, rdExperimentController.addTrial);

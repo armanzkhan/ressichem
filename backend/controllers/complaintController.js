@@ -1,3 +1,4 @@
+const { makeSoftDeleteHandlers } = require("../utils/qcSoftDeleteHandlers");
 const Complaint = require("../models/Complaint");
 const CAPA = require("../models/CAPA");
 const ElectronicSignature = require("../models/ElectronicSignature");
@@ -117,8 +118,23 @@ exports.create = async (req, res) => {
     const complaint = await Complaint.create({
       ...body,
       company_id,
+      title: body.title || "",
+      customer: {
+        customerName: body.customer?.customerName || body.customerName || "",
+        customerCode: body.customer?.customerCode || body.customerCode || "",
+        contactPerson: body.customer?.contactPerson || "",
+        contactEmail: body.customer?.contactEmail || "",
+        contactPhone: body.customer?.contactPhone || "",
+        address: body.customer?.address || "",
+      },
+      productType: body.productType || "OTHER",
+      productName: body.productName || body.title || "N/A",
+      batchNo: body.batchNo || "N/A",
+      complaintType: body.complaintType || "QUALITY",
+      description: body.description || body.title || "",
+      severity: body.severity || "MEDIUM",
       receivedDate: body.receivedDate || new Date(),
-      status: "RECEIVED",
+      status: body.status || "OPEN",
       initiatedBy: user?._id,
       createdBy: user?._id,
       updatedBy: user?._id,
@@ -471,3 +487,7 @@ exports.close = async (req, res) => {
   }
 };
 
+
+const __softDeleteHandlers = makeSoftDeleteHandlers(require("../models/Complaint"), "Complaint");
+exports.softDelete = __softDeleteHandlers.softDelete;
+exports.bulkSoftDelete = __softDeleteHandlers.bulkSoftDelete;

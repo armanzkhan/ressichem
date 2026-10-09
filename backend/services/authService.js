@@ -76,6 +76,7 @@ async function generateToken(user, expiresIn = "1h", isRefresh = false) {
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
+    role: user.role || (Array.isArray(roles) && roles[0]) || "",
     perms: encrypted,
     isSuperAdmin,
     // Include user type flags for role-based filtering

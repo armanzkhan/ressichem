@@ -1,4 +1,5 @@
 import { jwtDecode } from "jwt-decode";
+import { clearQcHubAccessFlags, setQcHubAccessFlags } from "./qcHubAccess";
 
 /** Treat tokens expired more than this many seconds ago as invalid (clock-skew tolerance). */
 const EXPIRY_SKEW_SECONDS = 60;
@@ -33,6 +34,7 @@ export function clearAuthSession(): void {
   localStorage.removeItem("procurementDepartment");
   localStorage.removeItem("procurementIsAdmin");
   localStorage.removeItem("qcPortal");
+  clearQcHubAccessFlags();
   sessionStorage.removeItem(QC_AUTH_BOOTSTRAP_KEY);
 }
 
@@ -129,7 +131,14 @@ export function persistQcSession({
   token: string;
   refreshToken?: string;
   portal: "site" | "hub";
-  user?: { _id?: string; company_id?: string };
+  user?: {
+    _id?: string;
+    company_id?: string;
+    role?: string;
+    isSuperAdmin?: boolean;
+    isCompanyAdmin?: boolean;
+    isManager?: boolean;
+  };
 }): void {
   const cleanToken = String(token).trim();
   if (!cleanToken) throw new Error("Cannot persist empty QC token");
@@ -142,6 +151,7 @@ export function persistQcSession({
   localStorage.setItem("qcPortal", portal);
   if (user?._id) localStorage.setItem("userId", String(user._id));
   if (user?.company_id) localStorage.setItem("company_id", String(user.company_id));
+  setQcHubAccessFlags(user);
   sessionStorage.setItem(QC_AUTH_BOOTSTRAP_KEY, "1");
 }
 

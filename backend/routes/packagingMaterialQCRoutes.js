@@ -10,7 +10,9 @@ router.use(permissionMiddleware(["qc.access"]));
 router.get("/", permissionMiddleware(["qc.results.read"]), packagingMaterialQCController.list);
 router.get("/:id", permissionMiddleware(["qc.results.read"]), packagingMaterialQCController.getById);
 router.post("/", permissionMiddleware(["qc.results.create"]), packagingMaterialQCController.create);
+router.post("/bulk-delete", permissionMiddleware(["qc.results.update"]), packagingMaterialQCController.bulkSoftDelete);
 router.put("/:id", permissionMiddleware(["qc.results.update"]), packagingMaterialQCController.update);
+router.delete("/:id", permissionMiddleware(["qc.results.update"]), packagingMaterialQCController.remove);
 router.post("/:id/approve", permissionMiddleware(["qc.results.approve"]), packagingMaterialQCController.approve);
 router.post("/:id/reject", permissionMiddleware(["qc.results.approve"]), packagingMaterialQCController.reject);
 

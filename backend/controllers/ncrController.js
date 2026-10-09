@@ -1,3 +1,4 @@
+const { makeSoftDeleteHandlers } = require("../utils/qcSoftDeleteHandlers");
 const NCR = require("../models/NCR");
 const { writeAudit } = require("../utils/qcAudit");
 
@@ -125,3 +126,7 @@ exports.close = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+const __softDeleteHandlers = makeSoftDeleteHandlers(require("../models/NCR"), "NCR");
+exports.softDelete = __softDeleteHandlers.softDelete;
+exports.bulkSoftDelete = __softDeleteHandlers.bulkSoftDelete;

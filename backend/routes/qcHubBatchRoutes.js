@@ -14,6 +14,7 @@ router.get("/modules", permissionMiddleware(["qc.hub.forms.read"]), qcHubBatchCo
 router.get("/trends", permissionMiddleware(["qc.hub.forms.read"]), qcHubBatchController.getTrends);
 router.get("/", permissionMiddleware(["qc.hub.forms.read"]), qcHubBatchController.list);
 router.post("/", permissionMiddleware(["qc.hub.forms.create"]), qcHubBatchController.create);
+router.post("/bulk-delete", permissionMiddleware(["qc.hub.forms.update"]), qcHubBatchController.bulkSoftDelete);
 
 router.get("/:id", permissionMiddleware(["qc.hub.forms.read"]), qcHubBatchController.getById);
 router.put("/:id", permissionMiddleware(["qc.hub.forms.update"]), qcHubBatchController.update);

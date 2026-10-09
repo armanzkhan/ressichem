@@ -9,12 +9,15 @@ router.use(authMiddleware);
 // Raw Material routes
 router.get("/", rawMaterialController.getAll);
 router.post("/", rawMaterialController.create);
+router.post("/bulk-delete", rawMaterialController.bulkSoftDelete);
 
 // Raw Material Batch routes (keep before /:id to avoid route collisions)
 router.get("/batches", rawMaterialController.getBatches);
 router.get("/batches/:id", rawMaterialController.getBatchById);
 router.post("/batches", rawMaterialController.createBatch);
+router.post("/batches/bulk-delete", rawMaterialController.bulkSoftDeleteBatches);
 router.put("/batches/:id", rawMaterialController.updateBatch);
+router.delete("/batches/:id", rawMaterialController.softDeleteBatch);
 router.get("/:materialId/batches", rawMaterialController.getBatches);
 
 // Raw Material routes (by id)

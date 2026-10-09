@@ -1,3 +1,4 @@
+const { makeSoftDeleteHandlers } = require("../utils/qcSoftDeleteHandlers");
 const CAPA = require("../models/CAPA");
 const ElectronicSignature = require("../models/ElectronicSignature");
 const { writeAudit } = require("../utils/qcAudit");
@@ -575,3 +576,7 @@ exports.close = async (req, res) => {
   }
 };
 
+
+const __softDeleteHandlers = makeSoftDeleteHandlers(require("../models/CAPA"), "CAPA");
+exports.softDelete = __softDeleteHandlers.softDelete;
+exports.bulkSoftDelete = __softDeleteHandlers.bulkSoftDelete;

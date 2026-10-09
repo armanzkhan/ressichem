@@ -2,15 +2,37 @@
 
 import { useEffect, useState } from "react";
 import { rdExperimentApi } from "@/lib/qcApi";
+import {
+  HubBulkDeleteButton,
+  HubRowDeleteButton,
+  useHubRowSelection,
+  useQcHubFullAccess,
+} from "@/components/qc-hub/HubDeleteControls";
 
 export default function HubRndExperimentsPage() {
+  const canDelete = useQcHubFullAccess();
   const [rows, setRows] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<any>({ productType: "TILE_ADHESIVE" });
   const [error, setError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const selection = useHubRowSelection(rows);
 
-  const load = () => rdExperimentApi.getAll().then((r) => setRows(r.data || [])).catch((e) => setError(e.message));
-  useEffect(() => { load(); }, []);
+  const load = async () => {
+    try {
+      setError("");
+      const r = await rdExperimentApi.getAll();
+      setRows(r.data || []);
+      selection.clearSelection();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,14 +45,57 @@ export default function HubRndExperimentsPage() {
     }
   };
 
+  const deleteOne = async (id: string, label?: string) => {
+    if (!window.confirm(`Delete experiment ${label || ""}?`.trim())) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await rdExperimentApi.remove(id);
+      selection.clearSelection();
+      await load();
+    } catch (err: any) {
+      setError(err.message || "Failed to delete");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const bulkDelete = async () => {
+    const ids = selection.selectedList;
+    if (!ids.length) return;
+    if (!window.confirm(`Delete ${ids.length} selected experiment(s)?`)) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await rdExperimentApi.bulkRemove(ids);
+      selection.clearSelection();
+      await load();
+    } catch (err: any) {
+      setError(err.message || "Bulk delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">R&amp;D Experiments</h1>
           <p className="text-sm text-gray-500">SRS 3.3 — trial batches T0/T1/T2, formulation comparison, cost reduction</p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm">+ New Experiment</button>
+        <div className="flex flex-wrap items-center gap-2">
+          {canDelete && (
+            <HubBulkDeleteButton
+              selectedCount={selection.selectedList.length}
+              deleting={deleting}
+              onBulkDelete={bulkDelete}
+            />
+          )}
+          <button onClick={() => setShowForm(!showForm)} className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700">
+            {showForm ? "Cancel" : "+ New Experiment"}
+          </button>
+        </div>
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
       {showForm && (
@@ -47,20 +112,56 @@ export default function HubRndExperimentsPage() {
             <option value="WATERPROOFING_MEMBRANE">Waterproofing</option>
             <option value="SURFACE_SEALANT">Sealers</option>
           </select>
-          <button type="submit" className="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm">Create</button>
+          <button type="submit" className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm">Create</button>
         </form>
       )}
       <div className="rounded-xl border overflow-x-auto">
         <table className="min-w-full text-sm">
-          <thead><tr className="bg-gray-50 dark:bg-gray-900"><th className="px-3 py-2 text-left">Code</th><th className="px-3 py-2 text-left">Name</th><th className="px-3 py-2 text-left">Product</th><th className="px-3 py-2 text-left">Trials</th><th className="px-3 py-2 text-left">Status</th></tr></thead>
+          <thead>
+            <tr className="bg-gray-50 dark:bg-gray-900">
+              {canDelete && (
+                <th className="px-3 py-2 text-left w-10">
+                  <input
+                    type="checkbox"
+                    checked={selection.allSelected}
+                    onChange={selection.toggleAll}
+                    disabled={!rows.length || deleting}
+                    aria-label="Select all"
+                  />
+                </th>
+              )}
+              <th className="px-3 py-2 text-left">Code</th>
+              <th className="px-3 py-2 text-left">Name</th>
+              <th className="px-3 py-2 text-left">Product</th>
+              <th className="px-3 py-2 text-left">Trials</th>
+              <th className="px-3 py-2 text-left">Status</th>
+              {canDelete && <th className="px-3 py-2 text-left">Actions</th>}
+            </tr>
+          </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r._id} className="border-t">
+                {canDelete && (
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={selection.selectedIds.has(r._id)}
+                      onChange={() => selection.toggleOne(r._id)}
+                      disabled={deleting}
+                      aria-label={`Select ${r.experimentCode}`}
+                    />
+                  </td>
+                )}
                 <td className="px-3 py-2">{r.experimentCode}</td>
                 <td className="px-3 py-2">{r.experimentName}</td>
                 <td className="px-3 py-2">{r.targetProduct || r.productType}</td>
                 <td className="px-3 py-2">{(r.trials || []).length}</td>
                 <td className="px-3 py-2">{r.status}</td>
+                {canDelete && (
+                  <td className="px-3 py-2">
+                    <HubRowDeleteButton disabled={deleting} onDelete={() => deleteOne(r._id, r.experimentCode)} />
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

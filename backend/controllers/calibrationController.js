@@ -1,3 +1,4 @@
+const { makeSoftDeleteHandlers } = require("../utils/qcSoftDeleteHandlers");
 const CalibrationRecord = require("../models/CalibrationRecord");
 const { writeAudit } = require("../utils/qcAudit");
 
@@ -132,3 +133,7 @@ exports.getDueSoon = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+const __softDeleteHandlers = makeSoftDeleteHandlers(require("../models/CalibrationRecord"), "CalibrationRecord");
+exports.softDelete = __softDeleteHandlers.softDelete;
+exports.bulkSoftDelete = __softDeleteHandlers.bulkSoftDelete;

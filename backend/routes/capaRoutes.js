@@ -12,7 +12,9 @@ router.use(enrichUserQcProfile);
 router.get("/", capaController.getAll);
 router.get("/:id", capaController.getById);
 router.post("/", requireQCLayer, capaController.create);
+router.post("/bulk-delete", requireManagementLayer, capaController.bulkSoftDelete);
 router.put("/:id", requireQCLayer, capaController.update);
+router.delete("/:id", requireManagementLayer, capaController.softDelete);
 
 // Workflow
 router.post("/:id/root-cause-analysis", requireQCLayer, capaController.conductRootCauseAnalysis);

@@ -320,3 +320,53 @@ exports.softDelete = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+/** Soft-delete many batch records at once (Hub bulk delete) */
+exports.bulkSoftDelete = async (req, res) => {
+  try {
+    const company_id = getCompanyId(req);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : [];
+    if (!ids.length) {
+      return res.status(400).json({ success: false, message: "ids array is required" });
+    }
+
+    const beforeDocs = await QCHubBatchRecord.find({
+      _id: { $in: ids },
+      company_id,
+      isActive: true,
+    });
+
+    if (!beforeDocs.length) {
+      return res.status(404).json({ success: false, message: "No matching batch records found" });
+    }
+
+    const matchedIds = beforeDocs.map((d) => d._id);
+    await QCHubBatchRecord.updateMany(
+      { _id: { $in: matchedIds }, company_id },
+      { isActive: false, updatedBy: req.user?._id }
+    );
+
+    await Promise.all(
+      beforeDocs.map((doc) =>
+        writeAudit({
+          req,
+          company_id,
+          entityType: "QCHubBatchRecord",
+          entityId: doc._id,
+          action: "DELETE",
+          before: doc.toObject(),
+          after: { ...doc.toObject(), isActive: false },
+          meta: { bulk: true },
+        })
+      )
+    );
+
+    res.json({
+      success: true,
+      deletedCount: matchedIds.length,
+      message: `${matchedIds.length} batch record(s) deleted`,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};

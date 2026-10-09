@@ -1,3 +1,4 @@
+const { makeSoftDeleteHandlers } = require("../utils/qcSoftDeleteHandlers");
 const InternalAudit = require("../models/InternalAudit");
 const { writeAudit } = require("../utils/qcAudit");
 
@@ -121,3 +122,7 @@ exports.approve = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+const __softDeleteHandlers = makeSoftDeleteHandlers(require("../models/InternalAudit"), "InternalAudit");
+exports.softDelete = __softDeleteHandlers.softDelete;
+exports.bulkSoftDelete = __softDeleteHandlers.bulkSoftDelete;
