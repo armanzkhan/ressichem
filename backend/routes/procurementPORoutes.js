@@ -8,7 +8,7 @@ router.use(authMiddleware);
 router.use(permissionMiddleware(["procurement.access"]));
 
 router.get("/", permissionMiddleware(["procurement.po.read"]), ctrl.list);
-router.post("/bulk-delete", permissionMiddleware(["procurement.po.update"]), ctrl.bulkRemove);
+router.post("/bulk-delete", permissionMiddleware(["procurement.access"]), ctrl.bulkRemove);
 router.get("/:id/print", permissionMiddleware(["procurement.po.read"]), ctrl.print);
 router.get("/:id", permissionMiddleware(["procurement.po.read"]), ctrl.getById);
 router.post("/", permissionMiddleware(["procurement.po.create"]), ctrl.create);
@@ -17,6 +17,6 @@ router.post("/:id/issue", permissionMiddleware(["procurement.po.approve"]), ctrl
 router.post("/:id/receive", permissionMiddleware(["procurement.po.update"]), ctrl.receive);
 router.post("/:id/close", permissionMiddleware(["procurement.po.update"]), ctrl.close);
 // Admin-only delete (controller also enforces Procurement Admin / po.delete)
-router.delete("/:id", permissionMiddleware(["procurement.po.update"]), ctrl.remove);
+router.delete("/:id", permissionMiddleware(["procurement.access"]), ctrl.remove);
 
 module.exports = router;

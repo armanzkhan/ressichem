@@ -23,6 +23,7 @@ import { recordTotalLabel } from "@/lib/procurementRecordSummary";
 import {
   accessLevelFromRole,
 } from "@/lib/procurementRoles";
+import { canProcurementSoftDelete } from "@/lib/procurementAccess";
 
 const emptyForm = () => ({
   title: "",
@@ -134,6 +135,13 @@ export function RequisitionsView({ section }: Props) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [departmentOptions, setDepartmentOptions] = useState<string[]>([...PR_DEPARTMENTS]);
+  const [canDelete, setCanDelete] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  useEffect(() => {
+    setCanDelete(canProcurementSoftDelete());
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -143,6 +151,7 @@ export function RequisitionsView({ section }: Props) {
         purchaseType: purchaseTypeForSection(section),
       });
       setRows(filterRequisitionsBySection(res.data || [], section));
+      setSelectedIds([]);
 
       const level = accessLevelFromRole(localStorage.getItem("userRole") || "");
       const needSuppliers = level === "buyer" || level === "admin";
@@ -185,6 +194,46 @@ export function RequisitionsView({ section }: Props) {
     setEditingId(null);
     setForm(emptyForm());
     setShowForm(true);
+  };
+
+  const deletePr = async (id: string, label: string) => {
+    if (!window.confirm(`Delete requisition ${label}? It will be hidden from lists (soft delete).`)) return;
+    setError("");
+    try {
+      await procurementApi.deleteRequisition(id);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    }
+  };
+
+  const bulkDeleteSelected = async () => {
+    if (!selectedIds.length) return;
+    if (
+      !window.confirm(
+        `Delete ${selectedIds.length} selected requisition(s)? They will be hidden from lists (soft delete).`
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    setError("");
+    try {
+      await procurementApi.bulkDeleteRequisitions(selectedIds);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Bulk delete failed");
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const allSelected = rows.length > 0 && selectedIds.length === rows.length;
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? [] : rows.map((r) => r._id));
+  };
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
   const openRequisition = async (row: PurchaseDocument) => {
@@ -319,140 +368,215 @@ export function RequisitionsView({ section }: Props) {
       onAdd={canCreate ? openCreate : undefined}
     >
       {error ? <Alert message={error} /> : null}
+      {canDelete && selectedIds.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <p className="text-sm text-blue-700 dark:text-blue-300">{selectedIds.length} selected</p>
+          <button
+            type="button"
+            disabled={bulkDeleting}
+            className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm hover:bg-red-700 disabled:opacity-60"
+            onClick={bulkDeleteSelected}
+          >
+            {bulkDeleting ? "Deleting..." : "Bulk delete"}
+          </button>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded-lg border border-blue-200 text-blue-700 text-sm hover:bg-blue-50"
+            onClick={() => setSelectedIds([])}
+          >
+            Clear selection
+          </button>
+        </div>
+      ) : null}
       {loading ? (
         <LoadingText />
       ) : (
         <Table
           onRowClick={(index) => openRequisition(rows[index])}
-          headers={[
-            "PR #",
-            "Departments",
-            "Created",
-            "Created by",
-            "Submitted at",
-            "Approvals",
-            "Assigned to",
-            "Status",
-            "Actions",
-          ]}
-          rows={rows.map((r) => [
-            r.requisitionNumber || "—",
-            r.title || "—",
-            procurementDateTime(r.createdAt),
-            procurementUserLabel(r.requestedBy),
-            procurementDateTime(r.submittedAt),
-            approvalProgressLabel(r),
-            r.assignedApprover ? procurementUserLabel(r.assignedApprover) : "—",
-            <StatusBadge key={`st-${r._id}`} status={r.status} />,
-            <span key={`act-${r._id}`} className="flex flex-wrap gap-2">
-              {canCreate && (r.status === "draft" || r.status === "rejected") ? (
-                <button
-                  type="button"
-                  className="text-blue-600 text-xs dark:text-blue-300"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    setError("");
-                    try {
-                      await procurementApi.submitRequisition(r._id);
-                      await load();
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : "Submit failed");
-                    }
-                  }}
-                >
-                  {r.status === "rejected" ? "Resubmit" : "Submit"}
-                </button>
-              ) : null}
-              {canConvertToPo && r.status === "approved" ? (
-                <button
-                  type="button"
-                  className="text-indigo-600 text-xs dark:text-indigo-300"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConvertSupplier("");
-                    setConvertPr(r);
-                  }}
-                >
-                  Create PO
-                </button>
-              ) : null}
-              {canApprove &&
-              (r.status === "submitted" || r.status === "partially_approved") ? (
-                <>
+          headers={
+            canDelete
+              ? [
+                  <input
+                    key="select-all"
+                    type="checkbox"
+                    checked={allSelected}
+                    aria-label="Select all requisitions"
+                    className="h-4 w-4 accent-blue-600"
+                    onChange={toggleSelectAll}
+                  />,
+                  "PR #",
+                  "Departments",
+                  "Created",
+                  "Created by",
+                  "Submitted at",
+                  "Approvals",
+                  "Assigned to",
+                  "Status",
+                  "Actions",
+                ]
+              : [
+                  "PR #",
+                  "Departments",
+                  "Created",
+                  "Created by",
+                  "Submitted at",
+                  "Approvals",
+                  "Assigned to",
+                  "Status",
+                  "Actions",
+                ]
+          }
+          rows={rows.map((r) => {
+            const actionCell = (
+              <span key={`act-${r._id}`} className="flex flex-wrap gap-2">
+                {canCreate && (r.status === "draft" || r.status === "rejected") ? (
                   <button
                     type="button"
-                    className="text-green-700 text-xs dark:text-green-300"
+                    className="text-blue-600 text-xs dark:text-blue-300"
                     onClick={async (e) => {
                       e.stopPropagation();
-                      await procurementApi.approveRequisition(r._id);
-                      await load();
+                      setError("");
+                      try {
+                        await procurementApi.submitRequisition(r._id);
+                        await load();
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : "Submit failed");
+                      }
                     }}
                   >
-                    Approve
+                    {r.status === "rejected" ? "Resubmit" : "Submit"}
                   </button>
+                ) : null}
+                {canConvertToPo && r.status === "approved" ? (
                   <button
                     type="button"
-                    className="text-amber-700 text-xs dark:text-amber-300"
+                    className="text-indigo-600 text-xs dark:text-indigo-300"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setReviewReason("");
-                      setReviewAction({ id: r._id, type: "hold", label: r.requisitionNumber || r._id });
+                      setConvertSupplier("");
+                      setConvertPr(r);
                     }}
                   >
-                    Hold
+                    Create PO
                   </button>
+                ) : null}
+                {canApprove &&
+                (r.status === "submitted" || r.status === "partially_approved") ? (
+                  <>
+                    <button
+                      type="button"
+                      className="text-green-700 text-xs dark:text-green-300"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await procurementApi.approveRequisition(r._id);
+                        await load();
+                      }}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="text-amber-700 text-xs dark:text-amber-300"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setReviewReason("");
+                        setReviewAction({ id: r._id, type: "hold", label: r.requisitionNumber || r._id });
+                      }}
+                    >
+                      Hold
+                    </button>
+                    <button
+                      type="button"
+                      className="text-red-700 text-xs dark:text-red-300"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setReviewReason("");
+                        setReviewAction({ id: r._id, type: "reject", label: r.requisitionNumber || r._id });
+                      }}
+                    >
+                      Reject
+                    </button>
+                  </>
+                ) : null}
+                {canApprove && r.status === "held" ? (
+                  <>
+                    <button
+                      type="button"
+                      className="text-green-700 text-xs dark:text-green-300"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await procurementApi.approveRequisition(r._id);
+                        await load();
+                      }}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="text-blue-700 text-xs dark:text-blue-300"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await procurementApi.releaseRequisitionHold(r._id);
+                        await load();
+                      }}
+                    >
+                      Release
+                    </button>
+                    <button
+                      type="button"
+                      className="text-red-700 text-xs dark:text-red-300"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setReviewReason("");
+                        setReviewAction({ id: r._id, type: "reject", label: r.requisitionNumber || r._id });
+                      }}
+                    >
+                      Reject
+                    </button>
+                  </>
+                ) : null}
+                {canDelete ? (
                   <button
                     type="button"
-                    className="text-red-700 text-xs dark:text-red-300"
+                    className="text-red-600 text-xs dark:text-red-300"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setReviewReason("");
-                      setReviewAction({ id: r._id, type: "reject", label: r.requisitionNumber || r._id });
+                      void deletePr(r._id, r.requisitionNumber || "this PR");
                     }}
                   >
-                    Reject
+                    Delete
                   </button>
-                </>
-              ) : null}
-              {canApprove && r.status === "held" ? (
-                <>
-                  <button
-                    type="button"
-                    className="text-green-700 text-xs dark:text-green-300"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await procurementApi.approveRequisition(r._id);
-                      await load();
-                    }}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    type="button"
-                    className="text-blue-700 text-xs dark:text-blue-300"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await procurementApi.releaseRequisitionHold(r._id);
-                      await load();
-                    }}
-                  >
-                    Release
-                  </button>
-                  <button
-                    type="button"
-                    className="text-red-700 text-xs dark:text-red-300"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setReviewReason("");
-                      setReviewAction({ id: r._id, type: "reject", label: r.requisitionNumber || r._id });
-                    }}
-                  >
-                    Reject
-                  </button>
-                </>
-              ) : null}
-            </span>,
-          ])}
+                ) : null}
+              </span>
+            );
+
+            const baseCells = [
+              r.requisitionNumber || "—",
+              r.title || "—",
+              procurementDateTime(r.createdAt),
+              procurementUserLabel(r.requestedBy),
+              procurementDateTime(r.submittedAt),
+              approvalProgressLabel(r),
+              r.assignedApprover ? procurementUserLabel(r.assignedApprover) : "—",
+              <StatusBadge key={`st-${r._id}`} status={r.status} />,
+              actionCell,
+            ];
+
+            if (!canDelete) return baseCells;
+
+            return [
+              <input
+                key={`chk-${r._id}`}
+                type="checkbox"
+                checked={selectedIds.includes(r._id)}
+                aria-label={`Select ${r.requisitionNumber || r._id}`}
+                className="h-4 w-4 accent-blue-600"
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => toggleSelectOne(r._id)}
+              />,
+              ...baseCells,
+            ];
+          })}
         />
       )}
       {showForm ? (

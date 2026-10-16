@@ -15,6 +15,6 @@ router.get("/:id/export", permissionMiddleware(["procurement.costing.read"]), ct
 router.get("/:id", permissionMiddleware(["procurement.costing.read"]), ctrl.getById);
 router.post("/", permissionMiddleware(["procurement.costing.create"]), ctrl.create);
 router.put("/:id", permissionMiddleware(["procurement.costing.update"]), ctrl.update);
-router.delete("/:id", permissionMiddleware(["procurement.costing.update"]), ctrl.remove);
+router.delete("/:id", permissionMiddleware(["procurement.access"]), ctrl.remove);
 
 module.exports = router;

@@ -9,6 +9,7 @@ import { UnitSelect } from "@/components/procurement/UnitSelect";
 import { ItemCategorySelect } from "@/components/procurement/ItemCategorySelect";
 import { filterItemsBySection, pageTitle } from "@/lib/procurementScope";
 import { recordTotalLabel } from "@/lib/procurementRecordSummary";
+import { canProcurementSoftDelete } from "@/lib/procurementAccess";
 
 const emptyForm = (): { name: string; hsCode: string; unit: string; category: string } => ({
   name: "",
@@ -31,6 +32,12 @@ export function ItemsView({ section }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [canDelete, setCanDelete] = useState(false);
+
+  useEffect(() => {
+    setCanDelete(canProcurementSoftDelete());
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -124,12 +131,14 @@ export function ItemsView({ section }: Props) {
                 e.stopPropagation();
                 openItem(r);
               }}>Edit</button>
-              <button type="button" className="text-red-600 text-xs" onClick={async (e) => {
-                e.stopPropagation();
-                if (!confirm("Deactivate this item?")) return;
-                await procurementApi.deleteItem(r._id);
-                await load();
-              }}>Deactivate</button>
+              {canDelete ? (
+                <button type="button" className="text-red-600 text-xs" onClick={async (e) => {
+                  e.stopPropagation();
+                  if (!confirm("Deactivate this item? (soft delete)")) return;
+                  await procurementApi.deleteItem(r._id);
+                  await load();
+                }}>Deactivate</button>
+              ) : null}
             </span>,
           ])}
         />

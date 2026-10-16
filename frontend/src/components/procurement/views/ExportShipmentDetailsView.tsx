@@ -14,6 +14,7 @@ import {
   type ShipmentTrackingFormValues,
 } from "@/components/procurement/ShipmentTrackingPaperForm";
 import { Alert, LoadingText, Modal, PageShell, Table, procurementSecondaryButtonClass } from "@/components/procurement/procurement-ui";
+import { canProcurementSoftDelete } from "@/lib/procurementAccess";
 
 function customerLabel(c: ProcurementSupplier | string | undefined, suppliers: ProcurementSupplier[]) {
   if (!c) return "—";
@@ -36,6 +37,11 @@ export function ExportShipmentDetailsView() {
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ShipmentTrackingFormValues>(emptyShipmentTrackingForm);
+  const [canDelete, setCanDelete] = useState(false);
+
+  useEffect(() => {
+    setCanDelete(canProcurementSoftDelete());
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -148,9 +154,11 @@ export function ExportShipmentDetailsView() {
               <button type="button" className="text-blue-600 text-xs dark:text-blue-300" onClick={(e) => { e.stopPropagation(); openEdit(r._id); }}>
                 Edit
               </button>
-              <button type="button" className="text-red-600 text-xs dark:text-red-400" onClick={(e) => { e.stopPropagation(); deleteRecord(r._id); }}>
-                Delete
-              </button>
+              {canDelete ? (
+                <button type="button" className="text-red-600 text-xs dark:text-red-400" onClick={(e) => { e.stopPropagation(); deleteRecord(r._id); }}>
+                  Delete
+                </button>
+              ) : null}
             </span>,
           ])}
         />

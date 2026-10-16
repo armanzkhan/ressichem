@@ -3,6 +3,7 @@ const { getCompanyId, nextDocumentNumber, computeLineTotals } = require("../util
 const {
   canApproveRequisitions,
   isProcurementAdminUser,
+  canSoftDeleteProcurement,
 } = require("../utils/procurementPrRouting");
 const {
   collectDepartmentsFromPr,
@@ -46,7 +47,7 @@ exports.list = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
     const { status, purchaseType } = req.query;
-    const query = { company_id };
+    const query = { company_id, isActive: { $ne: false } };
     if (status) query.status = status;
     if (purchaseType) query.purchaseType = purchaseType;
 
@@ -80,7 +81,7 @@ exports.getById = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
     const data = await populateRequisitionAudit(
-      PurchaseRequisition.findOne({ _id: req.params.id, company_id })
+      PurchaseRequisition.findOne({ _id: req.params.id, company_id, isActive: { $ne: false } })
     ).populate("supplier", "supplierCode name defaultCurrency");
     if (!data) return res.status(404).json({ success: false, message: "Requisition not found" });
 
@@ -573,6 +574,68 @@ exports.convertToPO = async (req, res) => {
       success: true,
       message: `Created draft PO ${po.poNumber} from ${pr.requisitionNumber}`,
       data: populated,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.softDelete = async (req, res) => {
+  try {
+    if (!canSoftDeleteProcurement(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to delete purchase requisitions",
+      });
+    }
+
+    const company_id = getCompanyId(req);
+    const data = await PurchaseRequisition.findOneAndUpdate(
+      { _id: req.params.id, company_id, isActive: { $ne: false } },
+      {
+        isActive: false,
+        deletedAt: new Date(),
+        deletedBy: req.user?._id,
+        status: "cancelled",
+      },
+      { new: true }
+    );
+    if (!data) return res.status(404).json({ success: false, message: "Requisition not found" });
+    return res.json({ success: true, message: "Requisition deleted", data });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.bulkSoftDelete = async (req, res) => {
+  try {
+    if (!canSoftDeleteProcurement(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to delete purchase requisitions",
+      });
+    }
+
+    const company_id = getCompanyId(req);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : [];
+    if (!ids.length) {
+      return res.status(400).json({ success: false, message: "Select at least one requisition" });
+    }
+
+    const result = await PurchaseRequisition.updateMany(
+      { _id: { $in: ids }, company_id, isActive: { $ne: false } },
+      {
+        isActive: false,
+        deletedAt: new Date(),
+        deletedBy: req.user?._id,
+        status: "cancelled",
+      }
+    );
+
+    return res.json({
+      success: true,
+      message: `Deleted ${result.modifiedCount} requisition(s)`,
+      deletedCount: result.modifiedCount,
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });

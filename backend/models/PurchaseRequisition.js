@@ -52,6 +52,10 @@ const purchaseRequisitionSchema = new mongoose.Schema(
     holdReason: { type: String, default: "" },
     submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     submittedAt: { type: Date },
+    /** Soft-delete flag — inactive rows are hidden from lists */
+    isActive: { type: Boolean, default: true, index: true },
+    deletedAt: { type: Date },
+    deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }
 );

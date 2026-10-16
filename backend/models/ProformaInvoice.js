@@ -34,6 +34,10 @@ const proformaInvoiceSchema = new mongoose.Schema(
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     approvedAt: { type: Date },
+    /** Soft-delete flag — inactive rows are hidden from lists */
+    isActive: { type: Boolean, default: true, index: true },
+    deletedAt: { type: Date },
+    deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     ...commercialDocumentFields,
   },
   { timestamps: true }

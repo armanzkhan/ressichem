@@ -1,7 +1,5 @@
 const ProformaInvoice = require("../models/ProformaInvoice");
 const PurchaseOrder = require("../models/PurchaseOrder");
-const fs = require("fs");
-const path = require("path");
 const { getCompanyId, createWithDocumentNumber, nextDocumentNumber, commercialFieldsFromDoc } = require("../utils/procurementHelpers");
 const {
   prepareCommercialPayload,
@@ -10,6 +8,7 @@ const {
   persistSupplierBanking,
   normalizeSupplierIds,
 } = require("../services/procurementDocumentService");
+const { canSoftDeleteProcurement } = require("../utils/procurementPrRouting");
 
 const supplierPopulate =
   "supplierCode name defaultCurrency paymentTerms street city country mobile phone taxId banking";
@@ -18,7 +17,7 @@ exports.list = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
     const { status, pfiFlow, purchaseType } = req.query;
-    const query = { company_id };
+    const query = { company_id, isActive: { $ne: false } };
     if (status) query.status = status;
     if (pfiFlow) query.pfiFlow = pfiFlow;
     if (purchaseType) query.purchaseType = purchaseType;
@@ -35,7 +34,7 @@ exports.list = async (req, res) => {
 exports.getById = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
-    const data = await ProformaInvoice.findOne({ _id: req.params.id, company_id })
+    const data = await ProformaInvoice.findOne({ _id: req.params.id, company_id, isActive: { $ne: false } })
       .populate("supplier", supplierPopulate)
       .lean();
     if (!data) return res.status(404).json({ success: false, message: "PFI not found" });
@@ -189,24 +188,22 @@ exports.convertToPO = async (req, res) => {
   }
 };
 
-function deletePfiSourceFile(sourceDocument) {
-  const relPath = sourceDocument?.path;
-  if (!relPath || relPath.startsWith("http://") || relPath.startsWith("https://")) return;
-  const localPath = path.join(__dirname, "..", String(relPath).replace(/^\//, ""));
-  if (fs.existsSync(localPath)) {
-    try {
-      fs.unlinkSync(localPath);
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-/** Admin-only: delete a received PFI upload and its stored file */
+/** Soft-delete a received PFI upload (keeps file for audit) */
 exports.remove = async (req, res) => {
   try {
+    if (!canSoftDeleteProcurement(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to delete PFIs",
+      });
+    }
+
     const company_id = getCompanyId(req);
-    const pfi = await ProformaInvoice.findOne({ _id: req.params.id, company_id }).lean();
+    const pfi = await ProformaInvoice.findOne({
+      _id: req.params.id,
+      company_id,
+      isActive: { $ne: false },
+    }).lean();
     if (!pfi) return res.status(404).json({ success: false, message: "PFI not found" });
 
     if (pfi.status === "converted") {
@@ -224,8 +221,15 @@ exports.remove = async (req, res) => {
       });
     }
 
-    deletePfiSourceFile(pfi.sourceDocument);
-    await ProformaInvoice.deleteOne({ _id: pfi._id, company_id });
+    await ProformaInvoice.findOneAndUpdate(
+      { _id: pfi._id, company_id },
+      {
+        isActive: false,
+        deletedAt: new Date(),
+        deletedBy: req.user?._id,
+        status: "cancelled",
+      }
+    );
 
     return res.json({ success: true, message: "PFI deleted" });
   } catch (err) {

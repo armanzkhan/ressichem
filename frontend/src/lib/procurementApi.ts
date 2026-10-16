@@ -660,6 +660,13 @@ export const procurementApi = {
     request(`/api/procurement/requisitions/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   submitRequisition: (id: string) =>
     request(`/api/procurement/requisitions/${id}/submit`, { method: "POST" }),
+  deleteRequisition: (id: string) =>
+    request(`/api/procurement/requisitions/${id}`, { method: "DELETE" }),
+  bulkDeleteRequisitions: (ids: string[]) =>
+    request(`/api/procurement/requisitions/bulk-delete`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
   approveRequisition: (id: string) =>
     request(`/api/procurement/requisitions/${id}/approve`, { method: "POST" }),
   rejectRequisition: (id: string, reason: string) =>

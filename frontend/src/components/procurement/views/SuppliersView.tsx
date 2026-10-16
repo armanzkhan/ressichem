@@ -10,6 +10,7 @@ import {
   pageTitle,
 } from "@/lib/procurementScope";
 import { recordTotalWithUniqueNames } from "@/lib/procurementRecordSummary";
+import { canProcurementSoftDelete } from "@/lib/procurementAccess";
 
 type Props = { section: "local" | "import" };
 
@@ -38,6 +39,11 @@ export function SuppliersView({ section }: Props) {
   const [rows, setRows] = useState<ProcurementSupplier[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [canDelete, setCanDelete] = useState(false);
+
+  useEffect(() => {
+    setCanDelete(canProcurementSoftDelete());
+  }, []);
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingCode, setEditingCode] = useState("");
@@ -161,22 +167,24 @@ export function SuppliersView({ section }: Props) {
                 >
                   Edit
                 </button>
-                <button
-                  type="button"
-                  className="text-red-600 text-xs"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    if (!confirm("Deactivate this supplier?")) return;
-                    try {
-                      await procurementApi.deleteSupplier(r._id);
-                      await load();
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : "Delete failed");
-                    }
-                  }}
-                >
-                  Deactivate
-                </button>
+                {canDelete ? (
+                  <button
+                    type="button"
+                    className="text-red-600 text-xs"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (!confirm("Deactivate this supplier? (soft delete)")) return;
+                      try {
+                        await procurementApi.deleteSupplier(r._id);
+                        await load();
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : "Delete failed");
+                      }
+                    }}
+                  >
+                    Deactivate
+                  </button>
+                ) : null}
               </span>,
             ];
             return base;

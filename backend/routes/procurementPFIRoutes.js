@@ -60,7 +60,7 @@ router.get("/:id/print", permissionMiddleware(["procurement.pfi.read"]), ctrl.pr
 router.get("/:id", permissionMiddleware(["procurement.pfi.read"]), ctrl.getById);
 router.post("/", permissionMiddleware(["procurement.pfi.create"]), ctrl.create);
 router.put("/:id", permissionMiddleware(["procurement.pfi.update"]), ctrl.update);
-router.delete("/:id", permissionMiddleware(["procurement.users.update"]), ctrl.remove);
+router.delete("/:id", permissionMiddleware(["procurement.access"]), ctrl.remove);
 router.post("/:id/convert-to-po", permissionMiddleware(["procurement.pfi.approve"]), ctrl.convertToPO);
 
 module.exports = router;

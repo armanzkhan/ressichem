@@ -35,7 +35,7 @@ import {
 } from "@/lib/procurementScope";
 import { recordTotalLabel } from "@/lib/procurementRecordSummary";
 import { RESSICHEM_BUYER_DEFAULT } from "@/lib/procurementDocumentTypes";
-import { isProcurementAdmin } from "@/lib/procurementAccess";
+import { canProcurementSoftDelete } from "@/lib/procurementAccess";
 import { formatProcurementAmount } from "@/lib/procurementMoney";
 
 function supplierLabel(s: ProcurementSupplier | string | undefined, suppliers: ProcurementSupplier[]) {
@@ -83,7 +83,7 @@ export function PurchaseOrdersView({ section }: Props) {
   const [receiving, setReceiving] = useState(false);
 
   useEffect(() => {
-    setCanDelete(isProcurementAdmin());
+    setCanDelete(canProcurementSoftDelete());
   }, []);
 
   const load = useCallback(async () => {
@@ -196,7 +196,7 @@ export function PurchaseOrdersView({ section }: Props) {
   };
 
   const deletePo = async (id: string, label: string) => {
-    if (!window.confirm(`Delete purchase order ${label}? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete purchase order ${label}? It will be hidden from lists (soft delete).`)) return;
     setError("");
     try {
       await procurementApi.deletePurchaseOrder(id);
@@ -221,7 +221,7 @@ export function PurchaseOrdersView({ section }: Props) {
     if (!selectedIds.length) return;
     if (
       !window.confirm(
-        `Delete ${selectedIds.length} selected purchase order(s)? This cannot be undone.`
+        `Delete ${selectedIds.length} selected purchase order(s)? They will be hidden from lists (soft delete).`
       )
     ) {
       return;

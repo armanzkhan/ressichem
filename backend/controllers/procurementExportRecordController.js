@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { getCompanyId } = require("../utils/procurementHelpers");
 const firebaseStorage = require("../services/firebaseStorageService");
+const { canSoftDeleteProcurement } = require("../utils/procurementPrRouting");
 
 const exportUploadsDir = path.join(__dirname, "..", "uploads", "procurement", "export-documents");
 
@@ -85,7 +86,7 @@ exports.list = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
     const { recordType } = req.query;
-    const query = { company_id };
+    const query = { company_id, isActive: { $ne: false } };
     if (recordType) query.recordType = recordType;
     const data = await ProcurementExportRecord.find(query)
       .populate("customer", supplierPopulate)
@@ -198,16 +199,24 @@ exports.updateShipment = async (req, res) => {
 
 exports.deleteRecord = async (req, res) => {
   try {
-    const company_id = getCompanyId(req);
-    const data = await ProcurementExportRecord.findOneAndDelete({ _id: req.params.id, company_id });
-    if (!data) return res.status(404).json({ success: false, message: "Record not found" });
-
-    const src = data.sourceDocument;
-    if (src?.storage === "firebase" && src.firebasePath) {
-      await firebaseStorage.deleteFirebaseFile(src.firebasePath);
-    } else if (src?.path) {
-      firebaseStorage.deleteLocalUpload(src.path);
+    if (!canSoftDeleteProcurement(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to delete export records",
+      });
     }
+
+    const company_id = getCompanyId(req);
+    const data = await ProcurementExportRecord.findOneAndUpdate(
+      { _id: req.params.id, company_id, isActive: { $ne: false } },
+      {
+        isActive: false,
+        deletedAt: new Date(),
+        deletedBy: req.user?._id,
+      },
+      { new: true }
+    );
+    if (!data) return res.status(404).json({ success: false, message: "Record not found" });
 
     return res.json({ success: true, message: "Record deleted" });
   } catch (err) {

@@ -68,6 +68,20 @@ function isProcurementAdminUser(user) {
   return keys.includes("procurement.users.create") || keys.includes("procurement.users.update");
 }
 
+/** Only these emails may soft-delete procurement records (PR, PO, PFI, etc.). */
+const PROCUREMENT_SOFT_DELETE_EMAILS = new Set(["arman@ressichem.com"]);
+
+function userEmail(user) {
+  return String(user?.email || "")
+    .trim()
+    .toLowerCase();
+}
+
+function canSoftDeleteProcurement(user) {
+  if (!user) return false;
+  return PROCUREMENT_SOFT_DELETE_EMAILS.has(userEmail(user));
+}
+
 function canApproveRequisitions(user) {
   if (isProcurementAdminUser(user)) return true;
   return permissionKeysFromUser(user).includes("procurement.requisitions.approve");
@@ -75,9 +89,11 @@ function canApproveRequisitions(user) {
 
 module.exports = {
   DEPARTMENT_APPROVER_EMAILS,
+  PROCUREMENT_SOFT_DELETE_EMAILS,
   normalizeDepartment,
   approverEmailForDepartment,
   resolveApproverEmail,
   isProcurementAdminUser,
+  canSoftDeleteProcurement,
   canApproveRequisitions,
 };

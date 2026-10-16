@@ -63,6 +63,6 @@ router.post(
 );
 router.post("/shipments", permissionMiddleware(["procurement.pfi.create"]), ctrl.createShipment);
 router.put("/shipments/:id", permissionMiddleware(["procurement.pfi.update"]), ctrl.updateShipment);
-router.delete("/:id", permissionMiddleware(["procurement.pfi.update"]), ctrl.deleteRecord);
+router.delete("/:id", permissionMiddleware(["procurement.access"]), ctrl.deleteRecord);
 
 module.exports = router;

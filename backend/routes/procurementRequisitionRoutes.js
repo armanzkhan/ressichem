@@ -15,6 +15,11 @@ router.get(
   permissionMiddleware(["procurement.requisitions.read"]),
   reportCtrl.exportMonthlyReport
 );
+router.post(
+  "/bulk-delete",
+  permissionMiddleware(["procurement.access"]),
+  ctrl.bulkSoftDelete
+);
 router.get("/:id", permissionMiddleware(["procurement.requisitions.read"]), ctrl.getById);
 router.post("/", permissionMiddleware(["procurement.requisitions.create"]), ctrl.create);
 router.put("/:id", permissionMiddleware(["procurement.requisitions.update"]), ctrl.update);
@@ -24,5 +29,6 @@ router.post("/:id/reject", permissionMiddleware(["procurement.requisitions.appro
 router.post("/:id/hold", permissionMiddleware(["procurement.requisitions.approve"]), ctrl.hold);
 router.post("/:id/release-hold", permissionMiddleware(["procurement.requisitions.approve"]), ctrl.releaseHold);
 router.post("/:id/convert-to-po", permissionMiddleware(["procurement.po.create"]), ctrl.convertToPO);
+router.delete("/:id", permissionMiddleware(["procurement.access"]), ctrl.softDelete);
 
 module.exports = router;

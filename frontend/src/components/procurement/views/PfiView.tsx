@@ -34,7 +34,7 @@ import {
   type TradeSection,
 } from "@/lib/procurementScope";
 import { recordTotalLabel } from "@/lib/procurementRecordSummary";
-import { isProcurementAdmin } from "@/lib/procurementAccess";
+import { canProcurementSoftDelete } from "@/lib/procurementAccess";
 
 function supplierLabel(s: ProcurementSupplier | string | undefined, suppliers: ProcurementSupplier[]) {
   if (!s) return "—";
@@ -88,7 +88,7 @@ export function PfiView({ section, module }: Props) {
   const [canDelete, setCanDelete] = useState(false);
 
   useEffect(() => {
-    setCanDelete(isProcurementAdmin());
+    setCanDelete(canProcurementSoftDelete());
   }, []);
 
   const load = useCallback(async () => {
@@ -244,7 +244,7 @@ export function PfiView({ section, module }: Props) {
   };
 
   const deleteReceivedPfi = async (id: string, label: string) => {
-    if (!window.confirm(`Delete this PFI upload (${label})? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete this PFI upload (${label})? It will be hidden from lists (soft delete).`)) return;
     setError("");
     try {
       await procurementApi.deletePFI(id);

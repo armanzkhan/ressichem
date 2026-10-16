@@ -3,6 +3,7 @@ const { getCompanyId, nextDocumentNumber } = require("../utils/procurementHelper
 const { computeBothScenarios } = require("../utils/procurementCostingCalc");
 const { renderCostingHtml } = require("../services/costingPrintTemplate");
 const { buildCostingExportBuffer } = require("../utils/procurementCostingExport");
+const { canSoftDeleteProcurement } = require("../utils/procurementPrRouting");
 
 function exportFormat(req) {
   return String(req.query.format || "xlsx").toLowerCase() === "csv" ? "csv" : "xlsx";
@@ -67,6 +68,7 @@ exports.list = async (req, res) => {
     const query = { company_id };
     if (tradeScope) query.tradeScope = tradeScope;
     if (status) query.status = status;
+    else query.status = { $ne: "cancelled" };
     const data = await ProcurementCosting.find(query)
       .populate("supplier", "supplierCode name")
       .populate("item", "itemCode name")
@@ -190,14 +192,21 @@ exports.update = async (req, res) => {
 
 exports.remove = async (req, res) => {
   try {
+    if (!canSoftDeleteProcurement(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to delete costing sheets",
+      });
+    }
+
     const company_id = getCompanyId(req);
     const data = await ProcurementCosting.findOneAndUpdate(
-      { _id: req.params.id, company_id },
+      { _id: req.params.id, company_id, status: { $ne: "cancelled" } },
       { status: "cancelled", updatedBy: req.user?._id },
       { new: true }
     );
     if (!data) return res.status(404).json({ success: false, message: "Costing sheet not found" });
-    return res.json({ success: true, data });
+    return res.json({ success: true, data, message: "Costing sheet deleted" });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }

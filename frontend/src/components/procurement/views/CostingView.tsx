@@ -21,6 +21,7 @@ import { pageTitle } from "@/lib/procurementScope";
 import { recordTotalLabel } from "@/lib/procurementRecordSummary";
 import { openProcurementPrint } from "@/lib/procurementPrint";
 import { downloadProcurementFile } from "@/lib/procurementDownload";
+import { canProcurementSoftDelete } from "@/lib/procurementAccess";
 
 type Props = { section: "local" | "import" };
 
@@ -305,6 +306,11 @@ export function CostingView({ section }: Props) {
     taxPurpose: CostingScenario;
     allInclusive: CostingScenario;
   } | null>(null);
+  const [canDelete, setCanDelete] = useState(false);
+
+  useEffect(() => {
+    setCanDelete(canProcurementSoftDelete());
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -318,6 +324,17 @@ export function CostingView({ section }: Props) {
       setLoading(false);
     }
   }, [section]);
+
+  const deleteCosting = async (id: string, label: string) => {
+    if (!window.confirm(`Delete costing ${label}? It will be hidden from lists (soft delete).`)) return;
+    setError("");
+    try {
+      await procurementApi.deleteCosting(id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+    }
+  };
 
   useEffect(() => {
     load();
@@ -495,6 +512,18 @@ export function CostingView({ section }: Props) {
               >
                 Excel
               </button>
+              {canDelete ? (
+                <button
+                  type="button"
+                  className="text-red-600 text-xs dark:text-red-300"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void deleteCosting(r._id, r.costingNumber || "this sheet");
+                  }}
+                >
+                  Delete
+                </button>
+              ) : null}
             </span>,
           ])}
         />

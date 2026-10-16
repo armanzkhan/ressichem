@@ -7,26 +7,20 @@ const {
   persistSupplierBanking,
   normalizeSupplierIds,
 } = require("../services/procurementDocumentService");
-const { isProcurementAdminUser } = require("../utils/procurementPrRouting");
+const { canSoftDeleteProcurement } = require("../utils/procurementPrRouting");
 
 const supplierPopulate =
   "supplierCode name defaultCurrency paymentTerms street city address country mobile phone phoneDialCode taxId banking";
 
-function permissionKeysFromUser(user) {
-  const perms = user?.permissions || [];
-  return perms.map((p) => (typeof p === "string" ? p : p?.key || "")).filter(Boolean);
-}
-
 function canDeletePurchaseOrder(user) {
-  if (isProcurementAdminUser(user)) return true;
-  return permissionKeysFromUser(user).includes("procurement.po.delete");
+  return canSoftDeleteProcurement(user);
 }
 
 exports.list = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
     const { status, purchaseType } = req.query;
-    const query = { company_id };
+    const query = { company_id, isActive: { $ne: false } };
     if (status) query.status = status;
     if (purchaseType) query.purchaseType = purchaseType;
     const data = await PurchaseOrder.find(query)
@@ -44,7 +38,7 @@ exports.list = async (req, res) => {
 exports.getById = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
-    const data = await PurchaseOrder.findOne({ _id: req.params.id, company_id })
+    const data = await PurchaseOrder.findOne({ _id: req.params.id, company_id, isActive: { $ne: false } })
       .populate("supplier", supplierPopulate)
       .populate("suppliers", supplierPopulate)
       .populate("requisition", "requisitionNumber")
@@ -245,12 +239,21 @@ exports.remove = async (req, res) => {
     if (!canDeletePurchaseOrder(req.user)) {
       return res.status(403).json({
         success: false,
-        message: "Only Procurement Admin can delete purchase orders",
+        message: "You do not have permission to delete purchase orders",
       });
     }
 
     const company_id = getCompanyId(req);
-    const data = await PurchaseOrder.findOneAndDelete({ _id: req.params.id, company_id });
+    const data = await PurchaseOrder.findOneAndUpdate(
+      { _id: req.params.id, company_id, isActive: { $ne: false } },
+      {
+        isActive: false,
+        deletedAt: new Date(),
+        deletedBy: req.user?._id,
+        status: "cancelled",
+      },
+      { new: true }
+    );
     if (!data) return res.status(404).json({ success: false, message: "Purchase order not found" });
     return res.json({ success: true, message: "Purchase order deleted" });
   } catch (err) {
@@ -263,7 +266,7 @@ exports.bulkRemove = async (req, res) => {
     if (!canDeletePurchaseOrder(req.user)) {
       return res.status(403).json({
         success: false,
-        message: "Only Procurement Admin can delete purchase orders",
+        message: "You do not have permission to delete purchase orders",
       });
     }
 
@@ -273,11 +276,19 @@ exports.bulkRemove = async (req, res) => {
       return res.status(400).json({ success: false, message: "Select at least one purchase order" });
     }
 
-    const result = await PurchaseOrder.deleteMany({ _id: { $in: ids }, company_id });
+    const result = await PurchaseOrder.updateMany(
+      { _id: { $in: ids }, company_id, isActive: { $ne: false } },
+      {
+        isActive: false,
+        deletedAt: new Date(),
+        deletedBy: req.user?._id,
+        status: "cancelled",
+      }
+    );
     return res.json({
       success: true,
-      message: `Deleted ${result.deletedCount} purchase order(s)`,
-      deletedCount: result.deletedCount,
+      message: `Deleted ${result.modifiedCount} purchase order(s)`,
+      deletedCount: result.modifiedCount,
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });

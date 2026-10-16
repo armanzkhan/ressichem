@@ -9,6 +9,7 @@ import {
 import { getBackendUrl } from "@/lib/getBackendUrl";
 import { SupplierSelect } from "@/components/procurement/SupplierSelect";
 import { Alert, Field, FormLabel, LoadingText, Modal, PageShell, Table, procurementSecondaryButtonClass } from "@/components/procurement/procurement-ui";
+import { canProcurementSoftDelete } from "@/lib/procurementAccess";
 
 const DOCUMENT_CATEGORIES = [
   "PFI (Proforma Invoice)",
@@ -66,6 +67,11 @@ export function ExportDocumentsView() {
   const [saving, setSaving] = useState(false);
   const [showDocModal, setShowDocModal] = useState(false);
   const [documentForm, setDocumentForm] = useState(emptyDocumentForm);
+  const [canDelete, setCanDelete] = useState(false);
+
+  useEffect(() => {
+    setCanDelete(canProcurementSoftDelete());
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -176,22 +182,24 @@ export function ExportDocumentsView() {
               ) : (
                 <span className="text-xs text-gray-400 dark:text-slate-500">No file</span>
               )}
-              <button
-                type="button"
-                className="text-red-600 text-xs dark:text-red-400"
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  if (!window.confirm("Delete this document?")) return;
-                  try {
-                    await procurementApi.deleteExportRecord(r._id);
-                    await load();
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : "Delete failed");
-                  }
-                }}
-              >
-                Delete
-              </button>
+              {canDelete ? (
+                <button
+                  type="button"
+                  className="text-red-600 text-xs dark:text-red-400"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!window.confirm("Delete this document? (soft delete)")) return;
+                    try {
+                      await procurementApi.deleteExportRecord(r._id);
+                      await load();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Delete failed");
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+              ) : null}
             </span>,
           ])}
         />

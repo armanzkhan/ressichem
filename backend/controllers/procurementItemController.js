@@ -78,6 +78,14 @@ exports.update = async (req, res) => {
 
 exports.remove = async (req, res) => {
   try {
+    const { canSoftDeleteProcurement } = require("../utils/procurementPrRouting");
+    if (!canSoftDeleteProcurement(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to deactivate items",
+      });
+    }
+
     const company_id = getCompanyId(req);
     const data = await ProcurementItem.findOneAndUpdate(
       { _id: req.params.id, company_id },
