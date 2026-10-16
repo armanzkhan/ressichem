@@ -351,8 +351,13 @@ export function RequisitionsView({ section }: Props) {
                   className="text-blue-600 text-xs dark:text-blue-300"
                   onClick={async (e) => {
                     e.stopPropagation();
-                    await procurementApi.submitRequisition(r._id);
-                    await load();
+                    setError("");
+                    try {
+                      await procurementApi.submitRequisition(r._id);
+                      await load();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Submit failed");
+                    }
                   }}
                 >
                   {r.status === "rejected" ? "Resubmit" : "Submit"}
@@ -465,9 +470,9 @@ export function RequisitionsView({ section }: Props) {
                   addLabel="+ Add department…"
                 />
                 <p className="mt-1 text-xs text-blue-600 dark:text-blue-300">
-                  Set a department on <strong>each line</strong>. Different lines can use different
-                  departments; each mapped approver must approve before the PR is fully approved. One
-                  reject rejects the whole PR.
+                  Set a department on <strong>each line</strong>. Use a mapped department (e.g.
+                  Maintenance, Production, Store, Local Purchase) — custom names cannot be submitted
+                  until a Procurement Admin adds them under <strong>PR Approvers</strong>.
                 </p>
               </div>
             </FormLabel>
