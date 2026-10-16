@@ -195,6 +195,22 @@ async function run() {
 
     await ensureRole({
       companyId,
+      name: "Procurement Requester Approver",
+      description: "Create PRs and approve/reject/hold — PR and reports only",
+      replacePermissions: true,
+      permissionIds: [
+        permId("procurement.access"),
+        permId("procurement.dashboard.read"),
+        permId("procurement.items.read"),
+        permId("procurement.requisitions.read"),
+        permId("procurement.requisitions.create"),
+        permId("procurement.requisitions.update"),
+        permId("procurement.requisitions.approve"),
+      ].filter(Boolean),
+    });
+
+    await ensureRole({
+      companyId,
       name: "Procurement Admin",
       description: "Full procurement access and user management",
       permissionIds: perms.map((p) => p._id),

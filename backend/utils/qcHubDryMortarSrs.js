@@ -3,6 +3,22 @@
  * Single source of truth for backend validation and Power BI export field mapping.
  */
 
+/** Fixed sieve sizes for Hub Sieve Analysis (% Passing entered per size) */
+const SIEVE_ANALYSIS_SIZES = [
+  "2.00 mm",
+  "0.50 mm",
+  "1.60 mm",
+  "0.315 mm",
+  "1.25 mm",
+  "0.250 mm",
+  "1.00 mm",
+  "0.125 mm",
+  "0.80 mm",
+  "0.090 mm",
+  "0.63 mm",
+  "0.063 mm",
+];
+
 const QC_MODULES = {
   TILE_ADHESIVE: {
     key: "TILE_ADHESIVE",
@@ -24,6 +40,8 @@ const QC_MODULES = {
       { key: "compressiveStrength28Days", label: "Compressive Strength (28 days)", type: "number", unit: "N/mm²", trend: true },
       { key: "flexuralStrength28Days", label: "Flexural (28 days)", type: "number", unit: "N/mm²", trend: true },
       { key: "waterRetention", label: "Water Retention", type: "number", unit: "%", trend: true },
+      { key: "shrinkage", label: "Shrinkage", type: "number", unit: "mm/m", trend: true },
+      { key: "hardenedDensity", label: "Hardened Density", type: "number", unit: "g/cm³", trend: true },
     ],
   },
   TILE_GROUT: {
@@ -33,14 +51,17 @@ const QC_MODULES = {
     categories: ["CG1", "CG2", "FINE_JOINT", "WIDE_JOINT"],
     parameters: [
       { key: "appearance", label: "Appearance", type: "text" },
+      { key: "productCode", label: "Product Code", type: "text" },
       { key: "waterDemand", label: "Water Demand", type: "number", unit: "%", trend: true },
       { key: "flow", label: "Flow", type: "number" },
+      { key: "spreadability", label: "Spreadability", type: "number", unit: "mm", trend: true },
       { key: "sieveAnalysis", label: "Sieve Analysis", type: "text" },
       { key: "flexuralStrength28Days", label: "Flexural (28 days)", type: "number", unit: "N/mm²", trend: true },
       { key: "compressiveStrength", label: "Compressive Strength", type: "number", unit: "N/mm²", trend: true },
       { key: "abrasionResistance", label: "Abrasion Resistance", type: "number" },
       { key: "waterAbsorption", label: "Water Absorption", type: "number", unit: "%" },
       { key: "shrinkage", label: "Shrinkage", type: "number", unit: "mm/m" },
+      { key: "hardenedDensity", label: "Hardened Density", type: "number", unit: "g/cm³", trend: true },
       { key: "colourConsistency", label: "Colour Consistency", type: "text" },
     ],
   },
@@ -62,6 +83,11 @@ const QC_MODULES = {
       { key: "adhesion", label: "Adhesion", type: "number", unit: "N/mm²" },
       { key: "crackObservation", label: "Crack Observation", type: "text" },
       { key: "spreadability", label: "Spreadability", type: "number", unit: "mm" },
+      // RPR (Premix Plaster) — Section-wise Parameter Changes
+      { key: "freshDensity", label: "Fresh Density", type: "number", unit: "g/cm³", trend: true },
+      { key: "waterRetention", label: "Water Retention", type: "number", unit: "%", trend: true },
+      { key: "waterAbsorption", label: "Water Absorption", type: "number", unit: "%", trend: true },
+      { key: "hardenedDensity", label: "Hardened Density", type: "number", unit: "g/cm³", trend: true },
     ],
   },
   SKIM_COAT: {
@@ -81,6 +107,12 @@ const QC_MODULES = {
       { key: "flexuralStrength28Days", label: "Flexural (28 days)", type: "number", unit: "N/mm²", trend: true },
       { key: "adhesion", label: "Adhesion", type: "number", unit: "N/mm²" },
       { key: "crackResistance", label: "Crack Resistance", type: "text" },
+      { key: "freshDensity", label: "Fresh Density", type: "number", unit: "g/cm³", trend: true },
+      { key: "dryBulkDensity", label: "Dry Bulk Density", type: "number", unit: "g/l", trend: true },
+      { key: "shrinkage", label: "Shrinkage", type: "number", unit: "mm/m", trend: true },
+      { key: "waterRetention", label: "Water Retention", type: "number", unit: "%", trend: true },
+      { key: "waterAbsorption", label: "Water Absorption", type: "number", unit: "%", trend: true },
+      { key: "hardenedDensity", label: "Hardened Density", type: "number", unit: "g/cm³", trend: true },
     ],
   },
   REPAIR_MORTAR: {
@@ -93,6 +125,10 @@ const QC_MODULES = {
       { key: "flow", label: "Flow", type: "number" },
       { key: "sieveAnalysis", label: "Sieve Analysis", type: "text" },
       { key: "spreadability", label: "Spreadability", type: "number", unit: "mm", trend: true },
+      { key: "freshDensity", label: "Fresh Density", type: "number", unit: "g/cm³", trend: true },
+      { key: "waterRetention", label: "Water Retention", type: "number", unit: "%", trend: true },
+      { key: "waterAbsorption", label: "Water Absorption", type: "number", unit: "%", trend: true },
+      { key: "hardenedDensity", label: "Hardened Density", type: "number", unit: "g/cm³", trend: true },
       { key: "compressiveStrength", label: "Compressive Strength", type: "number", unit: "N/mm²", trend: true },
       { key: "flexuralStrength", label: "Flexural Strength", type: "number", unit: "N/mm²", trend: true },
       { key: "pullOffStrength", label: "Pull-Off Strength", type: "number", unit: "N/mm²" },
@@ -107,6 +143,9 @@ const QC_MODULES = {
     categories: ["CEMENTITIOUS", "FLEXIBLE", "CRYSTALLINE"],
     parameters: [
       { key: "potLife", label: "Pot Life", type: "number", unit: "min" },
+      { key: "solidContent", label: "Solid Content", type: "number", unit: "%", trend: true },
+      { key: "viscosity", label: "Viscosity", type: "number", unit: "cP", trend: true },
+      { key: "density", label: "Density", type: "number", unit: "g/cm³", trend: true },
       { key: "waterPermeability", label: "Water Permeability", type: "text" },
       { key: "hydrostaticPressureResistance", label: "Hydrostatic Pressure Resistance", type: "text" },
       { key: "crackBridgingAbility", label: "Crack Bridging Ability", type: "text" },
@@ -139,6 +178,12 @@ const QC_MODULES = {
     parameters: [
       { key: "appearance", label: "Appearance", type: "text" },
       { key: "viscosity", label: "Viscosity", type: "number", unit: "cP" },
+      { key: "dryBulkDensity", label: "Dry Bulk Density", type: "number", unit: "g/l", trend: true },
+      { key: "freshDensity", label: "Fresh Density", type: "number", unit: "g/cm³", trend: true },
+      { key: "spreadability", label: "Spreadability", type: "number", unit: "mm", trend: true },
+      { key: "flexuralStrength", label: "Flexural Strength", type: "number", unit: "N/mm²", trend: true },
+      { key: "compressiveStrength", label: "Compressive Strength", type: "number", unit: "N/mm²", trend: true },
+      { key: "waterAbsorption", label: "Water Absorption", type: "number", unit: "%", trend: true },
       { key: "dryingTime", label: "Drying Time", type: "number", unit: "min" },
       { key: "adhesion", label: "Adhesion", type: "number", unit: "N/mm²" },
       { key: "waterRepellency", label: "Water Repellency", type: "text" },
@@ -197,6 +242,7 @@ module.exports = {
   RAW_MATERIAL_TYPES,
   PACKAGING_MATERIAL_TYPES,
   TREND_PARAMETERS,
+  SIEVE_ANALYSIS_SIZES,
   getModuleByKey,
   getModuleBySlug,
   getAllModules,

@@ -1,5 +1,12 @@
 const VALID_AREAS = new Set(["local", "import", "export", "local_import"]);
-const VALID_ACCESS_LEVELS = new Set(["viewer", "user", "buyer", "approver", "admin"]);
+const VALID_ACCESS_LEVELS = new Set([
+  "viewer",
+  "user",
+  "buyer",
+  "approver",
+  "creator_approver",
+  "admin",
+]);
 
 const LEGACY_AREA_ROLES = new Set([
   "Procurement Local User",
@@ -15,6 +22,7 @@ const ALL_ROLE_NAMES = [
   "Procurement User",
   "Procurement Buyer",
   "Procurement Manager",
+  "Procurement Requester Approver",
   "Procurement Viewer",
 ];
 
@@ -24,6 +32,8 @@ function roleNameFromAccessLevel(accessLevel) {
       return "Procurement Viewer";
     case "buyer":
       return "Procurement Buyer";
+    case "creator_approver":
+      return "Procurement Requester Approver";
     case "approver":
     case "manager":
       return "Procurement Manager";
@@ -152,6 +162,13 @@ function procurementSectionsForUser(role, department) {
 function accessLevelFromRole(role) {
   const r = String(role || "").toLowerCase();
   if (r.includes("viewer")) return "viewer";
+  if (
+    r.includes("requester approver") ||
+    r.includes("creator approver") ||
+    r.includes("requester & approver")
+  ) {
+    return "creator_approver";
+  }
   if (r.includes("manager") || r.includes("approver")) return "approver";
   if (r.includes("buyer")) return "buyer";
   if (r.includes("admin")) return "admin";

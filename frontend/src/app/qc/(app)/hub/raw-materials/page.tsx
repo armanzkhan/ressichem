@@ -4,31 +4,63 @@ import { useState, useEffect, useMemo } from "react";
 import { rawMaterialApi } from "@/lib/qcApi";
 import Link from "next/link";
 import {
+  HUB_RM_TESTS,
+  compactSievePassing,
+  emptySievePassing,
+  hubRmTestsForCategory,
+  type SievePassingMap,
+} from "@/lib/qcHubDryMortarSrs";
+import {
   HubBulkDeleteButton,
   HubRowDeleteButton,
   useHubRowSelection,
   useQcHubFullAccess,
 } from "@/components/qc-hub/HubDeleteControls";
-
-/** Hub raw-material QC test fields (saved under batch.coa.testResults) */
-const HUB_RM_TESTS = [
-  { code: "VISCOSITY", name: "Viscosity", unit: "cP" },
-  { code: "SIEVE_ANALYSIS", name: "Sieve Analysis", unit: "" },
-  { code: "BULK_DENSITY", name: "Bulk Density", unit: "g/l" },
-  { code: "SOLID_CONTENT", name: "Solid Content", unit: "%" },
-  { code: "PH", name: "pH", unit: "" },
-  { code: "INSOLUBLE_RESIDUE", name: "Insoluble Residue", unit: "%" },
-  { code: "LOI", name: "LOI", unit: "%" },
-  { code: "ASH_CONTENT", name: "Ash Content", unit: "%" },
-] as const;
+import { SieveAnalysisSection } from "@/components/qc-hub/SieveAnalysisSection";
 
 function formatTestValue(batch: any, code: string): string {
   const entry = batch?.coa?.testResults?.[code];
-  if (!entry || entry.value === undefined || entry.value === null || String(entry.value).trim() === "") {
-    return "—";
+  if (entry == null) return "—";
+  if (typeof entry === "object") {
+    if (entry.value === undefined || entry.value === null || String(entry.value).trim() === "") {
+      return "—";
+    }
+    const unit = entry.unit || HUB_RM_TESTS.find((t) => t.code === code)?.unit || "";
+    return `${entry.value}${unit ? ` ${unit}` : ""}`;
   }
-  const unit = entry.unit || HUB_RM_TESTS.find((t) => t.code === code)?.unit || "";
-  return `${entry.value}${unit ? ` ${unit}` : ""}`;
+  const s = String(entry).trim();
+  return s || "—";
+}
+
+function testsLabelForCategory(category?: string): string {
+  const tests = hubRmTestsForCategory(category);
+  if (!tests.length) return "—";
+  return tests.map((t) => t.name).join(", ");
+}
+
+function formatSpecValue(material: any, code: string): string {
+  const entry = material?.specifications?.[code];
+  if (entry == null) return "";
+  if (typeof entry === "object") {
+    if (entry.value === undefined || entry.value === null || String(entry.value).trim() === "") {
+      return "";
+    }
+    const unit = entry.unit || HUB_RM_TESTS.find((t) => t.code === code)?.unit || "";
+    return `${entry.value}${unit ? ` ${unit}` : ""}`;
+  }
+  return String(entry).trim();
+}
+
+function specsPreview(material: any): string {
+  const tests = hubRmTestsForCategory(material?.category);
+  const filled = tests
+    .map((t) => {
+      const v = formatSpecValue(material, t.code);
+      return v ? `${t.name}: ${v}` : null;
+    })
+    .filter(Boolean);
+  if (filled.length) return filled.join(" · ");
+  return testsLabelForCategory(material?.category);
 }
 
 export default function RawMaterialsPage() {
@@ -38,16 +70,30 @@ export default function RawMaterialsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState(false);
-  const [activeTab, setActiveTab] = useState<"materials" | "batches">("materials");
+  const [activeTab, setActiveTab] = useState<"materials" | "batches">("batches");
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [testValues, setTestValues] = useState<Record<string, string>>({});
+  const [sievePassing, setSievePassing] = useState<SievePassingMap>(emptySievePassing());
 
   const listRows = useMemo(
     () => (activeTab === "materials" ? materials : batches),
     [activeTab, materials, batches]
   );
   const selection = useHubRowSelection(listRows);
+
+  const selectedMaterial = useMemo(
+    () => materials.find((m) => m._id === formData.rawMaterial),
+    [materials, formData.rawMaterial]
+  );
+  const batchTestFields = useMemo(
+    () => hubRmTestsForCategory(selectedMaterial?.category),
+    [selectedMaterial?.category]
+  );
+  const materialFormTests = useMemo(
+    () => hubRmTestsForCategory(formData.category),
+    [formData.category]
+  );
 
   useEffect(() => {
     loadData();
@@ -116,11 +162,34 @@ export default function RawMaterialsPage() {
     e.preventDefault();
     try {
       setError("");
+      const sieve = compactSievePassing(sievePassing);
       if (activeTab === "materials") {
-        await rawMaterialApi.create(formData);
+        const fields = hubRmTestsForCategory(formData.category);
+        const specifications: Record<string, unknown> = {};
+        for (const test of fields) {
+          const raw = testValues[test.code];
+          if (raw !== undefined && String(raw).trim() !== "") {
+            specifications[test.code] = {
+              code: test.code,
+              value: String(raw).trim(),
+              unit: test.unit || undefined,
+            };
+          }
+        }
+        if (sieve) specifications.sieveAnalysisPassing = sieve;
+        await rawMaterialApi.create({
+          materialCode: formData.materialCode,
+          materialName: formData.materialName,
+          category: formData.category,
+          unit: formData.unit || "kg",
+          description: formData.description || "",
+          specifications,
+        });
       } else {
-        const testResults: Record<string, { code: string; value: string; unit?: string }> = {};
-        for (const test of HUB_RM_TESTS) {
+        const material = materials.find((m) => m._id === formData.rawMaterial);
+        const fields = hubRmTestsForCategory(material?.category);
+        const testResults: Record<string, unknown> = {};
+        for (const test of fields) {
           const raw = testValues[test.code];
           if (raw !== undefined && String(raw).trim() !== "") {
             testResults[test.code] = {
@@ -130,6 +199,7 @@ export default function RawMaterialsPage() {
             };
           }
         }
+        if (sieve) testResults.sieveAnalysisPassing = sieve;
 
         await rawMaterialApi.createBatch({
           rawMaterial: formData.rawMaterial,
@@ -148,6 +218,7 @@ export default function RawMaterialsPage() {
       setShowForm(false);
       setFormData({});
       setTestValues({});
+      setSievePassing(emptySievePassing());
       loadData();
     } catch (err: any) {
       setError(err.message || "Failed to save");
@@ -162,7 +233,7 @@ export default function RawMaterialsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Raw Materials Management</h1>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            Material master + incoming batches with QC testing results
+            Material master + incoming batches with category-specific QC tests (Cement / Sand / Other)
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -175,13 +246,19 @@ export default function RawMaterialsPage() {
           )}
           <button
             onClick={() => {
-              setShowForm(!showForm);
+              const opening = !showForm;
+              setShowForm(opening);
               setFormData({});
               setTestValues({});
+              setSievePassing(emptySievePassing());
             }}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
-            {showForm ? "Cancel" : `Add ${activeTab === "materials" ? "Material" : "Batch"}`}
+            {showForm
+              ? "Cancel"
+              : activeTab === "materials"
+                ? "Add Material"
+                : "Add Batch (with Sieve Analysis)"}
           </button>
         </div>
       </div>
@@ -205,8 +282,29 @@ export default function RawMaterialsPage() {
           }}
           className={`px-4 py-2 ${activeTab === "batches" ? "border-b-2 border-blue-600 text-blue-600" : ""}`}
         >
-          Batches
+          Batches &amp; QC Tests
         </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+        <div className="rounded-xl border border-amber-200 bg-amber-50/80 dark:bg-amber-900/10 p-3">
+          <div className="font-bold text-amber-900 dark:text-amber-200 mb-1">Cement tests</div>
+          <div className="text-gray-700 dark:text-gray-300">
+            {hubRmTestsForCategory("CEMENT").map((t) => t.name).join(" · ")}
+          </div>
+        </div>
+        <div className="rounded-xl border border-sky-200 bg-sky-50/80 dark:bg-sky-900/10 p-3">
+          <div className="font-bold text-sky-900 dark:text-sky-200 mb-1">Sand tests</div>
+          <div className="text-gray-700 dark:text-gray-300">
+            {hubRmTestsForCategory("SAND").map((t) => t.name).join(" · ")}
+          </div>
+        </div>
+        <div className="rounded-xl border border-violet-200 bg-violet-50/80 dark:bg-violet-900/10 p-3">
+          <div className="font-bold text-violet-900 dark:text-violet-200 mb-1">Other RM tests</div>
+          <div className="text-gray-700 dark:text-gray-300">
+            {hubRmTestsForCategory("OTHER").map((t) => t.name).join(" · ")}
+          </div>
+        </div>
       </div>
 
       {error && (
@@ -244,7 +342,10 @@ export default function RawMaterialsPage() {
                 <select
                   required
                   value={formData.category || ""}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, category: e.target.value });
+                    setTestValues({});
+                  }}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-gray-900"
                 >
                   <option value="">Select...</option>
@@ -257,6 +358,48 @@ export default function RawMaterialsPage() {
                   <option value="OTHER">Other</option>
                 </select>
               </div>
+              {formData.category ? (
+                <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/10 p-4">
+                  <h4 className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-3">
+                    QC Parameters — {formData.category}
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {materialFormTests.map((test) => (
+                      <div key={test.code}>
+                        <label className="block text-xs font-semibold mb-1">
+                          {test.name}
+                          {test.unit ? ` (${test.unit})` : ""}
+                        </label>
+                        <input
+                          type={
+                            test.code === "SIEVE_ANALYSIS" || test.code === "FRESH_MORTAR"
+                              ? "text"
+                              : "number"
+                          }
+                          step="any"
+                          value={testValues[test.code] || ""}
+                          onChange={(e) =>
+                            setTestValues({ ...testValues, [test.code]: e.target.value })
+                          }
+                          className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-900"
+                          placeholder={
+                            test.code === "SIEVE_ANALYSIS" ? "e.g. Pass / % retained" : ""
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  Select a category to enter Cement / Sand / Other QC parameters.
+                </p>
+              )}
+              <SieveAnalysisSection
+                key={`mat-sieve-${showForm ? "open" : "closed"}`}
+                values={sievePassing}
+                onChange={setSievePassing}
+              />
             </>
           ) : (
             <>
@@ -266,13 +409,18 @@ export default function RawMaterialsPage() {
                   <select
                     required
                     value={formData.rawMaterial || ""}
-                    onChange={(e) => setFormData({ ...formData, rawMaterial: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, rawMaterial: e.target.value });
+                      setTestValues({});
+                      setSievePassing(emptySievePassing());
+                    }}
                     className="w-full px-3 py-2 border rounded-lg dark:bg-gray-900"
                   >
                     <option value="">Select material...</option>
                     {materials.map((m) => (
                       <option key={m._id} value={m._id}>
                         {m.materialCode} — {m.materialName}
+                        {m.category ? ` (${m.category})` : ""}
                       </option>
                     ))}
                   </select>
@@ -309,30 +457,52 @@ export default function RawMaterialsPage() {
                 </div>
               </div>
 
+              {/* Sieve Analysis first so it is visible without scrolling past other tests */}
+              <SieveAnalysisSection
+                key={`batch-sieve-${showForm ? "open" : "closed"}`}
+                values={sievePassing}
+                onChange={setSievePassing}
+              />
+
               <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/10 p-4">
                 <h4 className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-3">
                   Testing Results
+                  {selectedMaterial?.category
+                    ? ` — ${selectedMaterial.category}`
+                    : " (select a material)"}
                 </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {HUB_RM_TESTS.map((test) => (
-                    <div key={test.code}>
-                      <label className="block text-xs font-semibold mb-1">
-                        {test.name}
-                        {test.unit ? ` (${test.unit})` : ""}
-                      </label>
-                      <input
-                        type={test.code === "SIEVE_ANALYSIS" ? "text" : "number"}
-                        step="any"
-                        value={testValues[test.code] || ""}
-                        onChange={(e) =>
-                          setTestValues({ ...testValues, [test.code]: e.target.value })
-                        }
-                        className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-900"
-                        placeholder={test.code === "SIEVE_ANALYSIS" ? "e.g. Pass / % retained" : ""}
-                      />
-                    </div>
-                  ))}
-                </div>
+                {!formData.rawMaterial ? (
+                  <p className="text-sm text-gray-500">
+                    Select a raw material to see category-specific tests.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {batchTestFields.map((test) => (
+                      <div key={test.code}>
+                        <label className="block text-xs font-semibold mb-1">
+                          {test.name}
+                          {test.unit ? ` (${test.unit})` : ""}
+                        </label>
+                        <input
+                          type={
+                            test.code === "SIEVE_ANALYSIS" || test.code === "FRESH_MORTAR"
+                              ? "text"
+                              : "number"
+                          }
+                          step="any"
+                          value={testValues[test.code] || ""}
+                          onChange={(e) =>
+                            setTestValues({ ...testValues, [test.code]: e.target.value })
+                          }
+                          className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-900"
+                          placeholder={
+                            test.code === "SIEVE_ANALYSIS" ? "e.g. Pass / % retained" : ""
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -357,6 +527,7 @@ export default function RawMaterialsPage() {
                 setShowForm(false);
                 setFormData({});
                 setTestValues({});
+                setSievePassing(emptySievePassing());
               }}
               className="px-4 py-2 bg-gray-300 dark:bg-gray-700 rounded-lg"
             >
@@ -386,21 +557,16 @@ export default function RawMaterialsPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC Parameters</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </>
               ) : (
                 <>
                   <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch No</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Viscosity</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sieve</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bulk Dens.</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Solid %</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">pH</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Insol.</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">LOI</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ash</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Results Preview</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                   {canDelete && (
                     <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
@@ -427,6 +593,9 @@ export default function RawMaterialsPage() {
                   <td className="px-4 py-3 whitespace-nowrap">{material.materialCode}</td>
                   <td className="px-4 py-3">{material.materialName}</td>
                   <td className="px-4 py-3">{material.category}</td>
+                  <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300 max-w-md">
+                    {specsPreview(material)}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Link href={`/qc/hub/raw-materials/${material._id}`} className="text-blue-600 hover:underline">
@@ -457,18 +626,32 @@ export default function RawMaterialsPage() {
                     </td>
                   )}
                   <td className="px-3 py-3 whitespace-nowrap text-sm font-medium">{batch.batchNo}</td>
-                  <td className="px-3 py-3 text-sm">{batch.rawMaterial?.materialName || "N/A"}</td>
+                  <td className="px-3 py-3 text-sm">
+                    {batch.rawMaterial?._id ? (
+                      <Link
+                        href={`/qc/hub/raw-materials/${batch.rawMaterial._id}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {batch.rawMaterial?.materialName || "N/A"}
+                      </Link>
+                    ) : (
+                      batch.rawMaterial?.materialName || "N/A"
+                    )}
+                  </td>
+                  <td className="px-3 py-3 text-sm">{batch.rawMaterial?.category || "—"}</td>
                   <td className="px-3 py-3 text-sm">
                     {batch.quantity} {batch.unit}
                   </td>
-                  <td className="px-3 py-3 text-sm">{formatTestValue(batch, "VISCOSITY")}</td>
-                  <td className="px-3 py-3 text-sm">{formatTestValue(batch, "SIEVE_ANALYSIS")}</td>
-                  <td className="px-3 py-3 text-sm">{formatTestValue(batch, "BULK_DENSITY")}</td>
-                  <td className="px-3 py-3 text-sm">{formatTestValue(batch, "SOLID_CONTENT")}</td>
-                  <td className="px-3 py-3 text-sm">{formatTestValue(batch, "PH")}</td>
-                  <td className="px-3 py-3 text-sm">{formatTestValue(batch, "INSOLUBLE_RESIDUE")}</td>
-                  <td className="px-3 py-3 text-sm">{formatTestValue(batch, "LOI")}</td>
-                  <td className="px-3 py-3 text-sm">{formatTestValue(batch, "ASH_CONTENT")}</td>
+                  <td className="px-3 py-3 text-xs text-gray-700 dark:text-gray-300 max-w-lg">
+                    {hubRmTestsForCategory(batch.rawMaterial?.category)
+                      .map((t) => {
+                        const v = formatTestValue(batch, t.code);
+                        if (v === "—") return null;
+                        return `${t.name}: ${v}`;
+                      })
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                  </td>
                   <td className="px-3 py-3">
                     <span
                       className={`px-2 py-1 rounded text-xs ${

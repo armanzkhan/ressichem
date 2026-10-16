@@ -11,6 +11,12 @@ import {
   useHubRowSelection,
   useQcHubFullAccess,
 } from "@/components/qc-hub/HubDeleteControls";
+import { SieveAnalysisSection } from "@/components/qc-hub/SieveAnalysisSection";
+import {
+  compactSievePassing,
+  emptySievePassing,
+  type SievePassingMap,
+} from "@/lib/qcHubDryMortarSrs";
 
 type CompositionLine = {
   materialName: string;
@@ -58,7 +64,6 @@ const TEST_RESULT_FIELDS = [
   { key: "waterDemand", label: "Water Demand", unit: "%" },
   { key: "spreadability", label: "Spreadability", unit: "mm" },
   { key: "freshDensity", label: "Fresh Density", unit: "g/cm³" },
-  { key: "sieveAnalysis", label: "Sieve Analysis" },
   { key: "compressive28Days", label: "Compressive (28 days)", unit: "N/mm²" },
   { key: "flexural28Days", label: "Flexural (28 days)", unit: "N/mm²" },
   { key: "tensileAdhesion", label: "Tensile Adhesion", unit: "N/mm²" },
@@ -104,6 +109,7 @@ export default function FormulationsPage() {
   const [formData, setFormData] = useState(emptyForm());
   const [composition, setComposition] = useState<CompositionLine[]>([emptyCompositionLine()]);
   const [testValues, setTestValues] = useState<Record<string, string>>({});
+  const [sievePassing, setSievePassing] = useState<SievePassingMap>(emptySievePassing());
   const [deleting, setDeleting] = useState(false);
   const selection = useHubRowSelection(formulations);
 
@@ -169,6 +175,7 @@ export default function FormulationsPage() {
     setFormData(emptyForm());
     setComposition([emptyCompositionLine()]);
     setTestValues({});
+    setSievePassing(emptySievePassing());
     setShowForm(false);
   };
 
@@ -187,13 +194,15 @@ export default function FormulationsPage() {
           notes: line.notes || "",
         }));
 
-      const testResults: Record<string, string> = {};
+      const testResults: Record<string, string | Record<string, string>> = {};
       for (const field of TEST_RESULT_FIELDS) {
         const raw = testValues[field.key];
         if (raw !== undefined && String(raw).trim() !== "") {
           testResults[field.key] = String(raw).trim();
         }
       }
+      const sieve = compactSievePassing(sievePassing);
+      if (sieve) testResults.sieveAnalysisPassing = sieve;
 
       const res = await fetch(`${apiUrl}/api/qc/formulations`, {
         method: "POST",
@@ -559,6 +568,11 @@ export default function FormulationsPage() {
                 </div>
               ))}
             </div>
+            <SieveAnalysisSection
+              key={showForm ? "formulation-sieve" : "hidden"}
+              values={sievePassing}
+              onChange={setSievePassing}
+            />
           </div>
 
           {/* Summary */}

@@ -1,7 +1,13 @@
 import type { TradeSection } from "./procurementScope";
 
 export type ProcurementArea = "local" | "import" | "export" | "local_import";
-export type ProcurementAccessLevel = "viewer" | "user" | "buyer" | "approver" | "admin";
+export type ProcurementAccessLevel =
+  | "viewer"
+  | "user"
+  | "buyer"
+  | "approver"
+  | "creator_approver"
+  | "admin";
 
 export const PROCUREMENT_AREAS: Array<{
   value: ProcurementArea;
@@ -61,6 +67,12 @@ export const PROCUREMENT_ACCESS_LEVELS: Array<{
     roleName: "Procurement Manager",
   },
   {
+    value: "creator_approver",
+    label: "Requester & Approver",
+    description: "Create PRs and approve/reject/hold — PR and reports only",
+    roleName: "Procurement Requester Approver",
+  },
+  {
     value: "admin",
     label: "Admin",
     description: "Full access — all areas and user management",
@@ -74,6 +86,7 @@ export const MODULES_BY_ACCESS_LEVEL: Record<ProcurementAccessLevel, string[] | 
   user: ["pr", "reports"],
   buyer: "all",
   approver: ["pr", "reports"],
+  creator_approver: ["pr", "reports"],
   admin: "all",
 };
 
@@ -90,7 +103,7 @@ export function canAccessModule(accessLevel: ProcurementAccessLevel, module: str
 /** Areas offered on signup / user admin for each access level. */
 export function areasForAccessLevel(accessLevel: ProcurementAccessLevel): ProcurementArea[] {
   if (accessLevel === "admin") return ["local", "import", "export"];
-  if (accessLevel === "user" || accessLevel === "approver") {
+  if (accessLevel === "user" || accessLevel === "approver" || accessLevel === "creator_approver") {
     return ["local", "import", "local_import"];
   }
   return ["local", "import", "local_import", "export"];
@@ -155,6 +168,14 @@ export function effectiveProcurementDepartment(role?: string | null, department?
 export function accessLevelFromRole(role?: string | null): ProcurementAccessLevel {
   const r = (role || "").toLowerCase();
   if (r.includes("viewer")) return "viewer";
+  // Combined creator+approver before plain "approver" / "manager"
+  if (
+    r.includes("requester approver") ||
+    r.includes("creator approver") ||
+    r.includes("requester & approver")
+  ) {
+    return "creator_approver";
+  }
   if (r.includes("manager") || r.includes("approver")) return "approver";
   if (r.includes("buyer")) return "buyer";
   if (r.includes("admin")) return "admin";
@@ -203,7 +224,7 @@ export function procurementSectionsForRole(role?: string | null): TradeSection[]
 export function defaultProcurementLandingPath(role?: string | null, department?: string | null): string {
   const sections = procurementSectionsForUser(role, department);
   const level = accessLevelFromRole(role);
-  if (level === "user" || level === "approver") {
+  if (level === "user" || level === "approver" || level === "creator_approver") {
     const section = sections.includes("local")
       ? "local"
       : sections.includes("import")

@@ -110,6 +110,11 @@ function localCards(stats: SectionStats, accessLevel: ProcurementAccessLevel): D
   if (accessLevel === "user") {
     return prCardsForSection("local", stats, "requester");
   }
+  if (accessLevel === "creator_approver") {
+    const requester = prCardsForSection("local", stats, "requester");
+    const held = prCardsForSection("local", stats, "approver").find((c) => c.id === "local-pr-held");
+    return held ? [...requester, held] : requester;
+  }
   if (accessLevel === "approver") {
     return prCardsForSection("local", stats, "approver");
   }
@@ -178,6 +183,11 @@ function localCards(stats: SectionStats, accessLevel: ProcurementAccessLevel): D
 function importCards(stats: SectionStats, accessLevel: ProcurementAccessLevel): DashboardCard[] {
   if (accessLevel === "user") {
     return prCardsForSection("import", stats, "requester");
+  }
+  if (accessLevel === "creator_approver") {
+    const requester = prCardsForSection("import", stats, "requester");
+    const held = prCardsForSection("import", stats, "approver").find((c) => c.id === "import-pr-held");
+    return held ? [...requester, held] : requester;
   }
   if (accessLevel === "approver") {
     return prCardsForSection("import", stats, "approver");

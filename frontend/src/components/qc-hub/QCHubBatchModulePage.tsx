@@ -1,9 +1,16 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { QcModuleDef } from "@/lib/qcHubDryMortarSrs";
+import {
+  QcModuleDef,
+  compactSievePassing,
+  emptySievePassing,
+  normalizeSievePassing,
+  type SievePassingMap,
+} from "@/lib/qcHubDryMortarSrs";
 import { qcHubBatchApi } from "@/lib/qcApi";
 import { QCHubTrendChart } from "./QCHubTrendChart";
+import { SieveAnalysisSection } from "./SieveAnalysisSection";
 
 type BatchRecord = {
   _id: string;
@@ -13,7 +20,7 @@ type BatchRecord = {
   grade: string;
   batchNo: string;
   testDate: string;
-  parameters: Record<string, string | number>;
+  parameters: Record<string, string | number | Record<string, string>>;
   remarks?: string;
   status: "draft" | "submitted" | "approved" | "rejected";
   rejectionReason?: string;
@@ -37,6 +44,7 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<BatchRecord | null>(null);
   const [form, setForm] = useState<any>({ parameters: {} });
+  const [sievePassing, setSievePassing] = useState<SievePassingMap>(emptySievePassing());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [selectedTrendParam, setSelectedTrendParam] = useState(
@@ -44,6 +52,11 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
   );
 
   const trendParams = useMemo(() => moduleDef.parameters.filter((p) => p.trend), [moduleDef]);
+  /** Plain sieveAnalysis text field is replaced by structured Sieve Analysis section */
+  const formParameters = useMemo(
+    () => moduleDef.parameters.filter((p) => p.key !== "sieveAnalysis"),
+    [moduleDef]
+  );
   const allSelected = records.length > 0 && selectedIds.size === records.length;
   const someSelected = selectedIds.size > 0;
 
@@ -71,6 +84,7 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
 
   const openCreate = () => {
     setEditing(null);
+    setSievePassing(emptySievePassing());
     setForm({
       category: moduleDef.categories[0] || "",
       productName: "",
@@ -85,13 +99,15 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
 
   const openEdit = (r: BatchRecord) => {
     setEditing(r);
+    setSievePassing(normalizeSievePassing(r.parameters?.sieveAnalysisPassing));
+    const { sieveAnalysisPassing: _drop, ...restParams } = r.parameters || {};
     setForm({
       category: r.category,
       productName: r.productName,
       grade: r.grade,
       batchNo: r.batchNo,
       testDate: isoDate(r.testDate),
-      parameters: { ...r.parameters },
+      parameters: { ...restParams },
       remarks: r.remarks || "",
     });
     setShowForm(true);
@@ -100,7 +116,12 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const payload = { ...form, module: moduleDef.key };
+      const compacted = compactSievePassing(sievePassing);
+      const parameters = { ...form.parameters };
+      delete parameters.sieveAnalysis;
+      if (compacted) parameters.sieveAnalysisPassing = compacted;
+      else delete parameters.sieveAnalysisPassing;
+      const payload = { ...form, parameters, module: moduleDef.key };
       if (editing) await qcHubBatchApi.update(editing._id, payload);
       else await qcHubBatchApi.create(payload);
       setShowForm(false);
@@ -213,7 +234,7 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
             onClick={openCreate}
             className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700"
           >
-            + New Batch Record
+            + New Batch Record (Sieve Analysis)
           </button>
         </div>
       </div>
@@ -311,27 +332,39 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {moduleDef.parameters.map((p) => (
-              <div key={p.key}>
-                <label className="block text-xs font-semibold mb-1">
-                  {p.label}
-                  {p.unit ? ` (${p.unit})` : ""}
-                </label>
-                <input
-                  type={p.type === "number" ? "number" : "text"}
-                  step={p.type === "number" ? "any" : undefined}
-                  value={form.parameters[p.key] ?? ""}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      parameters: { ...form.parameters, [p.key]: e.target.value },
-                    })
-                  }
-                  className="w-full rounded-lg border px-3 py-2 text-sm"
-                />
-              </div>
-            ))}
+          {/* Sieve Analysis near top so it is visible without scrolling past all QC params */}
+          <SieveAnalysisSection
+            key={editing?._id || `new-${moduleDef.key}`}
+            values={sievePassing}
+            onChange={setSievePassing}
+          />
+
+          <div>
+            <h4 className="text-sm font-bold text-gray-800 dark:text-gray-200 mb-2">
+              QC Parameters
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {formParameters.map((p) => (
+                <div key={p.key}>
+                  <label className="block text-xs font-semibold mb-1">
+                    {p.label}
+                    {p.unit ? ` (${p.unit})` : ""}
+                  </label>
+                  <input
+                    type={p.type === "number" ? "number" : "text"}
+                    step={p.type === "number" ? "any" : undefined}
+                    value={form.parameters[p.key] ?? ""}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        parameters: { ...form.parameters, [p.key]: e.target.value },
+                      })
+                    }
+                    className="w-full rounded-lg border px-3 py-2 text-sm"
+                  />
+                </div>
+              ))}
+            </div>
           </div>
 
           <div>

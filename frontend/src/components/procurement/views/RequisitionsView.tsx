@@ -108,10 +108,19 @@ export function RequisitionsView({ section }: Props) {
     setAccessLevel(accessLevelFromRole(localStorage.getItem("userRole") || ""));
   }, []);
 
-  const canApprove = accessLevel === "approver" || accessLevel === "admin";
-  const canBulkImport = accessLevel !== "user" && accessLevel !== "viewer" && accessLevel !== "approver";
+  const canApprove =
+    accessLevel === "approver" || accessLevel === "creator_approver" || accessLevel === "admin";
+  const canBulkImport =
+    accessLevel !== "user" &&
+    accessLevel !== "viewer" &&
+    accessLevel !== "approver" &&
+    accessLevel !== "creator_approver";
   const canCreate = accessLevel !== "viewer" && accessLevel !== "approver";
-  const canQuickAddItem = accessLevel !== "user" && accessLevel !== "viewer" && accessLevel !== "approver";
+  const canQuickAddItem =
+    accessLevel !== "user" &&
+    accessLevel !== "viewer" &&
+    accessLevel !== "approver" &&
+    accessLevel !== "creator_approver";
   const canConvertToPo = accessLevel === "buyer" || accessLevel === "admin";
   const [viewingRow, setViewingRow] = useState<PurchaseDocument | null>(null);
   const [reviewAction, setReviewAction] = useState<{

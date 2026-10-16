@@ -2,24 +2,13 @@
 
 import { useEffect, useState, Fragment } from "react";
 import { packagingMaterialApi } from "@/lib/qcApi";
-import { PACKAGING_MATERIAL_TYPES } from "@/lib/qcHubDryMortarSrs";
+import { PACKAGING_MATERIAL_TYPES, PACKAGING_RESULT_FIELDS } from "@/lib/qcHubDryMortarSrs";
 import {
   HubBulkDeleteButton,
   HubRowDeleteButton,
   useHubRowSelection,
   useQcHubFullAccess,
 } from "@/components/qc-hub/HubDeleteControls";
-
-const PACKAGING_RESULT_FIELDS = [
-  { key: "dimensions", label: "Dimensions", placeholder: "e.g. OK / 500x300 mm" },
-  { key: "weightGsm", label: "Weight / GSM", placeholder: "e.g. 80 gsm" },
-  { key: "thickness", label: "Thickness", placeholder: "e.g. 0.05 mm" },
-  { key: "printQuality", label: "Print Quality", placeholder: "e.g. Pass / Fail" },
-  { key: "colorMatch", label: "Color Match", placeholder: "e.g. OK" },
-  { key: "sealStrength", label: "Seal Strength", placeholder: "e.g. Pass" },
-  { key: "visualDefects", label: "Visual Defects", placeholder: "e.g. None" },
-  { key: "overallResult", label: "Overall Result", placeholder: "e.g. Pass / Fail" },
-] as const;
 
 const emptyForm = () => ({
   materialType: PACKAGING_MATERIAL_TYPES[0],
