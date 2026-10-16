@@ -1,3 +1,12 @@
+function mongooseReady() {
+  try {
+    const mongoose = require("mongoose");
+    return mongoose.connection.readyState === 1;
+  } catch (_) {
+    return false;
+  }
+}
+
 function permissionMiddleware(requiredPermissions = []) {
   return async (req, res, next) => {
     if (!req.user) return res.status(401).json({ message: "Unauthorized" });
@@ -30,6 +39,22 @@ function permissionMiddleware(requiredPermissions = []) {
     const hasPermission = requiredPermissions.every((p) => userPermissionKeys.includes(p));
     if (hasPermission) {
       return next();
+    }
+
+    // Role/permission updates after login: refresh from DB only when JWT is missing a key
+    // (avoids an Atlas hit on the common allow path).
+    if (req.user.user_id && req.user.company_id && mongooseReady()) {
+      try {
+        const { getUserPermissions } = require("../services/authService");
+        const fresh = await getUserPermissions(req.user.user_id, req.user.company_id);
+        const freshKeys = fresh.permissions || [];
+        if (requiredPermissions.every((p) => freshKeys.includes(p))) {
+          req.user.permissions = freshKeys;
+          return next();
+        }
+      } catch (refreshErr) {
+        console.error("⚠️ Error refreshing permissions from DB:", refreshErr.message);
+      }
     }
 
     // Slow path: company-admin fallback (e.g. assign_categories) when JWT lacks the key

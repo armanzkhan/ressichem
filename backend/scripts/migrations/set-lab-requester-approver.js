@@ -70,12 +70,16 @@ async function main() {
 
   user.role = ROLE_NAME;
   user.roles = [role._id];
+  // Also mirror role permissions onto the user document (JWT + some checks use these)
+  user.permissions = perms.map((p) => p._id);
   if (!Array.isArray(user.modules) || !user.modules.includes("PROCUREMENT")) {
     user.modules = Array.from(new Set([...(user.modules || []), "PROCUREMENT"]));
   }
   await user.save();
 
   console.log(`Updated ${user.email}: role=${user.role}, access=Requester & Approver (create + approve PR)`);
+  console.log(`Direct permissions synced: ${PERM_KEYS.join(", ")}`);
+  console.log("Ask the user to log out and log back into Procurement so the token refreshes.");
   await mongoose.disconnect();
 }
 
