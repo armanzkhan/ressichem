@@ -14,6 +14,13 @@ router.get(
   ctrl.listDepartments
 );
 
+// Any PR creator/approver can register a new department mapped to themselves
+router.post(
+  "/ensure-self",
+  permissionMiddleware(["procurement.requisitions.create"]),
+  ctrl.ensureSelf
+);
+
 router.get("/", permissionMiddleware(["procurement.users.read"]), ctrl.list);
 router.post("/", permissionMiddleware(["procurement.users.create"]), ctrl.create);
 router.put("/:id", permissionMiddleware(["procurement.users.update"]), ctrl.update);

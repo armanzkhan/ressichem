@@ -5,6 +5,7 @@ const {
   DEPARTMENT_APPROVER_EMAILS,
   normalizeDepartment,
 } = require("../utils/procurementPrRouting");
+const { ensureDepartmentMappedToUser } = require("../utils/procurementPrApprovals");
 
 async function ensureDefaultMappings(company_id) {
   const count = await ProcurementDepartmentApprover.countDocuments({ company_id });
@@ -67,11 +68,46 @@ exports.listDepartments = async (req, res) => {
   }
 };
 
+/**
+ * PR creators / approvers: register a new department mapped to themselves.
+ * POST /api/procurement/department-approvers/ensure-self  { department }
+ */
+exports.ensureSelf = async (req, res) => {
+  try {
+    const company_id = getCompanyId(req);
+    const department = String(req.body?.department || "").trim();
+    if (!department) {
+      return res.status(400).json({ success: false, message: "Department is required" });
+    }
+    if (!req.user?.email) {
+      return res.status(400).json({ success: false, message: "Current user email is required" });
+    }
+
+    const result = await ensureDepartmentMappedToUser(company_id, department, req.user);
+    return res.status(result.created ? 201 : 200).json({
+      success: true,
+      data: {
+        department: result.department,
+        approverEmail: result.approverEmail || String(req.user.email).toLowerCase(),
+        created: result.created,
+      },
+      message: result.created
+        ? `Department "${result.department}" mapped to ${req.user.email}`
+        : `Department "${result.department}" already mapped to ${result.approverEmail}`,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 exports.create = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
     const department = String(req.body?.department || "").trim();
-    const approverEmail = String(req.body?.approverEmail || "").trim().toLowerCase();
+    // Default new mappings to the creating user when email is omitted
+    const approverEmail = String(req.body?.approverEmail || req.user?.email || "")
+      .trim()
+      .toLowerCase();
     const approverName = String(req.body?.approverName || "").trim();
 
     if (!department) {

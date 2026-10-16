@@ -30,6 +30,7 @@ type Props = {
   onItemCreated?: (item: ProcurementItem) => void;
   onChange: (lines: RequisitionLine[]) => void;
   allowQuickAdd?: boolean;
+  onDepartmentCreated?: (department: string) => void | Promise<void>;
 };
 
 const emptyLine = (defaultDepartment = ""): RequisitionLine => ({
@@ -49,6 +50,7 @@ export function RequisitionLineEditor({
   onItemCreated,
   onChange,
   allowQuickAdd = true,
+  onDepartmentCreated,
 }: Props) {
   const updateLine = (index: number, patch: Partial<RequisitionLine>) => {
     onChange(lines.map((line, i) => (i === index ? { ...line, ...patch } : line)));
@@ -114,6 +116,7 @@ export function RequisitionLineEditor({
                     placeholder="Select department for this line"
                     allowAdd
                     addLabel="+ Add department…"
+                    onCustomAdd={onDepartmentCreated}
                   />
                 </div>
               </FormLabel>

@@ -468,11 +468,16 @@ export function RequisitionsView({ section }: Props) {
                   placeholder="Optional — pre-fills new lines"
                   allowAdd
                   addLabel="+ Add department…"
+                  onCustomAdd={async (department) => {
+                    await procurementApi.ensureDepartmentMappedToMe(department);
+                    setDepartmentOptions((prev) =>
+                      prev.includes(department) ? prev : [...prev, department].sort((a, b) => a.localeCompare(b))
+                    );
+                  }}
                 />
                 <p className="mt-1 text-xs text-blue-600 dark:text-blue-300">
-                  Set a department on <strong>each line</strong>. Use a mapped department (e.g.
-                  Maintenance, Production, Store, Local Purchase) — custom names cannot be submitted
-                  until a Procurement Admin adds them under <strong>PR Approvers</strong>.
+                  Set a department on <strong>each line</strong>. New departments you add are mapped to
+                  you as approver automatically.
                 </p>
               </div>
             </FormLabel>
@@ -484,6 +489,12 @@ export function RequisitionsView({ section }: Props) {
               defaultDepartment={form.title}
               allowQuickAdd={canQuickAddItem}
               onItemCreated={(item) => setItems((prev) => [...prev, item])}
+              onDepartmentCreated={async (department) => {
+                await procurementApi.ensureDepartmentMappedToMe(department);
+                setDepartmentOptions((prev) =>
+                  prev.includes(department) ? prev : [...prev, department].sort((a, b) => a.localeCompare(b))
+                );
+              }}
               onChange={(lines) => setForm({ ...form, lines })}
             />
             <footer className="flex justify-end gap-2 pt-2">

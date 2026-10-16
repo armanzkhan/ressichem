@@ -1,4 +1,5 @@
 const User = require("../models/User");
+const ProcurementDepartmentApprover = require("../models/ProcurementDepartmentApprover");
 const {
   resolveApproverEmail,
   normalizeDepartment,
@@ -54,6 +55,69 @@ async function resolveApproverUserId(company_id, department) {
     email,
     userId: user?._id || null,
   };
+}
+
+/**
+ * If a department has no mapping yet, map it to the given user (creator/approver who introduced it).
+ * Existing mappings are left unchanged.
+ */
+async function ensureDepartmentMappedToUser(company_id, department, user) {
+  const name = String(department || "").trim();
+  const email = String(user?.email || "").trim().toLowerCase();
+  if (!name || !email || !email.includes("@")) {
+    return { created: false, department: name, reason: "missing_department_or_email" };
+  }
+
+  const departmentKey = normalizeDepartment(name);
+  const existing = await ProcurementDepartmentApprover.findOne({ company_id, departmentKey }).lean();
+  if (existing) {
+    return {
+      created: false,
+      department: existing.department,
+      approverEmail: existing.approverEmail,
+      reason: "already_mapped",
+    };
+  }
+
+  const approverName =
+    `${user.firstName || ""} ${user.lastName || ""}`.trim() || email;
+
+  try {
+    const doc = await ProcurementDepartmentApprover.create({
+      company_id,
+      department: name,
+      departmentKey,
+      approverEmail: email,
+      approverName,
+      isActive: true,
+      createdBy: user._id,
+      updatedBy: user._id,
+    });
+    return {
+      created: true,
+      department: doc.department,
+      approverEmail: doc.approverEmail,
+    };
+  } catch (err) {
+    if (err?.code === 11000) {
+      const raced = await ProcurementDepartmentApprover.findOne({ company_id, departmentKey }).lean();
+      return {
+        created: false,
+        department: raced?.department || name,
+        approverEmail: raced?.approverEmail,
+        reason: "already_mapped",
+      };
+    }
+    throw err;
+  }
+}
+
+async function ensureDepartmentsMappedToUser(company_id, departments, user) {
+  const results = [];
+  for (const department of departments || []) {
+    results.push(await ensureDepartmentMappedToUser(company_id, department, user));
+  }
+  return results;
 }
 
 /**
@@ -141,6 +205,8 @@ module.exports = {
   collectDepartmentsFromPr,
   departmentsTitleLabel,
   resolveApproverUserId,
+  ensureDepartmentMappedToUser,
+  ensureDepartmentsMappedToUser,
   buildApprovalsForDepartments,
   userHasApprovalRoleOnPr,
   pendingApprovalsForUser,

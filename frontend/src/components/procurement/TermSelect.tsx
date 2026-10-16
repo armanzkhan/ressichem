@@ -17,6 +17,8 @@ type Props = {
   /** When true, only show the provided options (no out-of-scope saved values or custom adds). */
   scopedOnly?: boolean;
   allowAdd?: boolean;
+  /** Called after a custom value is added (e.g. auto-map new PR department to creator). */
+  onCustomAdd?: (value: string) => void | Promise<void>;
 };
 
 export function TermSelect({
@@ -29,6 +31,7 @@ export function TermSelect({
   required,
   scopedOnly = false,
   allowAdd = true,
+  onCustomAdd,
 }: Props) {
   const [extras, setExtras] = useState<string[]>([]);
   const merged = useMemo(() => {
@@ -38,11 +41,16 @@ export function TermSelect({
     return optionsWithCurrent([...options, ...extras], value);
   }, [options, extras, value, scopedOnly, allowAdd]);
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     const next = promptNewValue(placeholder.replace(/^Select\s/i, "").replace(/…$/, "") || "value");
     if (!next) return;
     setExtras((prev) => (prev.includes(next) ? prev : [...prev, next]));
     onChange(next);
+    try {
+      await onCustomAdd?.(next);
+    } catch {
+      // Parent surfaces errors; keep the typed value in the form.
+    }
   };
 
   return (

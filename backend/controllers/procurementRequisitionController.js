@@ -8,6 +8,7 @@ const {
   collectDepartmentsFromPr,
   departmentsTitleLabel,
   buildApprovalsForDepartments,
+  ensureDepartmentsMappedToUser,
   userHasApprovalRoleOnPr,
   pendingApprovalsForUser,
   deriveStatusAfterApprovals,
@@ -178,13 +179,16 @@ exports.submit = async (req, res) => {
       });
     }
 
-    const { approvals, missing } = await buildApprovalsForDepartments(company_id, departments);
+    // New departments introduced by the submitter are auto-mapped to them as approver.
+    await ensureDepartmentsMappedToUser(company_id, departments, req.user);
+
+    let { approvals, missing } = await buildApprovalsForDepartments(company_id, departments);
     if (missing.length) {
       return res.status(400).json({
         success: false,
-        message: `No approver is configured for department(s): ${missing
+        message: `No active approver user for department(s): ${missing
           .map((d) => `"${d}"`)
-          .join(", ")}. Ask a Procurement Admin to map them under PR Approvers.`,
+          .join(", ")}. Ensure your account email is active, or ask a Procurement Admin to map them under PR Approvers.`,
       });
     }
 

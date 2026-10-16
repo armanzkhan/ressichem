@@ -563,6 +563,16 @@ export const procurementApi = {
     }>("/api/procurement/department-approvers"),
   listPrDepartments: () =>
     request<{ success: boolean; data: string[] }>("/api/procurement/department-approvers/departments"),
+  /** Map a newly typed department to the current user as its approver (if not already mapped). */
+  ensureDepartmentMappedToMe: (department: string) =>
+    request<{
+      success: boolean;
+      message?: string;
+      data?: { department: string; approverEmail: string; created: boolean };
+    }>("/api/procurement/department-approvers/ensure-self", {
+      method: "POST",
+      body: JSON.stringify({ department }),
+    }),
   createDepartmentApprover: (body: {
     department: string;
     approverEmail: string;
