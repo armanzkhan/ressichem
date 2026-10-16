@@ -132,7 +132,7 @@ async function run() {
 
     const permId = (k) => perms.find((p) => p.key === k)?._id;
 
-    // Requester: create PRs + view PR status only (items.read needed to pick catalog lines)
+    // Requester: create PRs + view PR status (items.read/create to pick or add catalog lines)
     await ensureRole({
       companyId,
       name: "Procurement User",
@@ -142,6 +142,7 @@ async function run() {
         permId("procurement.access"),
         permId("procurement.dashboard.read"),
         permId("procurement.items.read"),
+        permId("procurement.items.create"),
         permId("procurement.requisitions.read"),
         permId("procurement.requisitions.create"),
         permId("procurement.requisitions.update"),
@@ -202,6 +203,7 @@ async function run() {
         permId("procurement.access"),
         permId("procurement.dashboard.read"),
         permId("procurement.items.read"),
+        permId("procurement.items.create"),
         permId("procurement.requisitions.read"),
         permId("procurement.requisitions.create"),
         permId("procurement.requisitions.update"),

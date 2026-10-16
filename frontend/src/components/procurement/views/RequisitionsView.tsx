@@ -116,11 +116,12 @@ export function RequisitionsView({ section }: Props) {
     accessLevel !== "approver" &&
     accessLevel !== "creator_approver";
   const canCreate = accessLevel !== "viewer" && accessLevel !== "approver";
+  // Requesters (and Requester & Approver) may create catalog items while raising a PR
   const canQuickAddItem =
-    accessLevel !== "user" &&
-    accessLevel !== "viewer" &&
-    accessLevel !== "approver" &&
-    accessLevel !== "creator_approver";
+    accessLevel === "user" ||
+    accessLevel === "creator_approver" ||
+    accessLevel === "buyer" ||
+    accessLevel === "admin";
   const canConvertToPo = accessLevel === "buyer" || accessLevel === "admin";
   const [viewingRow, setViewingRow] = useState<PurchaseDocument | null>(null);
   const [reviewAction, setReviewAction] = useState<{

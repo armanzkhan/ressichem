@@ -21,6 +21,7 @@ const PERM_KEYS = [
   "procurement.access",
   "procurement.dashboard.read",
   "procurement.items.read",
+  "procurement.items.create",
   "procurement.requisitions.read",
   "procurement.requisitions.create",
   "procurement.requisitions.update",
