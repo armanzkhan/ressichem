@@ -49,9 +49,11 @@ exports.list = async (req, res) => {
     if (status) query.status = status;
     if (purchaseType) query.purchaseType = purchaseType;
 
-    // Approvers (non-admin) only see PRs where they are an assigned department approver.
+    // Non-admin approvers see PRs assigned to them for approval AND PRs they created
+    // (Requester & Approver dual role must still see own drafts/submissions).
     if (canApproveRequisitions(req.user) && !isProcurementAdminUser(req.user)) {
       query.$or = [
+        { requestedBy: req.user._id },
         { assignedApprover: req.user._id },
         { "approvals.approver": req.user._id },
       ];
@@ -66,6 +68,13 @@ exports.list = async (req, res) => {
   }
 };
 
+function userCanViewPr(req, pr) {
+  if (isProcurementAdminUser(req.user)) return true;
+  if (String(pr.requestedBy?._id || pr.requestedBy) === String(req.user._id)) return true;
+  if (!canApproveRequisitions(req.user)) return true;
+  return userHasApprovalRoleOnPr(req.user, pr);
+}
+
 exports.getById = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
@@ -74,10 +83,8 @@ exports.getById = async (req, res) => {
     ).populate("supplier", "supplierCode name defaultCurrency");
     if (!data) return res.status(404).json({ success: false, message: "Requisition not found" });
 
-    if (canApproveRequisitions(req.user) && !isProcurementAdminUser(req.user)) {
-      if (!userHasApprovalRoleOnPr(req.user, data)) {
-        return res.status(403).json({ success: false, message: "This PR is assigned to another approver" });
-      }
+    if (!userCanViewPr(req, data)) {
+      return res.status(403).json({ success: false, message: "This PR is assigned to another approver" });
     }
 
     return res.json({ success: true, data });
