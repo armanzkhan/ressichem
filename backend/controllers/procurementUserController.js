@@ -17,23 +17,13 @@ function makeUserId() {
   return `user_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-async function ensureRoleId(company_id, roleName) {
-  const role = await Role.findOne({ company_id, name: roleName }).select("_id name").lean();
-  if (!role) throw new Error(`Role not found: ${roleName} (company ${company_id})`);
-  return role._id;
-}
-
-async function loadRoleWithPermissions(company_id, roleName) {
+/** Copy role permission IDs onto the user so JWT + checks stay aligned. */
+async function permissionIdsForRole(company_id, roleName) {
   const role = await Role.findOne({ company_id, name: roleName })
     .populate("permissions", "key")
     .lean();
   if (!role) throw new Error(`Role not found: ${roleName} (company ${company_id})`);
-  return role;
-}
 
-/** Copy role permission IDs onto the user so JWT + checks stay aligned. */
-async function permissionIdsForRole(company_id, roleName) {
-  const role = await loadRoleWithPermissions(company_id, roleName);
   const ids = (role.permissions || []).map((p) => p._id || p).filter(Boolean);
   // Safety: any PR-creating role must also carry items.create/read
   const keys = new Set((role.permissions || []).map((p) => p.key).filter(Boolean));
@@ -49,14 +39,6 @@ async function permissionIdsForRole(company_id, roleName) {
     }
   }
   return { roleId: role._id, permissionIds: ids };
-}
-
-async function ensurePermissionIds(company_id, keys) {
-  const perms = await Permission.find({ company_id, key: { $in: keys } }).select("_id key").lean();
-  const found = new Set(perms.map((p) => p.key));
-  const missing = keys.filter((k) => !found.has(k));
-  if (missing.length) throw new Error(`Missing permissions: ${missing.join(", ")}`);
-  return perms.map((p) => p._id);
 }
 
 function procurementUserQuery(company_id, userId) {
