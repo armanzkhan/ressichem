@@ -3,17 +3,9 @@ const PurchaseOrder = require("../models/PurchaseOrder");
 const { getCompanyId } = require("../utils/procurementHelpers");
 const { canApproveRequisitions, isProcurementAdminUser } = require("../utils/procurementPrRouting");
 const { buildPrReportExportBuffer } = require("../utils/procurementPrReportExport");
+const { enrichPrsWithFulfillment } = require("../utils/procurementPrFulfillment");
 
 const USER_AUDIT_FIELDS = "firstName lastName email role";
-
-const PO_STATUS_RANK = {
-  received: 6,
-  partial: 5,
-  issued: 4,
-  closed: 3,
-  draft: 2,
-  cancelled: 1,
-};
 
 function parseMonthYear(query = {}) {
   const now = new Date();
@@ -35,18 +27,21 @@ function parseMonthYear(query = {}) {
 function buildQuery(req) {
   const company_id = getCompanyId(req);
   const { year, month, start, end } = parseMonthYear(req.query);
-  const { status, department, purchaseType, dateField = "createdAt" } = req.query;
+  const { status, department, purchaseType, location, followUpStatus, dateField = "createdAt" } = req.query;
 
   const allowedDateFields = new Set(["createdAt", "submittedAt", "approvedAt"]);
   const field = allowedDateFields.has(String(dateField)) ? String(dateField) : "createdAt";
 
   const query = {
     company_id,
+    isActive: { $ne: false },
     [field]: { $gte: start, $lt: end },
   };
 
   if (status) query.status = String(status).trim().toLowerCase();
   if (department) query.title = String(department).trim();
+  if (location) query.location = String(location).trim();
+  if (followUpStatus) query.followUpStatus = String(followUpStatus).trim();
   if (purchaseType === "local" || purchaseType === "foreign") {
     query.purchaseType = purchaseType;
   }
@@ -57,81 +52,6 @@ function buildQuery(req) {
   }
 
   return { query, year, month, dateField: field };
-}
-
-function sumLineQtys(items = []) {
-  let ordered = 0;
-  let received = 0;
-  for (const line of items) {
-    ordered += Number(line.quantity) || 0;
-    received += Number(line.receivedQuantity) || 0;
-  }
-  return { ordered, received };
-}
-
-function pickLinkedPo(pos = []) {
-  if (!pos.length) return null;
-  return [...pos].sort((a, b) => {
-    const rankDiff = (PO_STATUS_RANK[b.status] || 0) - (PO_STATUS_RANK[a.status] || 0);
-    if (rankDiff !== 0) return rankDiff;
-    return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
-  })[0];
-}
-
-/**
- * Stock/fulfillment is tracked on the PO after PR approval — not on the PR itself.
- * Map linked PO + received quantities into a report-friendly stockStatus.
- */
-function deriveStockFulfillment(pr, po) {
-  const prStatus = String(pr.status || "").toLowerCase();
-  if (prStatus !== "approved") {
-    return {
-      stockStatus: "n_a",
-      poId: null,
-      poNumber: "",
-      poStatus: "",
-      qtyOrdered: 0,
-      qtyReceived: 0,
-    };
-  }
-
-  if (!po) {
-    return {
-      stockStatus: "awaiting_po",
-      poId: null,
-      poNumber: "",
-      poStatus: "",
-      qtyOrdered: 0,
-      qtyReceived: 0,
-    };
-  }
-
-  const { ordered, received } = sumLineQtys(po.items);
-  const poStatus = String(po.status || "draft").toLowerCase();
-  let stockStatus = poStatus;
-
-  if (poStatus === "cancelled") {
-    stockStatus = "cancelled";
-  } else if (poStatus === "closed") {
-    stockStatus = "closed";
-  } else if (poStatus === "received" || (ordered > 0 && received >= ordered)) {
-    stockStatus = "received";
-  } else if (poStatus === "partial" || received > 0) {
-    stockStatus = "partial";
-  } else if (poStatus === "issued") {
-    stockStatus = "issued";
-  } else if (poStatus === "draft") {
-    stockStatus = "po_draft";
-  }
-
-  return {
-    stockStatus,
-    poId: po._id,
-    poNumber: po.poNumber || "",
-    poStatus,
-    qtyOrdered: ordered,
-    qtyReceived: received,
-  };
 }
 
 function buildSummary(rows = []) {
@@ -155,6 +75,7 @@ function buildSummary(rows = []) {
     cancelled: 0,
   };
   const byDepartment = {};
+  const byLocation = {};
 
   for (const row of rows) {
     const status = String(row.status || "draft").toLowerCase();
@@ -164,6 +85,8 @@ function buildSummary(rows = []) {
     else byStock[stock] = (byStock[stock] || 0) + 1;
     const dept = row.title || "Unspecified";
     byDepartment[dept] = (byDepartment[dept] || 0) + 1;
+    const loc = String(row.location || "").trim() || "Unspecified";
+    byLocation[loc] = (byLocation[loc] || 0) + 1;
   }
 
   return {
@@ -171,39 +94,15 @@ function buildSummary(rows = []) {
     byStatus,
     byStock,
     byDepartment,
+    byLocation,
     pending: byStatus.submitted + byStatus.held,
     awaitingReceipt: byStock.awaiting_po + byStock.po_draft + byStock.issued,
     partiallyReceived: byStock.partial,
     fullyReceived: byStock.received + byStock.closed,
+    purchased: byStock.issued || 0,
+    partiallyDelivered: byStock.partial || 0,
+    completed: (byStock.received || 0) + (byStock.closed || 0),
   };
-}
-
-async function enrichWithPurchaseOrders(company_id, rows = []) {
-  if (!rows.length) return rows;
-
-  const prIds = rows.map((r) => r._id).filter(Boolean);
-  const pos = await PurchaseOrder.find({
-    company_id,
-    requisition: { $in: prIds },
-  })
-    .select("poNumber status items requisition updatedAt")
-    .lean();
-
-  const byPr = new Map();
-  for (const po of pos) {
-    const key = String(po.requisition);
-    if (!byPr.has(key)) byPr.set(key, []);
-    byPr.get(key).push(po);
-  }
-
-  return rows.map((pr) => {
-    const linked = pickLinkedPo(byPr.get(String(pr._id)) || []);
-    const fulfillment = deriveStockFulfillment(pr, linked);
-    return {
-      ...pr,
-      ...fulfillment,
-    };
-  });
 }
 
 async function loadReportRows(req) {
@@ -219,11 +118,12 @@ async function loadReportRows(req) {
     .populate("approvedBy", USER_AUDIT_FIELDS)
     .populate("rejectedBy", USER_AUDIT_FIELDS)
     .populate("heldBy", USER_AUDIT_FIELDS)
+    .populate("followUpBy", USER_AUDIT_FIELDS)
     .sort({ [dateField]: -1, createdAt: -1 })
     .lean();
 
   const company_id = getCompanyId(req);
-  rows = await enrichWithPurchaseOrders(company_id, rows);
+  rows = await enrichPrsWithFulfillment(PurchaseOrder, company_id, rows);
 
   if (stockFilter) {
     rows = rows.filter((r) => String(r.stockStatus || "").toLowerCase() === stockFilter);

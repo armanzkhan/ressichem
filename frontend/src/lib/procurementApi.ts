@@ -223,9 +223,18 @@ export type PurchaseDocument = {
   rejectedAt?: string;
   heldBy?: ProcurementUser | string;
   heldAt?: string;
-  /** Linked PO / stock fulfillment (PR monthly report enrichment). */
+  /** Optional site/plant for location-wise reports */
+  location?: string;
+  followUpStatus?: "" | "open" | "in_progress" | "done" | string;
+  followUpNote?: string;
+  followUpBy?: ProcurementUser | string;
+  followUpAt?: string;
+  /** Linked PO / stock fulfillment (derived; does not replace PR status). */
   stockStatus?: string;
+  fulfillmentStatus?: string;
+  fulfillmentLabel?: string;
   poId?: string | null;
+  poNumber?: string;
   poStatus?: string;
   qtyOrdered?: number;
   qtyReceived?: number;
@@ -645,10 +654,19 @@ export const procurementApi = {
     request(`/api/procurement/prices/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deletePrice: (id: string) => request(`/api/procurement/prices/${id}`, { method: "DELETE" }),
 
-  listRequisitions: (params?: { status?: string; purchaseType?: string }) => {
+  listRequisitions: (params?: {
+    status?: string;
+    purchaseType?: string;
+    location?: string;
+    followUpStatus?: string;
+    fulfillmentStatus?: string;
+  }) => {
     const sp = new URLSearchParams();
     if (params?.status) sp.set("status", params.status);
     if (params?.purchaseType) sp.set("purchaseType", params.purchaseType);
+    if (params?.location) sp.set("location", params.location);
+    if (params?.followUpStatus) sp.set("followUpStatus", params.followUpStatus);
+    if (params?.fulfillmentStatus) sp.set("fulfillmentStatus", params.fulfillmentStatus);
     const q = sp.toString() ? `?${sp}` : "";
     return request<{ success: boolean; data: PurchaseDocument[] }>(`/api/procurement/requisitions${q}`);
   },
@@ -658,6 +676,14 @@ export const procurementApi = {
     request<{ success: boolean; data: PurchaseDocument }>(`/api/procurement/requisitions/${id}`),
   updateRequisition: (id: string, body: Record<string, unknown>) =>
     request(`/api/procurement/requisitions/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  updateRequisitionFollowUp: (
+    id: string,
+    body: { followUpStatus?: string; followUpNote?: string; location?: string }
+  ) =>
+    request<{ success: boolean; data: PurchaseDocument; message?: string }>(
+      `/api/procurement/requisitions/${id}/follow-up`,
+      { method: "PATCH", body: JSON.stringify(body) }
+    ),
   submitRequisition: (id: string) =>
     request(`/api/procurement/requisitions/${id}/submit`, { method: "POST" }),
   deleteRequisition: (id: string) =>
@@ -689,6 +715,8 @@ export const procurementApi = {
     status?: string;
     stockStatus?: string;
     department?: string;
+    location?: string;
+    followUpStatus?: string;
     dateField?: "createdAt" | "submittedAt" | "approvedAt";
   }) => {
     const sp = new URLSearchParams();
@@ -698,6 +726,8 @@ export const procurementApi = {
     if (params.status) sp.set("status", params.status);
     if (params.stockStatus) sp.set("stockStatus", params.stockStatus);
     if (params.department) sp.set("department", params.department);
+    if (params.location) sp.set("location", params.location);
+    if (params.followUpStatus) sp.set("followUpStatus", params.followUpStatus);
     if (params.dateField) sp.set("dateField", params.dateField);
     return request<{
       success: boolean;
@@ -711,9 +741,13 @@ export const procurementApi = {
           awaitingReceipt?: number;
           partiallyReceived?: number;
           fullyReceived?: number;
+          purchased?: number;
+          partiallyDelivered?: number;
+          completed?: number;
           byStatus: Record<string, number>;
           byStock?: Record<string, number>;
           byDepartment: Record<string, number>;
+          byLocation?: Record<string, number>;
         };
         rows: PurchaseDocument[];
       };
@@ -727,6 +761,8 @@ export const procurementApi = {
     status?: string;
     stockStatus?: string;
     department?: string;
+    location?: string;
+    followUpStatus?: string;
     dateField?: "createdAt" | "submittedAt" | "approvedAt";
     format?: "xlsx" | "csv";
   }) => {
@@ -738,6 +774,8 @@ export const procurementApi = {
     if (params.status) sp.set("status", params.status);
     if (params.stockStatus) sp.set("stockStatus", params.stockStatus);
     if (params.department) sp.set("department", params.department);
+    if (params.location) sp.set("location", params.location);
+    if (params.followUpStatus) sp.set("followUpStatus", params.followUpStatus);
     if (params.dateField) sp.set("dateField", params.dateField);
     return `/api/procurement/requisitions/report/monthly/export?${sp}`;
   },

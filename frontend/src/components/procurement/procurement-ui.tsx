@@ -300,7 +300,7 @@ export function Field({
   );
 }
 
-export function StatusBadge({ status }: { status: string }) {
+export function StatusBadge({ status, label: labelOverride }: { status: string; label?: string }) {
   const styles: Record<string, string> = {
     draft: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
     submitted: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-200",
@@ -321,6 +321,9 @@ export function StatusBadge({ status }: { status: string }) {
     partially_paid: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
     awaiting_po: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
     po_draft: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
+    open: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+    in_progress: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-200",
+    done: "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-200",
     n_a: "bg-transparent text-slate-400 dark:text-slate-500",
   };
   const labels: Record<string, string> = {
@@ -331,10 +334,13 @@ export function StatusBadge({ status }: { status: string }) {
     partial: "partially received",
     received: "fully received",
     partially_approved: "partially approved",
+    open: "follow-up open",
+    in_progress: "in progress",
+    done: "done",
     n_a: "—",
   };
   const key = String(status || "draft");
-  const label = labels[key] || key.replace(/_/g, " ");
+  const label = labelOverride || labels[key] || key.replace(/_/g, " ");
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${styles[key] || styles.draft}`}>
       {label}

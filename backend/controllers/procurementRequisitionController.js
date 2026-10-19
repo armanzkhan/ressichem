@@ -18,6 +18,8 @@ const {
   approvalApproverId,
 } = require("../utils/procurementPrApprovals");
 const procurementPrNotificationService = require("../services/procurementPrNotificationService");
+const PurchaseOrder = require("../models/PurchaseOrder");
+const { enrichPrsWithFulfillment } = require("../utils/procurementPrFulfillment");
 
 const USER_AUDIT_FIELDS = "firstName lastName email role";
 
@@ -30,7 +32,8 @@ function populateRequisitionAudit(query) {
     .populate("approvals.approver", USER_AUDIT_FIELDS)
     .populate("approvedBy", USER_AUDIT_FIELDS)
     .populate("rejectedBy", USER_AUDIT_FIELDS)
-    .populate("heldBy", USER_AUDIT_FIELDS);
+    .populate("heldBy", USER_AUDIT_FIELDS)
+    .populate("followUpBy", USER_AUDIT_FIELDS);
 }
 
 function assertCanActOnPr(req, pr) {
@@ -46,10 +49,12 @@ function syncTitleFromItems(items, fallbackTitle) {
 exports.list = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
-    const { status, purchaseType } = req.query;
+    const { status, purchaseType, location, followUpStatus, fulfillmentStatus } = req.query;
     const query = { company_id, isActive: { $ne: false } };
     if (status) query.status = status;
     if (purchaseType) query.purchaseType = purchaseType;
+    if (location) query.location = String(location).trim();
+    if (followUpStatus) query.followUpStatus = String(followUpStatus).trim();
 
     // Non-admin approvers see PRs assigned to them for approval AND PRs they created
     // (Requester & Approver dual role must still see own drafts/submissions).
@@ -61,9 +66,20 @@ exports.list = async (req, res) => {
       ];
     }
 
-    const data = await populateRequisitionAudit(PurchaseRequisition.find(query))
+    let data = await populateRequisitionAudit(PurchaseRequisition.find(query))
       .sort({ createdAt: -1 })
       .lean();
+
+    // Additive enrichment — never mutates PR.status
+    data = await enrichPrsWithFulfillment(PurchaseOrder, company_id, data);
+
+    const fulfillmentFilter = String(fulfillmentStatus || "")
+      .trim()
+      .toLowerCase();
+    if (fulfillmentFilter) {
+      data = data.filter((r) => String(r.fulfillmentStatus || r.stockStatus || "").toLowerCase() === fulfillmentFilter);
+    }
+
     return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -89,7 +105,10 @@ exports.getById = async (req, res) => {
       return res.status(403).json({ success: false, message: "This PR is assigned to another approver" });
     }
 
-    return res.json({ success: true, data });
+    const [enriched] = await enrichPrsWithFulfillment(PurchaseOrder, company_id, [
+      data.toObject ? data.toObject() : data,
+    ]);
+    return res.json({ success: true, data: enriched || data });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -104,7 +123,6 @@ exports.create = async (req, res) => {
     const taxAmount = Number(body.taxAmount) || 0;
     const title = syncTitleFromItems(items, body.title);
     const data = await PurchaseRequisition.create({
-      ...body,
       company_id,
       requisitionNumber,
       title,
@@ -113,6 +131,12 @@ exports.create = async (req, res) => {
       taxAmount,
       total: Math.round((subtotal + taxAmount) * 100) / 100,
       status: body.status || "draft",
+      purchaseType: body.purchaseType || "foreign",
+      currency: body.currency || "USD",
+      exchangeRate: body.exchangeRate || 1,
+      notes: body.notes || "",
+      supplier: body.supplier || undefined,
+      location: String(body.location || "").trim(),
       requestedBy: req.user?._id,
       approvals: [],
     });
@@ -150,10 +174,60 @@ exports.update = async (req, res) => {
     } else if (body.title != null) {
       updates.title = String(body.title).trim();
     }
+    if (body.location !== undefined) {
+      updates.location = String(body.location || "").trim();
+    }
     const data = await populateRequisitionAudit(
       PurchaseRequisition.findByIdAndUpdate(req.params.id, updates, { new: true })
     );
     return res.json({ success: true, data });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/**
+ * Additive follow-up update for pending/on-hold (and any visible PR).
+ * Does not change approval status or line items.
+ */
+exports.updateFollowUp = async (req, res) => {
+  try {
+    const company_id = getCompanyId(req);
+    const existing = await PurchaseRequisition.findOne({
+      _id: req.params.id,
+      company_id,
+      isActive: { $ne: false },
+    });
+    if (!existing) return res.status(404).json({ success: false, message: "Requisition not found" });
+    if (!userCanViewPr(req, existing)) {
+      return res.status(403).json({ success: false, message: "Not allowed to update follow-up on this PR" });
+    }
+
+    const body = req.body || {};
+    const allowed = new Set(["", "open", "in_progress", "done"]);
+    const followUpStatus = body.followUpStatus !== undefined ? String(body.followUpStatus || "") : existing.followUpStatus;
+    if (!allowed.has(followUpStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "followUpStatus must be one of: (empty), open, in_progress, done",
+      });
+    }
+
+    const updates = {
+      followUpStatus,
+      followUpNote:
+        body.followUpNote !== undefined ? String(body.followUpNote || "").trim() : existing.followUpNote || "",
+      followUpBy: req.user?._id,
+      followUpAt: new Date(),
+    };
+    if (body.location !== undefined) {
+      updates.location = String(body.location || "").trim();
+    }
+
+    const data = await populateRequisitionAudit(
+      PurchaseRequisition.findByIdAndUpdate(existing._id, updates, { new: true })
+    );
+    return res.json({ success: true, data, message: "Follow-up updated" });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }

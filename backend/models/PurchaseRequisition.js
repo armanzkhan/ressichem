@@ -52,6 +52,22 @@ const purchaseRequisitionSchema = new mongoose.Schema(
     holdReason: { type: String, default: "" },
     submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     submittedAt: { type: Date },
+    /**
+     * Optional site / plant location for location-wise reports.
+     * Empty on existing records — does not affect approval workflow.
+     */
+    location: { type: String, default: "", trim: true, index: true },
+    /**
+     * Optional follow-up for pending / on-hold PRs (additive; never blocks submit/approve).
+     */
+    followUpStatus: {
+      type: String,
+      enum: ["", "open", "in_progress", "done"],
+      default: "",
+    },
+    followUpNote: { type: String, default: "" },
+    followUpBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    followUpAt: { type: Date },
     /** Soft-delete flag — inactive rows are hidden from lists */
     isActive: { type: Boolean, default: true, index: true },
     deletedAt: { type: Date },

@@ -206,6 +206,64 @@ async function notifyPrHeld(pr, approver, reason) {
   });
 }
 
+/** Purchase intimation: PO issued against the requester's PR */
+async function notifyPrPurchased(pr, actor, po) {
+  const targetId = requesterMongoId(pr);
+  if (!targetId) return null;
+  const poNumber = po?.poNumber || "PO";
+  return notifyProcurementUser({
+    company_id: pr.company_id,
+    targetMongoUserId: targetId,
+    title: "Items purchased for your PR",
+    message: `${prLabel(pr)}: purchase order ${poNumber} has been issued. Your requested items are now purchased.`,
+    type: "success",
+    priority: "high",
+    sender: actor,
+    data: {
+      entityId: String(pr._id),
+      requisitionNumber: pr.requisitionNumber,
+      poNumber,
+      poId: po?._id ? String(po._id) : "",
+      action: "purchased",
+      audience: "requester",
+      purchaseType: pr.purchaseType,
+      url: prListPath(pr),
+    },
+    actions: [{ label: "View PR", action: "view", url: prListPath(pr) }],
+  });
+}
+
+/** Delivery update: partial or full receipt against linked PO */
+async function notifyPrDeliveryUpdate(pr, actor, po) {
+  const targetId = requesterMongoId(pr);
+  if (!targetId) return null;
+  const poNumber = po?.poNumber || "PO";
+  const poStatus = String(po?.status || "").toLowerCase();
+  const isComplete = poStatus === "received" || poStatus === "closed";
+  return notifyProcurementUser({
+    company_id: pr.company_id,
+    targetMongoUserId: targetId,
+    title: isComplete ? "PR delivery completed" : "PR partially delivered",
+    message: isComplete
+      ? `${prLabel(pr)}: goods for ${poNumber} are fully received (completed).`
+      : `${prLabel(pr)}: partial delivery posted against ${poNumber}.`,
+    type: "info",
+    priority: "medium",
+    sender: actor,
+    data: {
+      entityId: String(pr._id),
+      requisitionNumber: pr.requisitionNumber,
+      poNumber,
+      poId: po?._id ? String(po._id) : "",
+      action: isComplete ? "completed" : "partially_delivered",
+      audience: "requester",
+      purchaseType: pr.purchaseType,
+      url: prListPath(pr),
+    },
+    actions: [{ label: "View PR", action: "view", url: prListPath(pr) }],
+  });
+}
+
 module.exports = {
   notifyPrSubmitted,
   notifyPrSubmittedToApprovers,
@@ -213,4 +271,6 @@ module.exports = {
   notifyPrPartiallyApproved,
   notifyPrRejected,
   notifyPrHeld,
+  notifyPrPurchased,
+  notifyPrDeliveryUpdate,
 };

@@ -23,6 +23,11 @@ router.post(
 router.get("/:id", permissionMiddleware(["procurement.requisitions.read"]), ctrl.getById);
 router.post("/", permissionMiddleware(["procurement.requisitions.create"]), ctrl.create);
 router.put("/:id", permissionMiddleware(["procurement.requisitions.update"]), ctrl.update);
+router.patch(
+  "/:id/follow-up",
+  permissionMiddleware(["procurement.requisitions.read"]),
+  ctrl.updateFollowUp
+);
 router.post("/:id/submit", permissionMiddleware(["procurement.requisitions.update"]), ctrl.submit);
 router.post("/:id/approve", permissionMiddleware(["procurement.requisitions.approve"]), ctrl.approve);
 router.post("/:id/reject", permissionMiddleware(["procurement.requisitions.approve"]), ctrl.reject);

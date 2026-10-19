@@ -58,6 +58,7 @@ export function PrReportsView({ section }: Props) {
   const [status, setStatus] = useState("");
   const [stockStatus, setStockStatus] = useState("");
   const [department, setDepartment] = useState("");
+  const [location, setLocation] = useState("");
   const [dateField, setDateField] = useState<"createdAt" | "submittedAt" | "approvedAt">("createdAt");
   const [rows, setRows] = useState<PurchaseDocument[]>([]);
   const [summary, setSummary] = useState<{
@@ -66,9 +67,13 @@ export function PrReportsView({ section }: Props) {
     awaitingReceipt?: number;
     partiallyReceived?: number;
     fullyReceived?: number;
+    purchased?: number;
+    partiallyDelivered?: number;
+    completed?: number;
     byStatus: Record<string, number>;
     byStock?: Record<string, number>;
     byDepartment: Record<string, number>;
+    byLocation?: Record<string, number>;
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -90,6 +95,7 @@ export function PrReportsView({ section }: Props) {
         status: status || undefined,
         stockStatus: stockStatus || undefined,
         department: department || undefined,
+        location: location || undefined,
         dateField,
       });
       setRows(res.data?.rows || []);
@@ -101,7 +107,7 @@ export function PrReportsView({ section }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [year, month, status, stockStatus, department, dateField, section]);
+  }, [year, month, status, stockStatus, department, location, dateField, section]);
 
   useEffect(() => {
     void load();
@@ -118,6 +124,7 @@ export function PrReportsView({ section }: Props) {
         status: status || undefined,
         stockStatus: stockStatus || undefined,
         department: department || undefined,
+        location: location || undefined,
         dateField,
         format,
       });
@@ -144,8 +151,9 @@ export function PrReportsView({ section }: Props) {
       {error ? <Alert message={error} /> : null}
 
       <p className="mb-3 text-sm text-blue-700 dark:text-blue-300">
-        PR status is approval only. Stock columns come from the linked purchase order after approval
-        (awaiting PO → issued → partially / fully received).
+        Approval status stays on the PR. Purchase / delivery is derived from the linked PO (awaiting
+        purchase → purchased → partially delivered → completed). Location is optional for site-wise
+        filtering.
       </p>
 
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
@@ -207,19 +215,19 @@ export function PrReportsView({ section }: Props) {
           </select>
         </FormLabel>
         <FormLabel>
-          Stock status
+          Purchase / delivery
           <select
             className={`mt-1 ${procurementControlClass}`}
             value={stockStatus}
             onChange={(e) => setStockStatus(e.target.value)}
           >
-            <option value="">All stock statuses</option>
-            <option value="awaiting_po">Awaiting PO</option>
+            <option value="">All purchase / delivery</option>
+            <option value="awaiting_po">Awaiting purchase</option>
             <option value="po_draft">PO draft</option>
-            <option value="issued">Awaiting receipt</option>
-            <option value="partial">Partially received</option>
-            <option value="received">Fully received</option>
-            <option value="closed">Closed</option>
+            <option value="issued">Purchased</option>
+            <option value="partial">Partially delivered</option>
+            <option value="received">Completed</option>
+            <option value="closed">Completed (closed)</option>
             <option value="n_a">N/A (not approved)</option>
           </select>
         </FormLabel>
@@ -237,6 +245,23 @@ export function PrReportsView({ section }: Props) {
               </option>
             ))}
           </select>
+        </FormLabel>
+        <FormLabel>
+          Location
+          <input
+            className={`mt-1 ${procurementControlClass}`}
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="Filter by location / site"
+            list="pr-report-locations"
+          />
+          <datalist id="pr-report-locations">
+            {Object.keys(summary?.byLocation || {})
+              .filter((loc) => loc && loc !== "Unspecified")
+              .map((loc) => (
+                <option key={loc} value={loc} />
+              ))}
+          </datalist>
         </FormLabel>
       </section>
 
@@ -277,11 +302,14 @@ export function PrReportsView({ section }: Props) {
           </section>
           <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
             {[
+              { label: "Awaiting purchase", value: summary.byStock?.awaiting_po || 0 },
+              { label: "Purchased", value: summary.purchased ?? summary.byStock?.issued ?? 0 },
+              {
+                label: "Partially delivered",
+                value: summary.partiallyDelivered ?? summary.partiallyReceived ?? 0,
+              },
+              { label: "Completed", value: summary.completed ?? summary.fullyReceived ?? 0 },
               { label: "Awaiting PO / receipt", value: summary.awaitingReceipt || 0 },
-              { label: "Partially received", value: summary.partiallyReceived || 0 },
-              { label: "Fully received", value: summary.fullyReceived || 0 },
-              { label: "Awaiting PO", value: summary.byStock?.awaiting_po || 0 },
-              { label: "PO issued (no GRN)", value: summary.byStock?.issued || 0 },
             ].map((card) => (
               <div
                 key={card.label}
@@ -292,6 +320,23 @@ export function PrReportsView({ section }: Props) {
               </div>
             ))}
           </section>
+          {summary.byLocation && Object.keys(summary.byLocation).length > 0 ? (
+            <section className="mb-4">
+              <p className="text-xs font-medium text-blue-800 dark:text-blue-200 mb-2">By location</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(summary.byLocation).map(([loc, count]) => (
+                  <button
+                    key={loc}
+                    type="button"
+                    className="rounded-lg border border-blue-100 bg-white px-3 py-1.5 text-xs text-blue-800 dark:border-slate-700 dark:bg-slate-900 dark:text-blue-100"
+                    onClick={() => setLocation(loc === "Unspecified" ? "" : loc)}
+                  >
+                    {loc}: <strong>{count}</strong>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
         </>
       ) : null}
 
@@ -302,10 +347,12 @@ export function PrReportsView({ section }: Props) {
           headers={[
             "PR #",
             "Department",
+            "Location",
             "PR status",
             "PO #",
-            "Stock",
+            "Purchase / delivery",
             "Recv / Ord",
+            "Follow-up",
             "Created",
             "Submitted",
             "Requester",
@@ -316,10 +363,16 @@ export function PrReportsView({ section }: Props) {
           rows={rows.map((r) => [
             r.requisitionNumber || "—",
             r.title || "—",
+            r.location || "—",
             <StatusBadge key={`st-${r._id}`} status={r.status} />,
             r.poNumber || "—",
-            <StatusBadge key={`stock-${r._id}`} status={r.stockStatus || "n_a"} />,
+            <StatusBadge
+              key={`stock-${r._id}`}
+              status={r.stockStatus || "n_a"}
+              label={r.fulfillmentLabel || undefined}
+            />,
             qtyPair(r),
+            r.followUpStatus ? <StatusBadge key={`fu-${r._id}`} status={r.followUpStatus} /> : "—",
             procurementDateTime(r.createdAt),
             procurementDateTime(r.submittedAt),
             userLabel(r.requestedBy || r.submittedBy),

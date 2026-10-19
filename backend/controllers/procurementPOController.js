@@ -8,12 +8,23 @@ const {
   normalizeSupplierIds,
 } = require("../services/procurementDocumentService");
 const { canSoftDeleteProcurement } = require("../utils/procurementPrRouting");
+const PurchaseRequisition = require("../models/PurchaseRequisition");
+const procurementPrNotificationService = require("../services/procurementPrNotificationService");
 
 const supplierPopulate =
   "supplierCode name defaultCurrency paymentTerms street city address country mobile phone phoneDialCode taxId banking";
 
 function canDeletePurchaseOrder(user) {
   return canSoftDeleteProcurement(user);
+}
+
+async function loadLinkedPr(po) {
+  const prId = po?.requisition;
+  if (!prId) return null;
+  return PurchaseRequisition.findById(prId)
+    .populate("requestedBy", "firstName lastName email user_id")
+    .populate("submittedBy", "firstName lastName email user_id")
+    .lean();
 }
 
 exports.list = async (req, res) => {
@@ -114,6 +125,15 @@ exports.issue = async (req, res) => {
       { new: true }
     );
     if (!data) return res.status(400).json({ success: false, message: "PO not found or not in draft" });
+
+    // Additive: notify PR requester — does not change PO/PR workflow
+    try {
+      const pr = await loadLinkedPr(data);
+      if (pr) void procurementPrNotificationService.notifyPrPurchased(pr, req.user, data);
+    } catch (notifyErr) {
+      console.error("PO issue purchase notify failed:", notifyErr.message);
+    }
+
     return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -204,6 +224,14 @@ exports.receive = async (req, res) => {
     const populatedPo = await PurchaseOrder.findById(po._id)
       .populate("supplier", supplierPopulate)
       .lean();
+
+    // Additive: notify PR requester of delivery progress
+    try {
+      const pr = await loadLinkedPr(po);
+      if (pr) void procurementPrNotificationService.notifyPrDeliveryUpdate(pr, req.user, populatedPo || po);
+    } catch (notifyErr) {
+      console.error("PO receive delivery notify failed:", notifyErr.message);
+    }
 
     return res.status(201).json({
       success: true,

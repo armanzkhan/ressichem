@@ -27,8 +27,28 @@ import { canProcurementSoftDelete } from "@/lib/procurementAccess";
 
 const emptyForm = () => ({
   title: "",
+  location: "",
   lines: [] as RequisitionLine[],
 });
+
+const PR_STATUS_FILTERS = [
+  { value: "", label: "All approval statuses" },
+  { value: "submitted", label: "Pending (submitted)" },
+  { value: "partially_approved", label: "Partially approved" },
+  { value: "approved", label: "Approved" },
+  { value: "held", label: "On hold" },
+  { value: "rejected", label: "Rejected" },
+  { value: "draft", label: "Draft" },
+];
+
+const FULFILLMENT_FILTERS = [
+  { value: "", label: "All purchase / delivery" },
+  { value: "awaiting_po", label: "Awaiting purchase" },
+  { value: "issued", label: "Purchased" },
+  { value: "partial", label: "Partially delivered" },
+  { value: "received", label: "Completed" },
+  { value: "closed", label: "Completed (closed)" },
+];
 
 function linesToPayload(lines: RequisitionLine[], items: ProcurementItem[]) {
   return lines.map((line) => {
@@ -71,9 +91,14 @@ function approvalProgressLabel(row: PurchaseDocument) {
   return `${done}/${approvals.length}`;
 }
 
-function requisitionToForm(row: PurchaseDocument): { title: string; lines: RequisitionLine[] } {
+function requisitionToForm(row: PurchaseDocument): {
+  title: string;
+  location: string;
+  lines: RequisitionLine[];
+} {
   return {
     title: row.title || "",
+    location: row.location || "",
     lines: (row.items || []).map((item) => ({
       item: typeof item.item === "string" ? item.item : "",
       quantity: String(item.quantity ?? 0),
@@ -138,6 +163,15 @@ export function RequisitionsView({ section }: Props) {
   const [canDelete, setCanDelete] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [fulfillmentFilter, setFulfillmentFilter] = useState("");
+  const [followUpDraft, setFollowUpDraft] = useState<{
+    id: string;
+    status: string;
+    note: string;
+    location: string;
+  } | null>(null);
+  const [followUpSaving, setFollowUpSaving] = useState(false);
 
   useEffect(() => {
     setCanDelete(canProcurementSoftDelete());
@@ -149,6 +183,8 @@ export function RequisitionsView({ section }: Props) {
     try {
       const res = await procurementApi.listRequisitions({
         purchaseType: purchaseTypeForSection(section),
+        status: statusFilter || undefined,
+        fulfillmentStatus: fulfillmentFilter || undefined,
       });
       setRows(filterRequisitionsBySection(res.data || [], section));
       setSelectedIds([]);
@@ -175,7 +211,7 @@ export function RequisitionsView({ section }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [section]);
+  }, [section, statusFilter, fulfillmentFilter]);
 
   useEffect(() => {
     load();
@@ -310,6 +346,7 @@ export function RequisitionsView({ section }: Props) {
         currency: purchaseType === "local" ? "PKR" : "USD",
         exchangeRate: 1,
         taxAmount: 0,
+        location: form.location.trim(),
         items: linesToPayload(form.lines, items),
       };
       if (editingId) await procurementApi.updateRequisition(editingId, body);
@@ -368,6 +405,36 @@ export function RequisitionsView({ section }: Props) {
       onAdd={canCreate ? openCreate : undefined}
     >
       {error ? <Alert message={error} /> : null}
+      <div className="flex flex-wrap items-end gap-3 mb-3">
+        <label className="text-xs text-blue-800 dark:text-blue-200">
+          Approval status
+          <select
+            className={`${procurementFieldClass} mt-1 min-w-[11rem]`}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            {PR_STATUS_FILTERS.map((o) => (
+              <option key={o.value || "all"} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-blue-800 dark:text-blue-200">
+          Purchase / delivery
+          <select
+            className={`${procurementFieldClass} mt-1 min-w-[12rem]`}
+            value={fulfillmentFilter}
+            onChange={(e) => setFulfillmentFilter(e.target.value)}
+          >
+            {FULFILLMENT_FILTERS.map((o) => (
+              <option key={o.value || "all-f"} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       {canDelete && selectedIds.length > 0 ? (
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <p className="text-sm text-blue-700 dark:text-blue-300">{selectedIds.length} selected</p>
@@ -406,23 +473,29 @@ export function RequisitionsView({ section }: Props) {
                   />,
                   "PR #",
                   "Departments",
+                  "Location",
                   "Created",
                   "Created by",
                   "Submitted at",
                   "Approvals",
                   "Assigned to",
                   "Status",
+                  "Purchase / delivery",
+                  "Follow-up",
                   "Actions",
                 ]
               : [
                   "PR #",
                   "Departments",
+                  "Location",
                   "Created",
                   "Created by",
                   "Submitted at",
                   "Approvals",
                   "Assigned to",
                   "Status",
+                  "Purchase / delivery",
+                  "Follow-up",
                   "Actions",
                 ]
           }
@@ -535,6 +608,21 @@ export function RequisitionsView({ section }: Props) {
                     </button>
                   </>
                 ) : null}
+                <button
+                  type="button"
+                  className="text-slate-700 text-xs dark:text-slate-300"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setFollowUpDraft({
+                      id: r._id,
+                      status: r.followUpStatus || (r.status === "held" || r.status === "submitted" ? "open" : ""),
+                      note: r.followUpNote || "",
+                      location: r.location || "",
+                    });
+                  }}
+                >
+                  Follow-up
+                </button>
                 {canDelete ? (
                   <button
                     type="button"
@@ -553,12 +641,23 @@ export function RequisitionsView({ section }: Props) {
             const baseCells = [
               r.requisitionNumber || "—",
               r.title || "—",
+              r.location || "—",
               procurementDateTime(r.createdAt),
               procurementUserLabel(r.requestedBy),
               procurementDateTime(r.submittedAt),
               approvalProgressLabel(r),
               r.assignedApprover ? procurementUserLabel(r.assignedApprover) : "—",
               <StatusBadge key={`st-${r._id}`} status={r.status} />,
+              r.fulfillmentLabel || r.stockStatus ? (
+                <StatusBadge
+                  key={`ff-${r._id}`}
+                  status={r.stockStatus || r.fulfillmentStatus || "n_a"}
+                  label={r.fulfillmentLabel || undefined}
+                />
+              ) : (
+                "—"
+              ),
+              r.followUpStatus ? <StatusBadge key={`fu-${r._id}`} status={r.followUpStatus} /> : "—",
               actionCell,
             ];
 
@@ -582,6 +681,12 @@ export function RequisitionsView({ section }: Props) {
       {showForm ? (
         <Modal title={editingId ? "Edit requisition" : "New requisition"} onClose={() => setShowForm(false)}>
           <form onSubmit={save} className="space-y-4">
+            <Field
+              label="Location / site (optional)"
+              value={form.location}
+              onChange={(location) => setForm({ ...form, location })}
+              placeholder="e.g. Lahore plant, Karachi store"
+            />
             <FormLabel>
               Default department (for new lines)
               <div className="mt-1">
@@ -644,6 +749,10 @@ export function RequisitionsView({ section }: Props) {
               {viewingRow.title || "—"}
             </p>
             <p>
+              <span className="font-medium text-blue-900 dark:text-blue-200">Location:</span>{" "}
+              {viewingRow.location || "—"}
+            </p>
+            <p>
               <span className="font-medium text-blue-900 dark:text-blue-200">Status:</span>{" "}
               <StatusBadge status={viewingRow.status} />
               {viewingRow.approvals?.length ? (
@@ -652,6 +761,28 @@ export function RequisitionsView({ section }: Props) {
                 </span>
               ) : null}
             </p>
+            {viewingRow.fulfillmentLabel || viewingRow.stockStatus ? (
+              <p className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-blue-900 dark:text-blue-200">Purchase / delivery:</span>
+                <StatusBadge
+                  status={viewingRow.stockStatus || viewingRow.fulfillmentStatus || "n_a"}
+                  label={viewingRow.fulfillmentLabel || undefined}
+                />
+                {viewingRow.poNumber ? (
+                  <span className="text-xs">PO {viewingRow.poNumber}</span>
+                ) : null}
+              </p>
+            ) : null}
+            {(viewingRow.followUpStatus || viewingRow.followUpNote) && (
+              <p>
+                <span className="font-medium text-blue-900 dark:text-blue-200">Follow-up:</span>{" "}
+                {viewingRow.followUpStatus ? <StatusBadge status={viewingRow.followUpStatus} /> : null}{" "}
+                {viewingRow.followUpNote || ""}
+                {viewingRow.followUpBy ? (
+                  <span className="text-xs"> · {procurementUserLabel(viewingRow.followUpBy)}</span>
+                ) : null}
+              </p>
+            )}
             {viewingRow.approvals?.length ? (
               <div>
                 <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">Department approvals</p>
@@ -888,6 +1019,78 @@ export function RequisitionsView({ section }: Props) {
                 }}
               >
                 {converting ? "Creating…" : "Create draft PO"}
+              </button>
+            </footer>
+          </div>
+        </Modal>
+      ) : null}
+      {followUpDraft ? (
+        <Modal
+          title="PR follow-up"
+          onClose={() => {
+            setFollowUpDraft(null);
+          }}
+        >
+          <div className="space-y-3">
+            <p className="text-sm text-blue-800 dark:text-blue-100">
+              Track pending / on-hold follow-up without changing approval status.
+            </p>
+            <FormLabel>
+              Follow-up status
+              <select
+                className={`${procurementFieldClass} mt-1`}
+                value={followUpDraft.status}
+                onChange={(e) => setFollowUpDraft({ ...followUpDraft, status: e.target.value })}
+              >
+                <option value="">None</option>
+                <option value="open">Open</option>
+                <option value="in_progress">In progress</option>
+                <option value="done">Done</option>
+              </select>
+            </FormLabel>
+            <Field
+              label="Follow-up note"
+              value={followUpDraft.note}
+              onChange={(note) => setFollowUpDraft({ ...followUpDraft, note })}
+              placeholder="Next action, owner context, deadline…"
+            />
+            <Field
+              label="Location / site"
+              value={followUpDraft.location}
+              onChange={(location) => setFollowUpDraft({ ...followUpDraft, location })}
+              placeholder="Optional location"
+            />
+            <footer className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className={procurementSecondaryButtonClass}
+                onClick={() => setFollowUpDraft(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={followUpSaving}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-50"
+                onClick={async () => {
+                  setFollowUpSaving(true);
+                  setError("");
+                  try {
+                    await procurementApi.updateRequisitionFollowUp(followUpDraft.id, {
+                      followUpStatus: followUpDraft.status,
+                      followUpNote: followUpDraft.note,
+                      location: followUpDraft.location,
+                    });
+                    setFollowUpDraft(null);
+                    await load();
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Follow-up update failed");
+                  } finally {
+                    setFollowUpSaving(false);
+                  }
+                }}
+              >
+                {followUpSaving ? "Saving…" : "Save follow-up"}
               </button>
             </footer>
           </div>
