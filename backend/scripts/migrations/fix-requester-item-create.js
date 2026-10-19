@@ -1,7 +1,6 @@
 /**
- * Ensure "Procurement User" (Requester) role includes items.create so
- * requesters can add catalog items while raising a PR.
- * Also syncs babarshaikh@ / raees.ahmed@ (and optionally all Requesters).
+ * Ensure every role/user that can create PRs also has items.create
+ * (so Requesters can add catalog items while raising a PR).
  *
  * Usage (from backend/):
  *   node scripts/migrations/fix-requester-item-create.js
@@ -13,76 +12,96 @@ const Role = require("../../models/Role");
 const Permission = require("../../models/Permission");
 
 const COMPANY_ID = process.env.COMPANY_ID || "RESSICHEM";
-const ROLE_NAME = "Procurement User";
-const EXTRA_EMAILS = ["babarshaikh@ressichem.com", "raees.ahmed@ressichem.com"];
 const DEFAULT_URI =
   "mongodb+srv://armanzaman4_db_user:1JJORz7jP2VFgTaP@cluster0.qn1babq.mongodb.net/Ressichem?retryWrites=true&w=majority";
 
-const PERM_KEYS = [
-  "procurement.access",
-  "procurement.dashboard.read",
-  "procurement.items.read",
-  "procurement.items.create",
-  "procurement.requisitions.read",
-  "procurement.requisitions.create",
-  "procurement.requisitions.update",
-];
+const PR_CREATE_KEY = "procurement.requisitions.create";
+const ITEM_CREATE_KEY = "procurement.items.create";
+const ITEM_READ_KEY = "procurement.items.read";
 
 async function main() {
   const uri = process.env.MONGODB_URI || process.env.CONNECTION_STRING || process.env.MONGO_URI || DEFAULT_URI;
   await mongoose.connect(uri, { dbName: "Ressichem" });
   console.log("Connected");
 
-  const perms = await Permission.find({ company_id: COMPANY_ID, key: { $in: PERM_KEYS } })
+  const needed = await Permission.find({
+    company_id: COMPANY_ID,
+    key: { $in: [PR_CREATE_KEY, ITEM_CREATE_KEY, ITEM_READ_KEY] },
+  })
     .select("_id key")
     .lean();
-  const found = new Set(perms.map((p) => p.key));
-  const missing = PERM_KEYS.filter((k) => !found.has(k));
-  if (missing.length) {
-    throw new Error(`Missing permissions: ${missing.join(", ")}. Run setup-procurement-permissions.js first.`);
+
+  const byKey = Object.fromEntries(needed.map((p) => [p.key, p._id]));
+  for (const key of [PR_CREATE_KEY, ITEM_CREATE_KEY, ITEM_READ_KEY]) {
+    if (!byKey[key]) {
+      throw new Error(`Missing permission ${key}. Run setup-procurement-permissions.js first.`);
+    }
   }
 
-  let role = await Role.findOne({ company_id: COMPANY_ID, name: ROLE_NAME });
-  if (!role) {
-    role = await Role.create({
-      company_id: COMPANY_ID,
-      name: ROLE_NAME,
-      description: "Requester — create purchase requisitions and view PR status",
-      permissions: perms.map((p) => p._id),
-      isActive: true,
-    });
-    console.log(`Created role: ${ROLE_NAME}`);
-  } else {
-    role.permissions = perms.map((p) => p._id);
-    role.description = "Requester — create purchase requisitions and view PR status";
-    await role.save();
-    console.log(`Updated role permissions: ${ROLE_NAME}`);
+  const roles = await Role.find({ company_id: COMPANY_ID, isActive: { $ne: false } }).populate(
+    "permissions",
+    "key"
+  );
+  const prRoles = [];
+
+  for (const role of roles) {
+    const keys = new Set((role.permissions || []).map((p) => (typeof p === "object" ? p.key : null)));
+    if (!keys.has(PR_CREATE_KEY)) continue;
+
+    const permIds = new Set((role.permissions || []).map((p) => String(p._id || p)));
+    let changed = false;
+    if (!keys.has(ITEM_CREATE_KEY)) {
+      permIds.add(String(byKey[ITEM_CREATE_KEY]));
+      changed = true;
+    }
+    if (!keys.has(ITEM_READ_KEY)) {
+      permIds.add(String(byKey[ITEM_READ_KEY]));
+      changed = true;
+    }
+    if (changed) {
+      role.permissions = Array.from(permIds);
+      await role.save();
+      console.log(`Updated role: ${role.name} (+ items.read/create)`);
+    } else {
+      console.log(`Role OK: ${role.name}`);
+    }
+    prRoles.push(role);
   }
 
-  console.log("Role now has:", PERM_KEYS.join(", "));
+  if (!prRoles.length) {
+    console.log("No roles with requisitions.create found.");
+    await mongoose.disconnect();
+    return;
+  }
 
-  // Sync all users on this role + the named emails
+  const roleIds = prRoles.map((r) => r._id);
+  const roleNames = prRoles.map((r) => r.name);
   const users = await User.find({
     company_id: COMPANY_ID,
-    $or: [
-      { roles: role._id },
-      { role: ROLE_NAME },
-      { email: { $in: EXTRA_EMAILS.map((e) => new RegExp(`^${e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")) } },
-    ],
+    $or: [{ roles: { $in: roleIds } }, { role: { $in: roleNames } }],
   });
 
+  let synced = 0;
   for (const user of users) {
-    user.role = ROLE_NAME;
-    user.roles = [role._id];
-    user.permissions = perms.map((p) => p._id);
+    const assignedRole =
+      prRoles.find((r) => (user.roles || []).some((id) => String(id) === String(r._id))) ||
+      prRoles.find((r) => r.name === user.role) ||
+      prRoles[0];
+
+    const nextPermIds = (assignedRole.permissions || []).map((p) => p._id || p);
+    user.roles = [assignedRole._id];
+    if (!user.role) user.role = assignedRole.name;
+    user.permissions = nextPermIds;
     if (!Array.isArray(user.modules) || !user.modules.includes("PROCUREMENT")) {
       user.modules = Array.from(new Set([...(user.modules || []), "PROCUREMENT"]));
     }
     await user.save();
-    console.log(`Synced ${user.email}`);
+    synced += 1;
+    console.log(`Synced ${user.email} ← ${assignedRole.name}`);
   }
 
-  console.log(`Done. Updated ${users.length} user(s). Ask them to log out and log back into Procurement.`);
+  console.log(`Done. Roles checked=${prRoles.length}, users synced=${synced}.`);
+  console.log("Users should log out/in if a stale JWT still blocks them (API also accepts requisitions.create).");
   await mongoose.disconnect();
 }
 

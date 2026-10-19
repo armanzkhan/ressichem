@@ -23,18 +23,26 @@ function makeUserId() {
   return `user_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-async function ensureRoleId(company_id, roleName) {
-  const role = await Role.findOne({ company_id, name: roleName }).select("_id name").lean();
+async function permissionIdsForRole(company_id, roleName) {
+  const role = await Role.findOne({ company_id, name: roleName })
+    .populate("permissions", "key")
+    .lean();
   if (!role) throw new Error(`Role not found: ${roleName} (company ${company_id})`);
-  return role._id;
-}
 
-async function ensurePermissionIds(company_id, keys) {
-  const perms = await Permission.find({ company_id, key: { $in: keys } }).select("_id key").lean();
-  const found = new Set(perms.map((p) => p.key));
-  const missing = keys.filter((k) => !found.has(k));
-  if (missing.length) throw new Error(`Missing permissions: ${missing.join(", ")}`);
-  return perms.map((p) => p._id);
+  const ids = (role.permissions || []).map((p) => p._id || p).filter(Boolean);
+  const keys = new Set((role.permissions || []).map((p) => p.key).filter(Boolean));
+  if (keys.has("procurement.requisitions.create")) {
+    const extra = await Permission.find({
+      company_id,
+      key: { $in: ["procurement.items.create", "procurement.items.read"] },
+    })
+      .select("_id")
+      .lean();
+    for (const p of extra) {
+      if (!ids.some((id) => String(id) === String(p._id))) ids.push(p._id);
+    }
+  }
+  return { roleId: role._id, permissionIds: ids };
 }
 
 async function authenticateBase({ company_id, email, password }) {
@@ -197,8 +205,7 @@ exports.signup = async (req, res) => {
       return res.status(400).json({ success: false, message: assignErr.message });
     }
 
-    const roleId = await ensureRoleId(company_id, roleName);
-    const accessPermIds = await ensurePermissionIds(company_id, ["procurement.access"]);
+    const { roleId, permissionIds } = await permissionIdsForRole(company_id, roleName);
 
     const hashed = await bcrypt.hash(password, 10);
     const doc = await User.create({
@@ -212,7 +219,7 @@ exports.signup = async (req, res) => {
       department,
       role: roleName,
       roles: [roleId],
-      permissions: accessPermIds,
+      permissions: permissionIds,
       isActive: body.isActive !== undefined ? !!body.isActive : true,
       isCustomer: false,
       isManager: false,
