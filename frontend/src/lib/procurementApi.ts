@@ -236,7 +236,6 @@ export type PurchaseDocument = {
   fulfillmentStatus?: string;
   fulfillmentLabel?: string;
   poId?: string | null;
-  poNumber?: string;
   poStatus?: string;
   qtyOrdered?: number;
   qtyReceived?: number;
