@@ -37,6 +37,14 @@ export type ChatConversation = {
   createdAt?: string;
 };
 
+export type ChatAttachment = {
+  url: string;
+  name?: string;
+  mimeType?: string;
+  size?: number;
+  kind?: "image" | "video" | "audio" | "document" | string;
+};
+
 export type ChatMessage = {
   _id: string;
   conversationId: string;
@@ -44,7 +52,8 @@ export type ChatMessage = {
   senderName: string;
   senderEmail?: string;
   text: string;
-  messageType?: "text" | "system" | "ai";
+  messageType?: "text" | "system" | "ai" | "image" | "video" | "audio" | "document";
+  attachment?: ChatAttachment | null;
   replyTo?: string | null;
   replyQuote?: {
     _id: string;
@@ -122,11 +131,45 @@ export const chatApi = {
     request<{ success: boolean; data: ChatMessage[]; conversation: ChatConversation }>(
       `/api/chat/conversations/${conversationId}/messages`
     ),
-  sendMessage: (conversationId: string, text: string, options?: { replyTo?: string }) =>
-    request<{ success: boolean; data: ChatMessage }>(
+  sendMessage: (
+    conversationId: string,
+    text: string,
+    options?: { replyTo?: string; file?: File | Blob; fileName?: string }
+  ) => {
+    if (options?.file) {
+      const apiBase = getBackendUrl();
+      const form = new FormData();
+      if (text) form.append("text", text);
+      if (options.replyTo) form.append("replyTo", options.replyTo);
+      const blob = options.file;
+      const name =
+        options.fileName ||
+        (blob instanceof File ? blob.name : `voice-${Date.now()}.webm`);
+      form.append("file", blob, name);
+      const headers = getAuthHeaders();
+      delete headers["Content-Type"]; // let browser set multipart boundary
+      return fetch(`${apiBase}/api/chat/conversations/${conversationId}/messages`, {
+        method: "POST",
+        headers: {
+          ...headers,
+          "x-company-id":
+            (typeof window !== "undefined" && localStorage.getItem("company_id")) || "RESSICHEM",
+        },
+        body: form,
+        cache: "no-store",
+      }).then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error((json as { message?: string })?.message || `Request failed (${res.status})`);
+        }
+        return json as { success: boolean; data: ChatMessage };
+      });
+    }
+    return request<{ success: boolean; data: ChatMessage }>(
       `/api/chat/conversations/${conversationId}/messages`,
       { method: "POST", body: JSON.stringify({ text, replyTo: options?.replyTo || null }) }
-    ),
+    );
+  },
   markDelivered: (conversationId: string, messageId: string, options?: { read?: boolean }) =>
     request<{ success: boolean; data: ChatMessage }>(
       `/api/chat/conversations/${conversationId}/messages/${messageId}/delivered`,

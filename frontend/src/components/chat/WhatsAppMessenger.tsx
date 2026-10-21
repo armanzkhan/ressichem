@@ -1,7 +1,27 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MessageCircle, Plus, Search, Send, Users, X, ArrowLeft, Bot, CornerUpLeft, Check, CheckCheck } from "lucide-react";
+import {
+  MessageCircle,
+  Plus,
+  Search,
+  Send,
+  Users,
+  X,
+  ArrowLeft,
+  Bot,
+  CornerUpLeft,
+  Check,
+  CheckCheck,
+  Paperclip,
+  Image as ImageIcon,
+  FileText,
+  Camera,
+  Mic,
+  Smile,
+  Square,
+  Download,
+} from "lucide-react";
 import {
   chatApi,
   isOwnChatMessage,
@@ -15,6 +35,14 @@ import { assistantConfig } from "@/lib/ressichemAssistantConfig";
 import realtimeNotificationService from "@/services/realtimeNotificationService";
 
 type View = "list" | "chat" | "new" | "group";
+
+const QUICK_EMOJIS = ["😀", "😂", "😍", "👍", "🙏", "✅", "🔥", "🎉", "❤️", "👏", "😅", "🤝"];
+
+type PendingAttach = {
+  file: File;
+  previewUrl?: string;
+  kind: "image" | "video" | "audio" | "document";
+};
 
 const GUEST_AI_ID = "guest_ai";
 const GUEST_USER_ID = "guest";
@@ -82,6 +110,28 @@ function MessageReceipt({ status }: { status?: ChatMessage["receiptStatus"] }) {
   );
 }
 
+function mediaUrl(path?: string) {
+  if (!path) return "";
+  if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("blob:")) return path;
+  const base = getBackendUrl().replace(/\/$/, "");
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function classifyFile(file: File): PendingAttach["kind"] {
+  const mime = (file.type || "").toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+function formatBytes(n?: number) {
+  const size = Number(n) || 0;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function renderMessageBody(text: string, mentions: ChatMessage["mentions"] = []) {
   if (!mentions?.length) return text;
   const names = [...mentions]
@@ -121,8 +171,17 @@ export default function WhatsAppMessenger() {
   const [authed, setAuthed] = useState(false);
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [pendingAttach, setPendingAttach] = useState<PendingAttach | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
 
   const mentionCandidates = useMemo(() => {
     if (!active || active.type !== "group") return [];
@@ -362,22 +421,90 @@ export default function WhatsAppMessenger() {
     textareaRef.current?.focus();
   };
 
+  const clearPendingAttach = () => {
+    if (pendingAttach?.previewUrl) URL.revokeObjectURL(pendingAttach.previewUrl);
+    setPendingAttach(null);
+  };
+
+  const pickFile = (file: File | null | undefined) => {
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) {
+      setError("File too large (max 25 MB)");
+      return;
+    }
+    clearPendingAttach();
+    const kind = classifyFile(file);
+    const previewUrl =
+      kind === "image" || kind === "video" ? URL.createObjectURL(file) : undefined;
+    setPendingAttach({ file, kind, previewUrl });
+    setAttachMenuOpen(false);
+    setEmojiOpen(false);
+  };
+
+  const startVoiceNote = async () => {
+    if (!authed || active?._id === GUEST_AI_ID) {
+      setError("Sign in to send voice notes");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recordChunksRef.current = [];
+      recorder.ondataavailable = (ev) => {
+        if (ev.data.size > 0) recordChunksRef.current.push(ev.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(recordChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const file = new File([blob], `voice-${Date.now()}.webm`, { type: blob.type });
+        pickFile(file);
+        setRecording(false);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+      setAttachMenuOpen(false);
+    } catch {
+      setError("Microphone permission denied");
+    }
+  };
+
+  const stopVoiceNote = () => {
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+  };
+
   const send = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!active || !text.trim() || sending) return;
+    if (!active || sending) return;
+    const pending = text.trim();
+    const attach = pendingAttach;
+    if (!pending && !attach) return;
+    if ((!authed || active._id === GUEST_AI_ID) && attach) {
+      setError("Sign in to send photos, files, or voice notes");
+      return;
+    }
     setSending(true);
     setError("");
-    const pending = text.trim();
     const replyId = replyTarget?._id;
     setText("");
     setReplyTarget(null);
     setMentionQuery(null);
+    setAttachMenuOpen(false);
+    setEmojiOpen(false);
+    const attachSnapshot = attach;
+    setPendingAttach(null);
     try {
       if (!authed || active._id === GUEST_AI_ID) {
         await sendGuestAi(pending);
         return;
       }
-      const res = await chatApi.sendMessage(active._id, pending, { replyTo: replyId });
+      const res = await chatApi.sendMessage(active._id, pending, {
+        replyTo: replyId,
+        file: attachSnapshot?.file,
+        fileName: attachSnapshot?.file.name,
+      });
+      if (attachSnapshot?.previewUrl) URL.revokeObjectURL(attachSnapshot.previewUrl);
       setMessages((prev) => (prev.some((m) => m._id === res.data._id) ? prev : [...prev, res.data]));
       setConversations((prev) => {
         const others = prev.filter((c) => c._id !== active._id);
@@ -397,6 +524,7 @@ export default function WhatsAppMessenger() {
       });
     } catch (err) {
       setText(pending);
+      if (attachSnapshot) setPendingAttach(attachSnapshot);
       setError(err instanceof Error ? err.message : "Send failed");
     } finally {
       setSending(false);
@@ -722,9 +850,59 @@ export default function WhatsAppMessenger() {
                               <p className="truncate opacity-90">{m.replyQuote.text}</p>
                             </div>
                           ) : null}
-                          <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                            {renderMessageBody(m.text, m.mentions)}
-                          </p>
+                          {m.attachment?.url && (m.attachment.kind === "image" || m.messageType === "image") ? (
+                            <button
+                              type="button"
+                              className="block mb-1 overflow-hidden rounded-md max-w-full"
+                              onClick={() => setLightboxUrl(mediaUrl(m.attachment?.url))}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={mediaUrl(m.attachment.url)}
+                                alt={m.attachment.name || "Photo"}
+                                className="max-h-56 w-full object-cover rounded-md"
+                              />
+                            </button>
+                          ) : null}
+                          {m.attachment?.url && (m.attachment.kind === "video" || m.messageType === "video") ? (
+                            <video
+                              src={mediaUrl(m.attachment.url)}
+                              controls
+                              className="mb-1 max-h-56 w-full rounded-md bg-black"
+                            />
+                          ) : null}
+                          {m.attachment?.url && (m.attachment.kind === "audio" || m.messageType === "audio") ? (
+                            <audio src={mediaUrl(m.attachment.url)} controls className="mb-1 w-full max-w-[240px]" />
+                          ) : null}
+                          {m.attachment?.url &&
+                          (m.attachment.kind === "document" || m.messageType === "document") ? (
+                            <a
+                              href={mediaUrl(m.attachment.url)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mb-1 flex items-center gap-2 rounded-md bg-black/20 px-2 py-2 text-sm hover:bg-black/30"
+                            >
+                              <FileText className="h-5 w-5 shrink-0 text-emerald-300" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate font-medium">{m.attachment.name || "Document"}</span>
+                                <span className="text-[10px] text-slate-300">
+                                  {formatBytes(m.attachment.size)}
+                                </span>
+                              </span>
+                              <Download className="h-4 w-4 shrink-0 opacity-80" />
+                            </a>
+                          ) : null}
+                          {(() => {
+                            const hideAutoCaption =
+                              !!m.attachment?.url &&
+                              (!m.text || /^(📷 Photo|🎥 Video|🎵 Audio|📄 )/.test(m.text));
+                            if (hideAutoCaption || !m.text) return null;
+                            return (
+                              <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                                {renderMessageBody(m.text, m.mentions)}
+                              </p>
+                            );
+                          })()}
                           <p className="text-[10px] text-slate-300/80 text-right mt-1 flex items-center justify-end gap-0.5 flex-wrap">
                             {formatTime(m.createdAt)}
                             {mine ? <MessageReceipt status={m.receiptStatus} /> : null}
@@ -736,7 +914,28 @@ export default function WhatsAppMessenger() {
                 })}
                 <div ref={bottomRef} />
               </div>
-              <form onSubmit={send} className="bg-[#202c33] p-2 flex flex-col gap-2 shrink-0 min-w-0 overflow-hidden">
+              <form onSubmit={send} className="bg-[#202c33] p-2 flex flex-col gap-2 shrink-0 min-w-0 overflow-hidden relative">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,application/pdf"
+                  onChange={(e) => {
+                    pickFile(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <input
+                  ref={cameraInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/*,video/*"
+                  capture="environment"
+                  onChange={(e) => {
+                    pickFile(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
                 {replyTarget ? (
                   <div className="flex items-start gap-2 rounded-lg bg-[#182229] px-3 py-2 border-l-4 border-emerald-500">
                     <div className="flex-1 min-w-0">
@@ -750,6 +949,36 @@ export default function WhatsAppMessenger() {
                       onClick={() => setReplyTarget(null)}
                       className="p-1 rounded-full hover:bg-white/10 text-slate-400"
                       aria-label="Cancel reply"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : null}
+                {pendingAttach ? (
+                  <div className="flex items-center gap-2 rounded-lg bg-[#182229] px-3 py-2">
+                    {pendingAttach.kind === "image" && pendingAttach.previewUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={pendingAttach.previewUrl}
+                        alt="Preview"
+                        className="h-14 w-14 rounded object-cover"
+                      />
+                    ) : pendingAttach.kind === "video" && pendingAttach.previewUrl ? (
+                      <video src={pendingAttach.previewUrl} className="h-14 w-14 rounded object-cover" />
+                    ) : (
+                      <FileText className="h-8 w-8 text-emerald-300" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium truncate">{pendingAttach.file.name}</p>
+                      <p className="text-[10px] text-slate-400">
+                        {pendingAttach.kind} · {formatBytes(pendingAttach.file.size)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearPendingAttach}
+                      className="p-1 rounded-full hover:bg-white/10 text-slate-400"
+                      aria-label="Remove attachment"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -770,35 +999,173 @@ export default function WhatsAppMessenger() {
                     ))}
                   </div>
                 ) : null}
-                <div className="flex items-end gap-2 min-w-0">
-                <textarea
-                  ref={textareaRef}
-                  value={text}
-                  onChange={(e) => handleTextChange(e.target.value)}
-                  rows={1}
-                  placeholder={
-                    active?.type === "group" ? "Type a message — use @ to mention" : "Type a message"
-                  }
-                  className="flex-1 min-w-0 resize-none rounded-xl bg-[#2a3942] px-3 py-2.5 text-sm outline-none max-h-28"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void send();
+                {emojiOpen ? (
+                  <div className="flex flex-wrap gap-1 rounded-lg bg-[#182229] px-2 py-2">
+                    {QUICK_EMOJIS.map((em) => (
+                      <button
+                        key={em}
+                        type="button"
+                        className="text-xl leading-none p-1 hover:bg-white/10 rounded"
+                        onClick={() => {
+                          setText((prev) => `${prev}${em}`);
+                          textareaRef.current?.focus();
+                        }}
+                      >
+                        {em}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {attachMenuOpen ? (
+                  <div className="absolute bottom-16 left-2 z-10 w-48 rounded-xl bg-[#233138] shadow-xl border border-white/10 overflow-hidden">
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-white/5"
+                      onClick={() => {
+                        setAttachMenuOpen(false);
+                        fileInputRef.current?.setAttribute("accept", "image/*,video/*");
+                        fileInputRef.current?.click();
+                      }}
+                    >
+                      <ImageIcon className="h-4 w-4 text-purple-400" /> Photos &amp; videos
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-white/5"
+                      onClick={() => {
+                        setAttachMenuOpen(false);
+                        cameraInputRef.current?.click();
+                      }}
+                    >
+                      <Camera className="h-4 w-4 text-pink-400" /> Camera
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-white/5"
+                      onClick={() => {
+                        setAttachMenuOpen(false);
+                        fileInputRef.current?.setAttribute(
+                          "accept",
+                          ".pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,application/pdf"
+                        );
+                        fileInputRef.current?.click();
+                      }}
+                    >
+                      <FileText className="h-4 w-4 text-sky-400" /> Document
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-white/5"
+                      onClick={() => void startVoiceNote()}
+                    >
+                      <Mic className="h-4 w-4 text-orange-400" /> Voice note
+                    </button>
+                  </div>
+                ) : null}
+                <div className="flex items-end gap-1.5 min-w-0">
+                  {authed && active._id !== GUEST_AI_ID ? (
+                    <button
+                      type="button"
+                      title="Attach"
+                      onClick={() => {
+                        setEmojiOpen(false);
+                        setAttachMenuOpen((v) => !v);
+                      }}
+                      className="h-11 w-10 rounded-full flex items-center justify-center text-slate-300 hover:bg-white/10"
+                    >
+                      <Paperclip className="h-5 w-5" />
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    title="Emoji"
+                    onClick={() => {
+                      setAttachMenuOpen(false);
+                      setEmojiOpen((v) => !v);
+                    }}
+                    className="h-11 w-10 rounded-full flex items-center justify-center text-slate-300 hover:bg-white/10"
+                  >
+                    <Smile className="h-5 w-5" />
+                  </button>
+                  <textarea
+                    ref={textareaRef}
+                    value={text}
+                    onChange={(e) => handleTextChange(e.target.value)}
+                    rows={1}
+                    placeholder={
+                      active?.type === "group" ? "Type a message — use @ to mention" : "Type a message"
                     }
-                  }}
-                />
-                <button
-                  type="submit"
-                  disabled={sending || !text.trim()}
-                  className="h-11 w-11 rounded-full bg-[#25D366] text-[#111] flex items-center justify-center disabled:opacity-40"
-                  aria-label="Send"
-                >
-                  <Send className="h-5 w-5" />
-                </button>
+                    className="flex-1 min-w-0 resize-none rounded-xl bg-[#2a3942] px-3 py-2.5 text-sm outline-none max-h-28"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void send();
+                      }
+                    }}
+                  />
+                  {recording ? (
+                    <button
+                      type="button"
+                      onClick={stopVoiceNote}
+                      className="h-11 w-11 rounded-full bg-red-600 text-white flex items-center justify-center animate-pulse"
+                      aria-label="Stop recording"
+                    >
+                      <Square className="h-4 w-4 fill-current" />
+                    </button>
+                  ) : text.trim() || pendingAttach ? (
+                    <button
+                      type="submit"
+                      disabled={sending}
+                      className="h-11 w-11 rounded-full bg-[#25D366] text-[#111] flex items-center justify-center disabled:opacity-40"
+                      aria-label="Send"
+                    >
+                      <Send className="h-5 w-5" />
+                    </button>
+                  ) : authed && active._id !== GUEST_AI_ID ? (
+                    <button
+                      type="button"
+                      onClick={() => void startVoiceNote()}
+                      className="h-11 w-11 rounded-full bg-[#25D366] text-[#111] flex items-center justify-center"
+                      aria-label="Record voice note"
+                    >
+                      <Mic className="h-5 w-5" />
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      disabled
+                      className="h-11 w-11 rounded-full bg-[#25D366] text-[#111] flex items-center justify-center opacity-40"
+                      aria-label="Send"
+                    >
+                      <Send className="h-5 w-5" />
+                    </button>
+                  )}
                 </div>
               </form>
             </>
           ) : null}
+        </div>
+      ) : null}
+
+      {lightboxUrl ? (
+        <div
+          className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setLightboxUrl(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightboxUrl}
+            alt="Full size"
+            className="max-h-full max-w-full object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            type="button"
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white"
+            onClick={() => setLightboxUrl(null)}
+          >
+            <X className="h-6 w-6" />
+          </button>
         </div>
       ) : null}
     </>

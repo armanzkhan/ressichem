@@ -13,11 +13,23 @@ const chatMessageSchema = new mongoose.Schema(
     senderMongoId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     senderName: { type: String, default: "" },
     senderEmail: { type: String, default: "" },
-    text: { type: String, required: true, trim: true },
+    text: { type: String, default: "", trim: true },
     messageType: {
       type: String,
-      enum: ["text", "system", "ai"],
+      enum: ["text", "system", "ai", "image", "video", "audio", "document"],
       default: "text",
+    },
+    /** WhatsApp-style media / file payload (optional). */
+    attachment: {
+      url: { type: String, default: "" },
+      name: { type: String, default: "" },
+      mimeType: { type: String, default: "" },
+      size: { type: Number, default: 0 },
+      kind: {
+        type: String,
+        enum: ["", "image", "video", "audio", "document"],
+        default: "",
+      },
     },
     replyTo: { type: mongoose.Schema.Types.ObjectId, ref: "ChatMessage", default: null },
     mentions: [

@@ -203,6 +203,30 @@ function parseMentions(text, participants = []) {
   return mentions;
 }
 
+function attachmentPreviewLabel(row = {}) {
+  const kind = String(row.attachment?.kind || row.messageType || "").toLowerCase();
+  if (kind === "image") return "📷 Photo";
+  if (kind === "video") return "🎥 Video";
+  if (kind === "audio") return "🎵 Audio";
+  if (kind === "document") return `📄 ${row.attachment?.name || "Document"}`;
+  return String(row.text || "").slice(0, 180) || "Attachment";
+}
+
+function kindFromMime(mime = "", originalName = "") {
+  const m = String(mime || "").toLowerCase();
+  if (m.startsWith("image/")) return "image";
+  if (m.startsWith("video/")) return "video";
+  if (m.startsWith("audio/")) return "audio";
+  const ext = String(originalName || "")
+    .split(".")
+    .pop()
+    ?.toLowerCase();
+  if (["jpg", "jpeg", "png", "gif", "webp", "bmp"].includes(ext)) return "image";
+  if (["mp4", "webm", "mov", "mkv"].includes(ext)) return "video";
+  if (["mp3", "wav", "ogg", "m4a", "webm", "aac"].includes(ext)) return "audio";
+  return "document";
+}
+
 function serializeMessage(msg, extras = {}) {
   const obj = msg.toObject ? msg.toObject() : msg;
   const replyQuote = extras.replyQuotes?.[String(obj.replyTo)] || null;
@@ -217,6 +241,15 @@ function serializeMessage(msg, extras = {}) {
     senderEmail: obj.senderEmail,
     text: obj.text,
     messageType: obj.messageType || "text",
+    attachment: obj.attachment?.url
+      ? {
+          url: obj.attachment.url,
+          name: obj.attachment.name || "",
+          mimeType: obj.attachment.mimeType || "",
+          size: Number(obj.attachment.size) || 0,
+          kind: obj.attachment.kind || "",
+        }
+      : null,
     replyTo: obj.replyTo ? String(obj.replyTo) : null,
     replyQuote,
     mentions: (obj.mentions || []).map((m) => ({
@@ -255,7 +288,7 @@ async function buildReplyQuotes(messages) {
       _id: String(row._id),
       senderUserId: row.senderUserId,
       senderName: row.senderName || "",
-      text: String(row.text || "").slice(0, 180),
+      text: String(row.text || "").slice(0, 180) || attachmentPreviewLabel(row),
     };
   }
   return map;
@@ -654,14 +687,33 @@ exports.listMessages = async (req, res) => {
 
 /**
  * POST /api/chat/conversations/:id/messages
- * body: { text, replyTo? }
+ * body (JSON): { text, replyTo? }
+ * multipart: file + text? + replyTo?
  */
 exports.sendMessage = async (req, res) => {
   try {
     const company_id = companyId(req);
     const id = req.params.id;
     const text = String(req.body?.text || "").trim();
-    if (!text) return res.status(400).json({ success: false, message: "Message text is required" });
+    const file = req.file || null;
+
+    let attachment = null;
+    let messageType = "text";
+    if (file) {
+      const kind = kindFromMime(file.mimetype, file.originalname);
+      attachment = {
+        url: req.file.chatRelPath || `/uploads/chat/${file.filename}`,
+        name: file.originalname || file.filename,
+        mimeType: file.mimetype || "",
+        size: Number(file.size) || 0,
+        kind,
+      };
+      messageType = kind;
+    }
+
+    if (!text && !attachment) {
+      return res.status(400).json({ success: false, message: "Message text or attachment is required" });
+    }
 
     const conv = await ChatConversation.findOne({ _id: id, company_id, isActive: true });
     if (!conv) return res.status(404).json({ success: false, message: "Conversation not found" });
@@ -684,7 +736,9 @@ exports.sendMessage = async (req, res) => {
     }
 
     const mentions =
-      conv.type === "group" ? parseMentions(text, conv.participants || []) : [];
+      conv.type === "group" && text ? parseMentions(text, conv.participants || []) : [];
+
+    const displayText = text || attachmentPreviewLabel({ messageType, attachment });
 
     const message = await ChatMessage.create({
       company_id,
@@ -693,8 +747,9 @@ exports.sendMessage = async (req, res) => {
       senderMongoId: meUser?._id,
       senderName,
       senderEmail: meUser?.email || req.user?.email || "",
-      text,
-      messageType: "text",
+      text: text || displayText,
+      messageType,
+      attachment: attachment || undefined,
       replyTo: replyToId,
       mentions,
       deliveredTo: [],
@@ -702,7 +757,7 @@ exports.sendMessage = async (req, res) => {
     });
 
     conv.lastMessage = {
-      text,
+      text: displayText,
       senderUserId: meKey,
       senderName,
       at: message.createdAt,
