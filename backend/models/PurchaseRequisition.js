@@ -5,6 +5,15 @@ const prApprovalSchema = new mongoose.Schema(
   {
     department: { type: String, required: true },
     departmentKey: { type: String, default: "" },
+    /**
+     * department = line/dept managers (parallel);
+     * finance / boss = corporate stages after all departments approve (sequential).
+     */
+    stage: {
+      type: String,
+      enum: ["department", "finance", "boss"],
+      default: "department",
+    },
     approver: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     status: {
       type: String,
@@ -40,7 +49,10 @@ const purchaseRequisitionSchema = new mongoose.Schema(
     requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     /** Primary / first pending approver (legacy + list convenience). */
     assignedApprover: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    /** One entry per department; PR is fully approved only when all are approved. */
+    /**
+     * Approval chain: department row(s) → Finance Manager → Boss.
+     * Fully approved only when every row (all stages) is approved.
+     */
     approvals: [prApprovalSchema],
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     approvedAt: { type: Date },

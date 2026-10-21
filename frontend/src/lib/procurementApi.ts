@@ -174,6 +174,8 @@ export type PrApproval = {
   _id?: string;
   department: string;
   departmentKey?: string;
+  /** department (parallel) → finance → boss (sequential corporate stages) */
+  stage?: "department" | "finance" | "boss" | string;
   approver?: ProcurementUser | string;
   status: "pending" | "approved" | "rejected" | "held" | string;
   actedAt?: string;

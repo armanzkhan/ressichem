@@ -187,6 +187,9 @@ export const PR_DEPARTMENTS = [
   "Staff",
 ] as const;
 
+/** Required corporate stages after all line departments approve (map under PR Approvers). */
+export const PR_CORPORATE_APPROVAL_ROLES = ["Finance Manager", "Boss"] as const;
+
 export type ProcurementTradeScope = "local" | "import" | "export";
 
 export function paymentTermsForScope(scope: ProcurementTradeScope): readonly string[] {

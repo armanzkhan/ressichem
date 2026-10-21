@@ -22,7 +22,12 @@ router.post(
 );
 router.get("/:id", permissionMiddleware(["procurement.requisitions.read"]), ctrl.getById);
 router.post("/", permissionMiddleware(["procurement.requisitions.create"]), ctrl.create);
-router.put("/:id", permissionMiddleware(["procurement.requisitions.update"]), ctrl.update);
+// Requesters use update; assigned approvers use approve (amend before decision)
+router.put(
+  "/:id",
+  permissionMiddleware.any(["procurement.requisitions.update", "procurement.requisitions.approve"]),
+  ctrl.update
+);
 router.patch(
   "/:id/follow-up",
   permissionMiddleware(["procurement.requisitions.read"]),
@@ -33,7 +38,12 @@ router.post("/:id/approve", permissionMiddleware(["procurement.requisitions.appr
 router.post("/:id/reject", permissionMiddleware(["procurement.requisitions.approve"]), ctrl.reject);
 router.post("/:id/hold", permissionMiddleware(["procurement.requisitions.approve"]), ctrl.hold);
 router.post("/:id/release-hold", permissionMiddleware(["procurement.requisitions.approve"]), ctrl.releaseHold);
-router.post("/:id/convert-to-po", permissionMiddleware(["procurement.po.create"]), ctrl.convertToPO);
+// Buyers: po.create. Requesters: convert their own approved PRs via requisitions.create
+router.post(
+  "/:id/convert-to-po",
+  permissionMiddleware.any(["procurement.po.create", "procurement.requisitions.create"]),
+  ctrl.convertToPO
+);
 router.delete("/:id", permissionMiddleware(["procurement.access"]), ctrl.softDelete);
 
 module.exports = router;

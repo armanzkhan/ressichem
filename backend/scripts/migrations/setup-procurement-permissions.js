@@ -132,20 +132,22 @@ async function run() {
 
     const permId = (k) => perms.find((p) => p.key === k)?._id;
 
-    // Requester: create PRs + view PR status (items.read/create to pick or add catalog lines)
+    // Requester: create PRs + convert own approved PRs to PO + view own POs
     await ensureRole({
       companyId,
       name: "Procurement User",
-      description: "Requester — create purchase requisitions and view PR status",
+      description: "Requester — create PRs, convert own approved PRs to PO, view own POs",
       replacePermissions: true,
       permissionIds: [
         permId("procurement.access"),
         permId("procurement.dashboard.read"),
         permId("procurement.items.read"),
         permId("procurement.items.create"),
+        permId("procurement.vendors.read"),
         permId("procurement.requisitions.read"),
         permId("procurement.requisitions.create"),
         permId("procurement.requisitions.update"),
+        permId("procurement.po.read"),
       ].filter(Boolean),
     });
 

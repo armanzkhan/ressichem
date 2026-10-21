@@ -24,7 +24,8 @@ exports.getDashboard = async (req, res) => {
     const accessLevel = accessLevelFromRole(roleName);
     const area = userProcurementArea(roleName, department);
 
-    const statsBySection = await countLocalImportStats(company_id);
+    // PR counts follow the same visibility as the PR list (own / assigned / admin)
+    const statsBySection = await countLocalImportStats(company_id, req.user);
 
     res.set("Cache-Control", "no-store, no-cache, must-revalidate");
     res.set("Pragma", "no-cache");

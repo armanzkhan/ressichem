@@ -80,6 +80,13 @@ function departmentsFromLines(lines: RequisitionLine[]) {
   return out;
 }
 
+function approvalStageLabel(stage?: string) {
+  const s = String(stage || "department").toLowerCase();
+  if (s === "finance") return "Finance";
+  if (s === "boss") return "Boss";
+  return "Dept";
+}
+
 function approvalProgressLabel(row: PurchaseDocument) {
   const approvals = row.approvals || [];
   if (!approvals.length) {
@@ -88,7 +95,16 @@ function approvalProgressLabel(row: PurchaseDocument) {
     return "—";
   }
   const done = approvals.filter((a) => a.status === "approved").length;
-  return `${done}/${approvals.length}`;
+  // Expected full chain = current rows, or at least depts + finance + boss once stages unlock
+  const hasFinance = approvals.some((a) => String(a.stage || "").toLowerCase() === "finance");
+  const hasBoss = approvals.some((a) => String(a.stage || "").toLowerCase() === "boss");
+  const expected =
+    hasFinance && hasBoss
+      ? approvals.length
+      : hasFinance
+        ? approvals.length + 1
+        : approvals.length + 2;
+  return `${done}/${expected}`;
 }
 
 function requisitionToForm(row: PurchaseDocument): {
@@ -129,9 +145,13 @@ export function RequisitionsView({ section }: Props) {
   const [accessLevel, setAccessLevel] = useState(() =>
     typeof window !== "undefined" ? accessLevelFromRole(localStorage.getItem("userRole")) : "user"
   );
+  const [currentUserId, setCurrentUserId] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("userId") || "" : ""
+  );
 
   useEffect(() => {
     setAccessLevel(accessLevelFromRole(localStorage.getItem("userRole") || ""));
+    setCurrentUserId(localStorage.getItem("userId") || "");
   }, []);
 
   const canApprove =
@@ -148,7 +168,31 @@ export function RequisitionsView({ section }: Props) {
     accessLevel === "creator_approver" ||
     accessLevel === "buyer" ||
     accessLevel === "admin";
-  const canConvertToPo = accessLevel === "buyer" || accessLevel === "admin";
+  const isOwnPr = (row: PurchaseDocument) => {
+    if (!currentUserId) return false;
+    const owner = row.requestedBy;
+    const ownerId = typeof owner === "string" ? owner : owner?._id;
+    return Boolean(ownerId && String(ownerId) === String(currentUserId));
+  };
+
+  const canConvertAnyApprovedPo = accessLevel === "buyer" || accessLevel === "admin";
+  /** Buyers/admins: any approved PR. Requesters: only their own approved PRs. */
+  const canConvertToPo = (row: PurchaseDocument) =>
+    row.status === "approved" &&
+    (canConvertAnyApprovedPo || (canCreate && (accessLevel === "admin" || isOwnPr(row))));
+
+  /** Only the requester (or admin) may edit / submit / resubmit draft or rejected PRs */
+  const canEditOrSubmitPr = (row: PurchaseDocument) =>
+    canCreate &&
+    (row.status === "draft" || row.status === "rejected") &&
+    (accessLevel === "admin" || isOwnPr(row));
+
+  /** Assigned approver (or admin) may amend content before approve / hold / reject */
+  const canApproverAmendPr = (row: PurchaseDocument) =>
+    (canApprove || accessLevel === "admin") &&
+    (row.status === "submitted" || row.status === "held" || row.status === "partially_approved");
+
+  const canOpenEditForm = (row: PurchaseDocument) => canEditOrSubmitPr(row) || canApproverAmendPr(row);
   const [viewingRow, setViewingRow] = useState<PurchaseDocument | null>(null);
   const [reviewAction, setReviewAction] = useState<{
     id: string;
@@ -190,7 +234,9 @@ export function RequisitionsView({ section }: Props) {
       setSelectedIds([]);
 
       const level = accessLevelFromRole(localStorage.getItem("userRole") || "");
-      const needSuppliers = level === "buyer" || level === "admin";
+      // Buyers/admins + requesters (who convert own approved PRs) need supplier picker
+      const needSuppliers =
+        level === "buyer" || level === "admin" || level === "user" || level === "creator_approver";
 
       const [itemsRes, deptRes, suplRes] = await Promise.all([
         procurementApi.listItems({ tradeScope: section }).catch(() => ({ data: [] as ProcurementItem[] })),
@@ -274,7 +320,7 @@ export function RequisitionsView({ section }: Props) {
 
   const openRequisition = async (row: PurchaseDocument) => {
     setError("");
-    const editable = (row.status === "draft" || row.status === "rejected") && canCreate;
+    const editable = canOpenEditForm(row);
     if (!editable) {
       try {
         const res = await procurementApi.getRequisition(row._id);
@@ -288,6 +334,20 @@ export function RequisitionsView({ section }: Props) {
       const res = await procurementApi.getRequisition(row._id);
       setEditingId(row._id);
       setForm(requisitionToForm(res.data));
+      setShowForm(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load requisition");
+    }
+  };
+
+  const openApproverEditFromView = async () => {
+    if (!viewingRow) return;
+    setError("");
+    try {
+      const res = await procurementApi.getRequisition(viewingRow._id);
+      setEditingId(viewingRow._id);
+      setForm(requisitionToForm(res.data));
+      setViewingRow(null);
       setShowForm(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load requisition");
@@ -341,13 +401,13 @@ export function RequisitionsView({ section }: Props) {
       const depts = departmentsFromLines(form.lines);
       const body = {
         title: depts.join(", ") || form.title.trim(),
-        status: "draft",
         purchaseType,
         currency: purchaseType === "local" ? "PKR" : "USD",
         exchangeRate: 1,
         taxAmount: 0,
         location: form.location.trim(),
         items: linesToPayload(form.lines, items),
+        ...(editingId ? {} : { status: "draft" }),
       };
       if (editingId) await procurementApi.updateRequisition(editingId, body);
       else await procurementApi.createRequisition(body);
@@ -502,7 +562,7 @@ export function RequisitionsView({ section }: Props) {
           rows={rows.map((r) => {
             const actionCell = (
               <span key={`act-${r._id}`} className="flex flex-wrap gap-2">
-                {canCreate && (r.status === "draft" || r.status === "rejected") ? (
+                {canEditOrSubmitPr(r) ? (
                   <button
                     type="button"
                     className="text-blue-600 text-xs dark:text-blue-300"
@@ -520,7 +580,7 @@ export function RequisitionsView({ section }: Props) {
                     {r.status === "rejected" ? "Resubmit" : "Submit"}
                   </button>
                 ) : null}
-                {canConvertToPo && r.status === "approved" ? (
+                {canConvertToPo(r) ? (
                   <button
                     type="button"
                     className="text-indigo-600 text-xs dark:text-indigo-300"
@@ -531,6 +591,18 @@ export function RequisitionsView({ section }: Props) {
                     }}
                   >
                     Create PO
+                  </button>
+                ) : null}
+                {canApproverAmendPr(r) ? (
+                  <button
+                    type="button"
+                    className="text-blue-600 text-xs dark:text-blue-300"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openRequisition(r);
+                    }}
+                  >
+                    Edit
                   </button>
                 ) : null}
                 {canApprove &&
@@ -679,7 +751,19 @@ export function RequisitionsView({ section }: Props) {
         />
       )}
       {showForm ? (
-        <Modal title={editingId ? "Edit requisition" : "New requisition"} onClose={() => setShowForm(false)}>
+        <Modal
+          title={
+            editingId
+              ? (() => {
+                  const row = rows.find((r) => r._id === editingId);
+                  return row && canApproverAmendPr(row)
+                    ? "Edit requisition (before decision)"
+                    : "Edit requisition";
+                })()
+              : "New requisition"
+          }
+          onClose={() => setShowForm(false)}
+        >
           <form onSubmit={save} className="space-y-4">
             <Field
               label="Location / site (optional)"
@@ -785,10 +869,15 @@ export function RequisitionsView({ section }: Props) {
             )}
             {viewingRow.approvals?.length ? (
               <div>
-                <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">Department approvals</p>
+                <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">
+                  Approval chain (departments → finance → boss)
+                </p>
                 <ul className="space-y-1 text-gray-700 dark:text-gray-300">
                   {viewingRow.approvals.map((a, i) => (
                     <li key={a._id || `${a.department}-${i}`} className="flex flex-wrap items-center gap-2">
+                      <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+                        {approvalStageLabel(a.stage)}
+                      </span>
                       <span className="font-medium">{a.department}</span>
                       <StatusBadge status={a.status} />
                       <span>{procurementUserLabel(a.approver)}</span>
@@ -797,6 +886,15 @@ export function RequisitionsView({ section }: Props) {
                     </li>
                   ))}
                 </ul>
+                {!viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
+                  <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
+                    After all departments approve → Finance Manager, then Boss.
+                  </p>
+                ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "boss") ? (
+                  <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
+                    After Finance Manager approves → Boss for final approval.
+                  </p>
+                ) : null}
               </div>
             ) : null}
             {viewingRow.rejectionReason ? (
@@ -837,6 +935,15 @@ export function RequisitionsView({ section }: Props) {
               </ul>
             </div>
             <footer className="flex justify-end gap-2 pt-2">
+              {canApproverAmendPr(viewingRow) ? (
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm"
+                  onClick={() => void openApproverEditFromView()}
+                >
+                  Edit before decision
+                </button>
+              ) : null}
               {canApprove &&
               (viewingRow.status === "submitted" || viewingRow.status === "partially_approved") ? (
                 <>

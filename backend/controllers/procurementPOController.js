@@ -34,6 +34,21 @@ exports.list = async (req, res) => {
     const query = { company_id, isActive: { $ne: false } };
     if (status) query.status = status;
     if (purchaseType) query.purchaseType = purchaseType;
+
+    // Requesters (po.read without po.create): only POs they created
+    const {
+      canCreatePurchaseOrders,
+      canCreateRequisitions,
+      isProcurementAdminUser,
+    } = require("../utils/procurementPrRouting");
+    if (
+      !isProcurementAdminUser(req.user) &&
+      canCreateRequisitions(req.user) &&
+      !canCreatePurchaseOrders(req.user)
+    ) {
+      query.createdBy = req.user._id;
+    }
+
     const data = await PurchaseOrder.find(query)
       .populate("supplier", supplierPopulate)
       .populate("suppliers", supplierPopulate)

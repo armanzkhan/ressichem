@@ -1,7 +1,7 @@
 const PurchaseRequisition = require("../models/PurchaseRequisition");
 const PurchaseOrder = require("../models/PurchaseOrder");
 const { getCompanyId } = require("../utils/procurementHelpers");
-const { canApproveRequisitions, isProcurementAdminUser } = require("../utils/procurementPrRouting");
+const { applyPurchaseRequisitionVisibility } = require("../utils/procurementPrRouting");
 const { buildPrReportExportBuffer } = require("../utils/procurementPrReportExport");
 const { enrichPrsWithFulfillment } = require("../utils/procurementPrFulfillment");
 
@@ -46,10 +46,7 @@ function buildQuery(req) {
     query.purchaseType = purchaseType;
   }
 
-  // Approvers (non-admin) only see PRs routed to them.
-  if (canApproveRequisitions(req.user) && !isProcurementAdminUser(req.user)) {
-    query.assignedApprover = req.user._id;
-  }
+  applyPurchaseRequisitionVisibility(query, req.user);
 
   return { query, year, month, dateField: field };
 }

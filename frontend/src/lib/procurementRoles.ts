@@ -51,7 +51,7 @@ export const PROCUREMENT_ACCESS_LEVELS: Array<{
   {
     value: "user",
     label: "Requester",
-    description: "Create purchase requisitions and view PR status only",
+    description: "Create PRs, convert own approved PRs to PO, and view own POs",
     roleName: "Procurement User",
   },
   {
@@ -83,7 +83,7 @@ export const PROCUREMENT_ACCESS_LEVELS: Array<{
 /** Modules visible for each access level (within their allowed area). */
 export const MODULES_BY_ACCESS_LEVEL: Record<ProcurementAccessLevel, string[] | "all"> = {
   viewer: "all",
-  user: ["pr", "reports"],
+  user: ["pr", "po", "reports"],
   buyer: "all",
   approver: ["pr", "reports"],
   creator_approver: ["pr", "reports"],

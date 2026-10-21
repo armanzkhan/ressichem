@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { procurementApi } from "@/lib/procurementApi";
 import { isProcurementAdmin } from "@/lib/procurementAccess";
-import { PR_DEPARTMENTS } from "@/lib/procurementOptions";
+import { PR_CORPORATE_APPROVAL_ROLES, PR_DEPARTMENTS } from "@/lib/procurementOptions";
 import {
   Alert,
   Field,
@@ -141,8 +141,9 @@ export function DepartmentApproversView() {
         </p>
       ) : null}
       <p className="mb-4 text-sm text-blue-700 dark:text-blue-300">
-        Map each PR department to the manager email that should approve requisitions. The approver account
-        must exist and be active in Procurement.
+        Map each PR line department to its manager, and also map <strong>Finance Manager</strong> and{" "}
+        <strong>Boss</strong> for the corporate stages after departments approve. Approver accounts must
+        exist and be active in Procurement. Flow: departments → Finance Manager → Boss → fully approved.
       </p>
 
       {loading ? (
@@ -181,7 +182,7 @@ export function DepartmentApproversView() {
                 required
               />
               <datalist id="pr-department-suggestions">
-                {PR_DEPARTMENTS.map((d) => (
+                {[...PR_CORPORATE_APPROVAL_ROLES, ...PR_DEPARTMENTS].map((d) => (
                   <option key={d} value={d} />
                 ))}
               </datalist>

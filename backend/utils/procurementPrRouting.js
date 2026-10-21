@@ -9,6 +9,23 @@ const DEPARTMENT_APPROVER_EMAILS = {
   "Local Purchase": "salim@gmail.com",
 };
 
+/**
+ * Corporate stages after all line departments approve.
+ * Map these under PR Approvers (or set env emails).
+ */
+const CORPORATE_APPROVAL_STAGES = [
+  {
+    stage: "finance",
+    department: "Finance Manager",
+    envKey: "PROCUREMENT_FINANCE_APPROVER_EMAIL",
+  },
+  {
+    stage: "boss",
+    department: "Boss",
+    envKey: "PROCUREMENT_BOSS_APPROVER_EMAIL",
+  },
+];
+
 function normalizeDepartment(name) {
   return String(name || "")
     .trim()
@@ -87,8 +104,55 @@ function canApproveRequisitions(user) {
   return permissionKeysFromUser(user).includes("procurement.requisitions.approve");
 }
 
+function canCreateRequisitions(user) {
+  return permissionKeysFromUser(user).includes("procurement.requisitions.create");
+}
+
+function canCreatePurchaseOrders(user) {
+  return permissionKeysFromUser(user).includes("procurement.po.create");
+}
+
+function isPrRequester(user, pr) {
+  if (!user?._id || !pr) return false;
+  return String(pr.requestedBy?._id || pr.requestedBy) === String(user._id);
+}
+
+/**
+ * Scope PR list/report queries by role:
+ * - admin: company-wide
+ * - approver: own + assigned for approval
+ * - buyer (po.create): own + approved (for PO conversion)
+ * - requester (create only): own only
+ * - viewer / read-only: company-wide
+ */
+function applyPurchaseRequisitionVisibility(query, user) {
+  if (!query || !user || isProcurementAdminUser(user)) return query;
+
+  if (canApproveRequisitions(user)) {
+    query.$or = [
+      { requestedBy: user._id },
+      { assignedApprover: user._id },
+      { "approvals.approver": user._id },
+    ];
+    return query;
+  }
+
+  if (canCreatePurchaseOrders(user)) {
+    query.$or = [{ requestedBy: user._id }, { status: "approved" }];
+    return query;
+  }
+
+  if (canCreateRequisitions(user)) {
+    query.requestedBy = user._id;
+    return query;
+  }
+
+  return query;
+}
+
 module.exports = {
   DEPARTMENT_APPROVER_EMAILS,
+  CORPORATE_APPROVAL_STAGES,
   PROCUREMENT_SOFT_DELETE_EMAILS,
   normalizeDepartment,
   approverEmailForDepartment,
@@ -96,4 +160,8 @@ module.exports = {
   isProcurementAdminUser,
   canSoftDeleteProcurement,
   canApproveRequisitions,
+  canCreateRequisitions,
+  canCreatePurchaseOrders,
+  isPrRequester,
+  applyPurchaseRequisitionVisibility,
 };

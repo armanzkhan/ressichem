@@ -4,6 +4,7 @@ const PurchaseRequisition = require("../models/PurchaseRequisition");
 const PurchaseOrder = require("../models/PurchaseOrder");
 const ProformaInvoice = require("../models/ProformaInvoice");
 const ProcurementExportRecord = require("../models/ProcurementExportRecord");
+const { applyPurchaseRequisitionVisibility } = require("./procurementPrRouting");
 
 const OPEN_PFI_STATUSES = ["draft", "sent", "accepted"];
 
@@ -22,29 +23,59 @@ function importSupplierFilter() {
   };
 }
 
-async function purchaseStats(company_id, purchaseType) {
-  const filter = { company_id, purchaseType };
-  const [draft, submitted, held, rejected, approved, total] = await Promise.all([
+/** Same visibility as PR list — requester sees own, approver sees own+assigned, etc. */
+function prBaseFilter(company_id, purchaseType, user) {
+  const filter = {
+    company_id,
+    purchaseType,
+    isActive: { $ne: false },
+  };
+  applyPurchaseRequisitionVisibility(filter, user);
+  return filter;
+}
+
+async function purchaseStats(company_id, purchaseType, user) {
+  const filter = prBaseFilter(company_id, purchaseType, user);
+  const [
+    draft,
+    submitted,
+    held,
+    partiallyApproved,
+    rejected,
+    approved,
+    total,
+  ] = await Promise.all([
     PurchaseRequisition.countDocuments({ ...filter, status: "draft" }),
     PurchaseRequisition.countDocuments({ ...filter, status: "submitted" }),
     PurchaseRequisition.countDocuments({ ...filter, status: "held" }),
+    PurchaseRequisition.countDocuments({ ...filter, status: "partially_approved" }),
     PurchaseRequisition.countDocuments({ ...filter, status: "rejected" }),
     PurchaseRequisition.countDocuments({ ...filter, status: "approved" }),
     PurchaseRequisition.countDocuments(filter),
   ]);
-  const pending = submitted + held;
+  const pending = submitted + held + partiallyApproved;
+  const poFilter = { company_id, purchaseType, isActive: { $ne: false } };
   const [poDraft, poIssued, poTotal] = await Promise.all([
-    PurchaseOrder.countDocuments({ ...filter, status: "draft" }),
-    PurchaseOrder.countDocuments({ ...filter, status: "issued" }),
-    PurchaseOrder.countDocuments(filter),
+    PurchaseOrder.countDocuments({ ...poFilter, status: "draft" }),
+    PurchaseOrder.countDocuments({ ...poFilter, status: "issued" }),
+    PurchaseOrder.countDocuments(poFilter),
   ]);
   return {
-    requisitions: { draft, pending, submitted, held, rejected, approved, total },
+    requisitions: {
+      draft,
+      pending,
+      submitted,
+      held,
+      partially_approved: partiallyApproved,
+      rejected,
+      approved,
+      total,
+    },
     purchaseOrders: { draft: poDraft, issued: poIssued, total: poTotal },
   };
 }
 
-async function countLocalImportStats(company_id) {
+async function countLocalImportStats(company_id, user) {
   const base = { company_id, isActive: true };
   const [localSuppliers, importSuppliers, localItems, importItems] = await Promise.all([
     ProcurementSupplier.countDocuments({ ...base, ...localSupplierFilter() }),
@@ -54,8 +85,8 @@ async function countLocalImportStats(company_id) {
   ]);
 
   const [localPurchase, importPurchase, importPfiOpen] = await Promise.all([
-    purchaseStats(company_id, "local"),
-    purchaseStats(company_id, "foreign"),
+    purchaseStats(company_id, "local", user),
+    purchaseStats(company_id, "foreign", user),
     ProformaInvoice.countDocuments({
       company_id,
       pfiFlow: "import_received",

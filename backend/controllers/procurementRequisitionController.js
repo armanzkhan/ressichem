@@ -2,14 +2,24 @@ const PurchaseRequisition = require("../models/PurchaseRequisition");
 const { getCompanyId, nextDocumentNumber, computeLineTotals } = require("../utils/procurementHelpers");
 const {
   canApproveRequisitions,
+  canCreatePurchaseOrders,
+  canCreateRequisitions,
   isProcurementAdminUser,
   canSoftDeleteProcurement,
+  isPrRequester,
+  applyPurchaseRequisitionVisibility,
+  normalizeDepartment,
 } = require("../utils/procurementPrRouting");
 const {
   collectDepartmentsFromPr,
   departmentsTitleLabel,
   buildApprovalsForDepartments,
   ensureDepartmentsMappedToUser,
+  assertCorporateApproversConfigured,
+  advanceCorporateApprovalStages,
+  actionableApprovalRows,
+  getActionableApprovalStage,
+  approvalStage,
   userHasApprovalRoleOnPr,
   pendingApprovalsForUser,
   deriveStatusAfterApprovals,
@@ -41,6 +51,24 @@ function assertCanActOnPr(req, pr) {
   return userHasApprovalRoleOnPr(req.user, pr);
 }
 
+function assertCanEditOrSubmitPr(req, pr) {
+  if (isProcurementAdminUser(req.user)) return true;
+  return isPrRequester(req.user, pr);
+}
+
+/** Requester: draft/rejected. Assigned approver (or admin): submitted/held/partially_approved before decision. */
+function assertCanAmendPr(req, pr) {
+  if (isProcurementAdminUser(req.user)) return true;
+  const status = String(pr.status || "").toLowerCase();
+  if (status === "draft" || status === "rejected") {
+    return isPrRequester(req.user, pr);
+  }
+  if (status === "submitted" || status === "held" || status === "partially_approved") {
+    return assertCanActOnPr(req, pr);
+  }
+  return false;
+}
+
 function syncTitleFromItems(items, fallbackTitle) {
   const depts = collectDepartmentsFromPr({ items, title: fallbackTitle });
   return departmentsTitleLabel(depts) || String(fallbackTitle || "").trim();
@@ -56,15 +84,7 @@ exports.list = async (req, res) => {
     if (location) query.location = String(location).trim();
     if (followUpStatus) query.followUpStatus = String(followUpStatus).trim();
 
-    // Non-admin approvers see PRs assigned to them for approval AND PRs they created
-    // (Requester & Approver dual role must still see own drafts/submissions).
-    if (canApproveRequisitions(req.user) && !isProcurementAdminUser(req.user)) {
-      query.$or = [
-        { requestedBy: req.user._id },
-        { assignedApprover: req.user._id },
-        { "approvals.approver": req.user._id },
-      ];
-    }
+    applyPurchaseRequisitionVisibility(query, req.user);
 
     let data = await populateRequisitionAudit(PurchaseRequisition.find(query))
       .sort({ createdAt: -1 })
@@ -88,9 +108,16 @@ exports.list = async (req, res) => {
 
 function userCanViewPr(req, pr) {
   if (isProcurementAdminUser(req.user)) return true;
-  if (String(pr.requestedBy?._id || pr.requestedBy) === String(req.user._id)) return true;
-  if (!canApproveRequisitions(req.user)) return true;
-  return userHasApprovalRoleOnPr(req.user, pr);
+  if (isPrRequester(req.user, pr)) return true;
+  if (canApproveRequisitions(req.user)) return userHasApprovalRoleOnPr(req.user, pr);
+  if (canCreatePurchaseOrders(req.user) && String(pr.status || "").toLowerCase() === "approved") {
+    return true;
+  }
+  // Read-only viewers (no create / approve / PO) may view company PRs
+  if (!canCreateRequisitions(req.user) && !canApproveRequisitions(req.user) && !canCreatePurchaseOrders(req.user)) {
+    return true;
+  }
+  return false;
 }
 
 exports.getById = async (req, res) => {
@@ -102,7 +129,7 @@ exports.getById = async (req, res) => {
     if (!data) return res.status(404).json({ success: false, message: "Requisition not found" });
 
     if (!userCanViewPr(req, data)) {
-      return res.status(403).json({ success: false, message: "This PR is assigned to another approver" });
+      return res.status(403).json({ success: false, message: "You do not have access to this purchase requisition" });
     }
 
     const [enriched] = await enrichPrsWithFulfillment(PurchaseOrder, company_id, [
@@ -152,7 +179,14 @@ exports.update = async (req, res) => {
     const company_id = getCompanyId(req);
     const existing = await PurchaseRequisition.findOne({ _id: req.params.id, company_id });
     if (!existing) return res.status(404).json({ success: false, message: "Requisition not found" });
-    if (["approved", "cancelled", "partially_approved", "submitted", "held"].includes(existing.status)) {
+    if (!assertCanAmendPr(req, existing)) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "You cannot edit this purchase requisition (only the requester on draft/rejected, or an assigned approver before approve/reject).",
+      });
+    }
+    if (["approved", "cancelled"].includes(existing.status)) {
       return res.status(400).json({
         success: false,
         message: `Cannot edit requisition in status: ${existing.status}`,
@@ -160,10 +194,21 @@ exports.update = async (req, res) => {
     }
     const body = req.body || {};
     const updates = { ...body };
+    // Never change workflow/audit fields via generic update
+    delete updates.status;
     delete updates.assignedApprover;
     delete updates.approvals;
     delete updates.approvedBy;
     delete updates.approvedAt;
+    delete updates.rejectedBy;
+    delete updates.rejectedAt;
+    delete updates.rejectionReason;
+    delete updates.heldBy;
+    delete updates.heldAt;
+    delete updates.holdReason;
+    delete updates.submittedBy;
+    delete updates.submittedAt;
+    delete updates.requestedBy;
     if (body.items) {
       const { items, subtotal } = computeLineTotals(body.items, body.exchangeRate ?? existing.exchangeRate);
       updates.items = items;
@@ -171,6 +216,39 @@ exports.update = async (req, res) => {
       updates.taxAmount = Number(body.taxAmount) || 0;
       updates.total = Math.round((subtotal + updates.taxAmount) * 100) / 100;
       updates.title = syncTitleFromItems(items, body.title ?? existing.title);
+
+      // If still in department approval stage and departments changed, rebuild dept rows
+      const stage = getActionableApprovalStage(existing.approvals || []);
+      if (
+        (existing.status === "submitted" ||
+          existing.status === "held" ||
+          existing.status === "partially_approved") &&
+        stage === "department"
+      ) {
+        const oldKeys = collectDepartmentsFromPr(existing)
+          .map((d) => normalizeDepartment(d))
+          .sort()
+          .join("|");
+        const newKeys = collectDepartmentsFromPr({ items, title: updates.title })
+          .map((d) => normalizeDepartment(d))
+          .sort()
+          .join("|");
+        if (oldKeys !== newKeys) {
+          const departments = collectDepartmentsFromPr({ items, title: updates.title });
+          const built = await buildApprovalsForDepartments(company_id, departments);
+          if (built.missing.length) {
+            return res.status(400).json({
+              success: false,
+              message: `No active approver for department(s): ${built.missing.map((d) => `"${d}"`).join(", ")}`,
+            });
+          }
+          const corporate = (existing.approvals || [])
+            .map((a) => (typeof a.toObject === "function" ? a.toObject() : { ...a }))
+            .filter((a) => approvalStage(a) !== "department");
+          updates.approvals = [...built.approvals, ...corporate];
+          updates.assignedApprover = firstPendingApproverId(updates.approvals) || existing.assignedApprover;
+        }
+      }
     } else if (body.title != null) {
       updates.title = String(body.title).trim();
     }
@@ -244,6 +322,12 @@ exports.submit = async (req, res) => {
     if (!existing) {
       return res.status(400).json({ success: false, message: "Requisition not found or cannot be submitted" });
     }
+    if (!assertCanEditOrSubmitPr(req, existing)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the requester can submit or resubmit this purchase requisition",
+      });
+    }
 
     const departments = collectDepartmentsFromPr(existing);
     if (!departments.length) {
@@ -256,6 +340,16 @@ exports.submit = async (req, res) => {
 
     // New departments introduced by the submitter are auto-mapped to them as approver.
     await ensureDepartmentsMappedToUser(company_id, departments, req.user);
+
+    const corporateMissing = await assertCorporateApproversConfigured(company_id);
+    if (corporateMissing.length) {
+      return res.status(400).json({
+        success: false,
+        message: `Corporate approvers not configured: ${corporateMissing
+          .map((d) => `"${d}"`)
+          .join(", ")}. Map Finance Manager and Boss under PR Approvers before submitting.`,
+      });
+    }
 
     let { approvals, missing } = await buildApprovalsForDepartments(company_id, departments);
     if (missing.length) {
@@ -349,25 +443,32 @@ exports.approve = async (req, res) => {
       return res.json({ success: true, data });
     }
 
-    const actorId = String(req.user?._id || "");
-    const isAdmin = isProcurementAdminUser(req.user);
-    let touched = 0;
-    for (const row of approvals) {
-      if (row.status !== "pending" && row.status !== "held") continue;
-      const mine = approvalApproverId(row) === actorId;
-      if (!mine && !isAdmin) continue;
-      row.status = "approved";
-      row.actedAt = new Date();
-      row.reason = "";
-      touched += 1;
-    }
-
-    if (touched === 0) {
+    // Only the current stage can be approved (departments → finance → boss).
+    const actionable = actionableApprovalRows(approvals, req.user);
+    if (!actionable.length) {
       return res.status(403).json({
         success: false,
         message:
-          "You have no pending department approval on this PR (another approver may still need to act).",
+          "You have no pending approval on the current stage of this PR (department, finance, or boss).",
       });
+    }
+
+    for (const row of actionable) {
+      row.status = "approved";
+      row.actedAt = new Date();
+      row.reason = "";
+    }
+
+    let newlyAdded = [];
+    try {
+      const advanced = await advanceCorporateApprovalStages(company_id, approvals);
+      approvals = advanced.approvals;
+      newlyAdded = advanced.newlyAdded || [];
+    } catch (advErr) {
+      if (advErr?.code === "CORPORATE_APPROVER_MISSING") {
+        return res.status(400).json({ success: false, message: advErr.message });
+      }
+      throw advErr;
     }
 
     const nextStatus = deriveStatusAfterApprovals(approvals);
@@ -394,6 +495,14 @@ exports.approve = async (req, res) => {
     );
     if (!data) {
       return res.status(400).json({ success: false, message: "Requisition not found or not awaiting approval" });
+    }
+
+    if (newlyAdded.length) {
+      void procurementPrNotificationService.notifyPrSubmittedToApprovers(
+        data,
+        req.user,
+        newlyAdded.map((r) => r.approver)
+      );
     }
 
     if (nextStatus === "approved") {
@@ -482,18 +591,23 @@ exports.hold = async (req, res) => {
       return res.status(403).json({ success: false, message: "This PR is assigned to another approver" });
     }
 
-    const actorId = String(req.user?._id || "");
-    const isAdmin = isProcurementAdminUser(req.user);
-    const approvals = (existing.approvals || []).map((a) => {
-      const row = typeof a.toObject === "function" ? a.toObject() : { ...a };
-      const mine = approvalApproverId(row) === actorId;
-      if (row.status === "pending" && (mine || isAdmin)) {
+    const approvals = (existing.approvals || []).map((a) =>
+      typeof a.toObject === "function" ? a.toObject() : { ...a }
+    );
+    const actionable = actionableApprovalRows(approvals, req.user);
+    if (!actionable.length) {
+      return res.status(403).json({
+        success: false,
+        message: "You have no pending approval on the current stage to hold.",
+      });
+    }
+    for (const row of actionable) {
+      if (row.status === "pending") {
         row.status = "held";
         row.actedAt = new Date();
         row.reason = reason;
       }
-      return row;
-    });
+    }
 
     const data = await populateRequisitionAudit(
       PurchaseRequisition.findOneAndUpdate(
@@ -582,6 +696,16 @@ exports.convertToPO = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Only fully approved requisitions can be converted to a PO (all department approvers must approve)",
+      });
+    }
+
+    // Buyers (po.create) may convert any approved PR they can see; requesters only their own
+    const permKeys = (req.user?.permissions || []).map((p) => (typeof p === "string" ? p : p?.key || ""));
+    const canBuyerConvert = permKeys.includes("procurement.po.create") || isProcurementAdminUser(req.user);
+    if (!canBuyerConvert && !isPrRequester(req.user, pr)) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only create a PO from your own approved purchase requisitions",
       });
     }
 
