@@ -139,12 +139,21 @@ export const chatApi = {
     if (options?.file) {
       const apiBase = getBackendUrl();
       const form = new FormData();
-      if (text) form.append("text", text);
-      if (options.replyTo) form.append("replyTo", options.replyTo);
       const blob = options.file;
       const name =
         options.fileName ||
         (blob instanceof File ? blob.name : `voice-${Date.now()}.webm`);
+      const mime = (blob.type || "").toLowerCase();
+      const autoCaption = mime.startsWith("image/")
+        ? "📷 Photo"
+        : mime.startsWith("video/")
+          ? "🎥 Video"
+          : mime.startsWith("audio/")
+            ? "🎵 Audio"
+            : `📄 ${name}`;
+      // Always send text so older backends / proxies that drop multipart still get a body field
+      form.append("text", text.trim() || autoCaption);
+      if (options.replyTo) form.append("replyTo", options.replyTo);
       form.append("file", blob, name);
       const headers = getAuthHeaders();
       delete headers["Content-Type"]; // let browser set multipart boundary
