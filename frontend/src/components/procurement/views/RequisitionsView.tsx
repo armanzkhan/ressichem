@@ -179,7 +179,7 @@ export function RequisitionsView({ section }: Props) {
   /** Buyers/admins: any approved PR. Requesters: only their own approved PRs. */
   const canConvertToPo = (row: PurchaseDocument) =>
     row.status === "approved" &&
-    (canConvertAnyApprovedPo || (canCreate && (accessLevel === "admin" || isOwnPr(row))));
+    (canConvertAnyApprovedPo || (canCreate && isOwnPr(row)));
 
   /** Only the requester (or admin) may edit / submit / resubmit draft or rejected PRs */
   const canEditOrSubmitPr = (row: PurchaseDocument) =>
