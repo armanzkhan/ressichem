@@ -178,10 +178,20 @@ export default function WhatsAppMessenger() {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordChunksRef = useRef<Blob[]>([]);
+
+  const triggerFileInput = (ref: React.RefObject<HTMLInputElement | null>) => {
+    // Must stay in the same user-gesture turn — do not await/setState before click()
+    const el = ref.current;
+    if (!el) return;
+    el.value = "";
+    el.click();
+  };
 
   const mentionCandidates = useMemo(() => {
     if (!active || active.type !== "group") return [];
@@ -446,26 +456,70 @@ export default function WhatsAppMessenger() {
       setError("Sign in to send voice notes");
       return;
     }
+    setAttachMenuOpen(false);
+
+    // Browsers block mic on plain HTTP (LAN/VPS) except localhost
+    const secure =
+      typeof window !== "undefined" &&
+      (window.isSecureContext ||
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1");
+    if (!secure || !navigator.mediaDevices?.getUserMedia) {
+      setError(
+        "Live mic needs HTTPS (or localhost). On HTTP, pick an audio file instead."
+      );
+      triggerFileInput(audioInputRef);
+      return;
+    }
+    if (typeof MediaRecorder === "undefined") {
+      setError("Voice recording is not supported in this browser. Pick an audio file instead.");
+      triggerFileInput(audioInputRef);
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const mime = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4")
+          ? "audio/mp4"
+          : "";
+      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
       recordChunksRef.current = [];
       recorder.ondataavailable = (ev) => {
         if (ev.data.size > 0) recordChunksRef.current.push(ev.data);
       };
       recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(recordChunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        const file = new File([blob], `voice-${Date.now()}.webm`, { type: blob.type });
+        const blob = new Blob(recordChunksRef.current, {
+          type: recorder.mimeType || mime || "audio/webm",
+        });
+        if (!blob.size) {
+          setError("No audio captured — try again or attach an audio file");
+          setRecording(false);
+          return;
+        }
+        const ext = (recorder.mimeType || mime).includes("mp4") ? "mp4" : "webm";
+        const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: blob.type });
         pickFile(file);
         setRecording(false);
       };
       mediaRecorderRef.current = recorder;
       recorder.start();
       setRecording(true);
-      setAttachMenuOpen(false);
-    } catch {
-      setError("Microphone permission denied");
+      setError("");
+    } catch (err) {
+      const name = err instanceof DOMException ? err.name : "";
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        setError(
+          "Microphone blocked in the browser. Allow mic for this site, or attach an audio file."
+        );
+      } else if (name === "NotFoundError") {
+        setError("No microphone found. Attach an audio file instead.");
+      } else {
+        setError("Could not start microphone. Attach an audio file instead.");
+      }
+      triggerFileInput(audioInputRef);
     }
   };
 
@@ -914,12 +968,36 @@ export default function WhatsAppMessenger() {
                 })}
                 <div ref={bottomRef} />
               </div>
-              <form onSubmit={send} className="bg-[#202c33] p-2 flex flex-col gap-2 shrink-0 min-w-0 overflow-hidden relative">
+              <form
+                onSubmit={send}
+                className="bg-[#202c33] p-2 flex flex-col gap-2 shrink-0 min-w-0 overflow-visible relative"
+              >
+                {/* opacity/size trick — display:none often blocks programmatic .click() */}
                 <input
-                  ref={fileInputRef}
+                  ref={photoInputRef}
                   type="file"
-                  className="hidden"
-                  accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,application/pdf"
+                  className="pointer-events-none absolute h-px w-px opacity-0"
+                  accept="image/*,video/*"
+                  onChange={(e) => {
+                    pickFile(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <input
+                  ref={docInputRef}
+                  type="file"
+                  className="pointer-events-none absolute h-px w-px opacity-0"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={(e) => {
+                    pickFile(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <input
+                  ref={audioInputRef}
+                  type="file"
+                  className="pointer-events-none absolute h-px w-px opacity-0"
+                  accept="audio/*,.mp3,.wav,.m4a,.ogg,.webm"
                   onChange={(e) => {
                     pickFile(e.target.files?.[0]);
                     e.target.value = "";
@@ -928,7 +1006,7 @@ export default function WhatsAppMessenger() {
                 <input
                   ref={cameraInputRef}
                   type="file"
-                  className="hidden"
+                  className="pointer-events-none absolute h-px w-px opacity-0"
                   accept="image/*,video/*"
                   capture="environment"
                   onChange={(e) => {
@@ -1017,14 +1095,14 @@ export default function WhatsAppMessenger() {
                   </div>
                 ) : null}
                 {attachMenuOpen ? (
-                  <div className="absolute bottom-16 left-2 z-10 w-48 rounded-xl bg-[#233138] shadow-xl border border-white/10 overflow-hidden">
+                  <div className="absolute bottom-full left-2 z-20 mb-2 w-52 rounded-xl bg-[#233138] shadow-xl border border-white/10 overflow-hidden">
                     <button
                       type="button"
                       className="w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-white/5"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
+                        triggerFileInput(photoInputRef);
                         setAttachMenuOpen(false);
-                        fileInputRef.current?.setAttribute("accept", "image/*,video/*");
-                        fileInputRef.current?.click();
                       }}
                     >
                       <ImageIcon className="h-4 w-4 text-purple-400" /> Photos &amp; videos
@@ -1032,9 +1110,10 @@ export default function WhatsAppMessenger() {
                     <button
                       type="button"
                       className="w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-white/5"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
+                        triggerFileInput(cameraInputRef);
                         setAttachMenuOpen(false);
-                        cameraInputRef.current?.click();
                       }}
                     >
                       <Camera className="h-4 w-4 text-pink-400" /> Camera
@@ -1042,13 +1121,10 @@ export default function WhatsAppMessenger() {
                     <button
                       type="button"
                       className="w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-white/5"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
+                        triggerFileInput(docInputRef);
                         setAttachMenuOpen(false);
-                        fileInputRef.current?.setAttribute(
-                          "accept",
-                          ".pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,application/pdf"
-                        );
-                        fileInputRef.current?.click();
                       }}
                     >
                       <FileText className="h-4 w-4 text-sky-400" /> Document
@@ -1056,9 +1132,21 @@ export default function WhatsAppMessenger() {
                     <button
                       type="button"
                       className="w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-white/5"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        triggerFileInput(audioInputRef);
+                        setAttachMenuOpen(false);
+                      }}
+                    >
+                      <Mic className="h-4 w-4 text-amber-400" /> Audio file
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-white/5"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => void startVoiceNote()}
                     >
-                      <Mic className="h-4 w-4 text-orange-400" /> Voice note
+                      <Mic className="h-4 w-4 text-orange-400" /> Record voice
                     </button>
                   </div>
                 ) : null}
