@@ -182,10 +182,12 @@ export function RequisitionsView({ section }: Props) {
     (canConvertAnyApprovedPo || (canCreate && isOwnPr(row)));
 
   /** Only the requester (or admin) may edit / submit / resubmit draft or rejected PRs */
-  const canEditOrSubmitPr = (row: PurchaseDocument) =>
-    canCreate &&
-    (row.status === "draft" || row.status === "rejected") &&
-    (accessLevel === "admin" || isOwnPr(row));
+  const canEditOrSubmitPr = (row: PurchaseDocument) => {
+    if (!canCreate) return false;
+    if (row.status !== "draft" && row.status !== "rejected") return false;
+    if (accessLevel === "admin") return true;
+    return isOwnPr(row);
+  };
 
   /** Assigned approver (or admin) may amend content before approve / hold / reject */
   const canApproverAmendPr = (row: PurchaseDocument) =>
