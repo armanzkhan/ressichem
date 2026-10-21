@@ -189,7 +189,7 @@ export function RequisitionsView({ section }: Props) {
 
   /** Assigned approver (or admin) may amend content before approve / hold / reject */
   const canApproverAmendPr = (row: PurchaseDocument) =>
-    (canApprove || accessLevel === "admin") &&
+    canApprove &&
     (row.status === "submitted" || row.status === "held" || row.status === "partially_approved");
 
   const canOpenEditForm = (row: PurchaseDocument) => canEditOrSubmitPr(row) || canApproverAmendPr(row);
