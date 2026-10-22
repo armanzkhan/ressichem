@@ -416,7 +416,7 @@ exports.approve = async (req, res) => {
       return res.status(403).json({ success: false, message: "This PR is assigned to another approver" });
     }
 
-    const approvals = (existing.approvals || []).map((a) =>
+    let approvals = (existing.approvals || []).map((a) =>
       typeof a.toObject === "function" ? a.toObject() : { ...a }
     );
 
