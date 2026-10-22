@@ -176,10 +176,17 @@ export function RequisitionsView({ section }: Props) {
   };
 
   const canConvertAnyApprovedPo = accessLevel === "buyer" || accessLevel === "admin";
-  /** Buyers/admins: any approved PR. Requesters: only their own approved PRs. */
-  const canConvertToPo = (row: PurchaseDocument) =>
-    row.status === "approved" &&
-    (canConvertAnyApprovedPo || (canCreate && isOwnPr(row)));
+  /**
+   * Buyers/admins: any approved PR. Requesters: only their own approved PRs.
+   * Hide once a PO already exists (drafting / purchased / delivered). Allow again if the only PO was cancelled.
+   */
+  const canConvertToPo = (row: PurchaseDocument) => {
+    if (row.status !== "approved") return false;
+    if (!(canConvertAnyApprovedPo || (canCreate && isOwnPr(row)))) return false;
+    const fulfillment = String(row.fulfillmentStatus || row.stockStatus || "awaiting_po").toLowerCase();
+    const alreadyHasPo = ["po_draft", "issued", "partial", "received", "closed"].includes(fulfillment);
+    return !alreadyHasPo;
+  };
 
   /** Only the requester (or admin) may edit / submit / resubmit draft or rejected PRs */
   const canEditOrSubmitPr = (row: PurchaseDocument) => {
