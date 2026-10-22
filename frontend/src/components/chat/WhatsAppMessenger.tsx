@@ -458,7 +458,11 @@ export default function WhatsAppMessenger() {
       window.isSecureContext ||
       window.location.hostname === "localhost" ||
       window.location.hostname === "127.0.0.1";
-    return Boolean(secure && navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined");
+    return Boolean(
+      secure &&
+        typeof navigator.mediaDevices?.getUserMedia === "function" &&
+        typeof MediaRecorder !== "undefined"
+    );
   };
 
   const startVoiceNote = async () => {
