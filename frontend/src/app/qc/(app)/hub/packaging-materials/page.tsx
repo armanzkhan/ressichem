@@ -167,7 +167,7 @@ export default function HubPackagingMaterialsPage() {
       <div className="flex justify-between items-center gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Packaging Material QC</h1>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             Create, edit, and delete packaging inspections with test results
           </p>
         </div>
@@ -210,7 +210,7 @@ export default function HubPackagingMaterialsPage() {
               <select
                 value={form.materialType}
                 onChange={(e) => setForm({ ...form, materialType: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-900"
+                className="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
               >
                 {PACKAGING_MATERIAL_TYPES.map((t) => (
                   <option key={t} value={t}>
@@ -225,7 +225,7 @@ export default function HubPackagingMaterialsPage() {
                 required
                 value={form.materialName || ""}
                 onChange={(e) => setForm({ ...form, materialName: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-900"
+                className="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
               />
             </div>
             <div>
@@ -234,7 +234,7 @@ export default function HubPackagingMaterialsPage() {
                 required
                 value={form.batchNo || ""}
                 onChange={(e) => setForm({ ...form, batchNo: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-900"
+                className="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
               />
             </div>
             <div>
@@ -243,7 +243,7 @@ export default function HubPackagingMaterialsPage() {
                 required
                 value={form.supplier || ""}
                 onChange={(e) => setForm({ ...form, supplier: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-900"
+                className="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
               />
             </div>
             <div className="md:col-span-2">
@@ -251,7 +251,7 @@ export default function HubPackagingMaterialsPage() {
               <textarea
                 value={form.remarks || ""}
                 onChange={(e) => setForm({ ...form, remarks: e.target.value })}
-                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-900"
+                className="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                 rows={2}
               />
             </div>
@@ -270,7 +270,7 @@ export default function HubPackagingMaterialsPage() {
                     value={results[field.key] || ""}
                     onChange={(e) => setResults({ ...results, [field.key]: e.target.value })}
                     placeholder={field.placeholder}
-                    className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-900"
+                    className="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                   />
                 </div>
               ))}
@@ -298,7 +298,7 @@ export default function HubPackagingMaterialsPage() {
 
       <div className="rounded-xl border overflow-x-auto bg-white dark:bg-gray-800">
         {loading ? (
-          <div className="px-4 py-8 text-center text-gray-500">Loading...</div>
+          <div className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...</div>
         ) : (
           <table className="min-w-full text-sm">
             <thead>
@@ -365,7 +365,7 @@ export default function HubPackagingMaterialsPage() {
                             <button
                               type="button"
                               onClick={() => setExpandedId(isExpanded ? null : r._id)}
-                              className="text-xs text-blue-600 hover:underline"
+                              className="text-xs text-blue-600 hover:underline dark:text-blue-300"
                             >
                               {isExpanded ? "Hide details" : "View details"}
                             </button>
@@ -409,7 +409,7 @@ export default function HubPackagingMaterialsPage() {
                                 key={`${r._id}-${entry.label}`}
                                 className="rounded-lg border border-blue-100 dark:border-blue-800 bg-white dark:bg-gray-900 px-3 py-2"
                               >
-                                <div className="text-gray-500">{entry.label}</div>
+                                <div className="text-gray-500 dark:text-gray-400">{entry.label}</div>
                                 <div className="font-semibold text-gray-900 dark:text-white">
                                   {entry.value}
                                 </div>
@@ -424,7 +424,7 @@ export default function HubPackagingMaterialsPage() {
               })}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={canDelete ? 8 : 7} className="px-3 py-8 text-center text-gray-500">
+                  <td colSpan={canDelete ? 8 : 7} className="px-3 py-8 text-center text-gray-500 dark:text-gray-400">
                     No packaging inspections yet. Click <strong>+ New Inspection</strong> to create one.
                   </td>
                 </tr>

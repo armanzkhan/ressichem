@@ -15,7 +15,14 @@ import { AddableSelect } from "@/components/procurement/AddableSelect";
 import { getCountryCode } from "@/lib/countryCodes";
 import { getCountryDialCode } from "@/lib/countryDialCodes";
 import { CountryCombobox } from "@/components/procurement/CountryCombobox";
-import { Field, FormLabel, Modal, procurementControlClass, procurementLabelClass } from "@/components/procurement/procurement-ui";
+import {
+  Field,
+  FormLabel,
+  Modal,
+  procurementControlClass,
+  procurementLabelClass,
+  procurementSecondaryButtonClass,
+} from "@/components/procurement/procurement-ui";
 
 export type SupplierFormState = {
   name: string;
@@ -212,18 +219,20 @@ export function SupplierFormModal({
       onClose={onClose}
     >
       <form onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {error ? <p className="text-sm text-red-600 sm:col-span-2">{error}</p> : null}
+        {error ? (
+          <p className="text-sm text-red-600 sm:col-span-2 dark:text-red-300">{error}</p>
+        ) : null}
         {editingId ? (
           <FormLabel className="sm:col-span-2">
             Supplier code
             <input
               readOnly
               value={editingCode}
-              className={`${procurementControlClass} mt-1 bg-blue-50`}
+              className={`${procurementControlClass} mt-1 bg-blue-50 dark:bg-slate-800`}
             />
           </FormLabel>
         ) : (
-          <p className="text-sm text-blue-600 sm:col-span-2">
+          <p className="text-sm text-blue-600 sm:col-span-2 dark:text-blue-300">
             Supplier code will be assigned automatically (e.g. SUP-2026-00001).
           </p>
         )}
@@ -349,11 +358,7 @@ export function SupplierFormModal({
           onChange={(v) => setForm((prev) => ({ ...prev, banking: { ...prev.banking, address: v } }))}
         />
         <footer className="sm:col-span-2 flex justify-end gap-2 pt-2">
-          <button
-            type="button"
-            className="px-4 py-2 rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50"
-            onClick={onClose}
-          >
+          <button type="button" className={procurementSecondaryButtonClass} onClick={onClose}>
             Cancel
           </button>
           <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg bg-blue-600 text-white">

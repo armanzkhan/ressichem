@@ -264,7 +264,7 @@ export default function ProcurementLayout({ children }: { children: React.ReactN
     "bg-white text-blue-800 border-r border-blue-100 flex flex-col shadow-sm overflow-hidden relative dark:bg-slate-900 dark:text-blue-100 dark:border-slate-800";
 
   return (
-    <div className="min-h-dvh w-full max-w-[100vw] overflow-x-hidden bg-[radial-gradient(ellipse_at_top,_#eff6ff_0%,_#ffffff_55%)] dark:bg-slate-950 dark:bg-none flex flex-col lg:flex-row">
+    <div className="h-dvh w-full max-w-[100vw] overflow-hidden bg-[radial-gradient(ellipse_at_top,_#eff6ff_0%,_#ffffff_55%)] dark:bg-slate-950 dark:bg-none flex flex-col lg:flex-row">
       {/* Mobile drawer — portal-style overlay; never reserves a left column */}
       {sidebarOpen ? (
         <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
@@ -282,13 +282,13 @@ export default function ProcurementLayout({ children }: { children: React.ReactN
         </div>
       ) : null}
 
-      {/* Desktop sidebar only — hidden on phones so content is full width */}
-      <aside className={`hidden lg:flex w-72 h-dvh shrink-0 sticky top-0 ${asideShellClass}`}>
+      {/* Desktop sidebar — full viewport height; content column scrolls independently */}
+      <aside className={`hidden lg:flex w-72 h-full shrink-0 ${asideShellClass}`}>
         {renderSidebar()}
       </aside>
 
-      <div className="flex flex-col min-w-0 w-full flex-1">
-        <header className="sticky top-0 z-30 border-b border-blue-100/80 bg-white/85 px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2 backdrop-blur-xl dark:bg-slate-900/90 dark:border-slate-800">
+      <div className="flex flex-col min-w-0 w-full flex-1 min-h-0 h-full">
+        <header className="shrink-0 z-30 border-b border-blue-100/80 bg-white/85 px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2 backdrop-blur-xl dark:bg-slate-900/90 dark:border-slate-800">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <button
               type="button"
@@ -342,7 +342,7 @@ export default function ProcurementLayout({ children }: { children: React.ReactN
             </button>
           </div>
         </header>
-        <main className="flex-1 w-full min-w-0 p-3 sm:p-6 overflow-x-hidden overflow-y-auto text-blue-800 dark:text-blue-100">
+        <main className="flex-1 w-full min-w-0 min-h-0 p-3 sm:p-6 overflow-x-hidden overflow-y-auto text-blue-800 dark:text-blue-100">
           {children}
         </main>
       </div>

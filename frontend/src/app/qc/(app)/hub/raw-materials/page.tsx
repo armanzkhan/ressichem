@@ -323,7 +323,7 @@ export default function RawMaterialsPage() {
                   required
                   value={formData.materialCode || ""}
                   onChange={(e) => setFormData({ ...formData, materialCode: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-900"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                 />
               </div>
               <div>
@@ -333,7 +333,7 @@ export default function RawMaterialsPage() {
                   required
                   value={formData.materialName || ""}
                   onChange={(e) => setFormData({ ...formData, materialName: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-900"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                 />
               </div>
               <div>
@@ -345,7 +345,7 @@ export default function RawMaterialsPage() {
                     setFormData({ ...formData, category: e.target.value });
                     setTestValues({});
                   }}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-900"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                 >
                   <option value="">Select...</option>
                   <option value="CEMENT">Cement</option>
@@ -380,7 +380,7 @@ export default function RawMaterialsPage() {
                           onChange={(e) =>
                             setTestValues({ ...testValues, [test.code]: e.target.value })
                           }
-                          className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-900"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                           placeholder={
                             test.code === "SIEVE_ANALYSIS" ? "e.g. Pass / % retained" : ""
                           }
@@ -390,7 +390,7 @@ export default function RawMaterialsPage() {
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
                   Select a category to enter Cement / Sand / Other QC parameters.
                 </p>
               )}
@@ -413,7 +413,7 @@ export default function RawMaterialsPage() {
                       setTestValues({});
                       setSievePassing(emptySievePassing());
                     }}
-                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-900"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                   >
                     <option value="">Select material...</option>
                     {materials.map((m) => (
@@ -436,7 +436,7 @@ export default function RawMaterialsPage() {
                     required
                     value={formData.batchNo || ""}
                     onChange={(e) => setFormData({ ...formData, batchNo: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-900"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                   />
                 </div>
                 <div>
@@ -447,7 +447,7 @@ export default function RawMaterialsPage() {
                     step="any"
                     value={formData.quantity || ""}
                     onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-900"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                   />
                 </div>
                 <div>
@@ -456,7 +456,7 @@ export default function RawMaterialsPage() {
                     type="text"
                     value={formData.unit || "kg"}
                     onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-900"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                   />
                 </div>
               </div>
@@ -467,12 +467,12 @@ export default function RawMaterialsPage() {
                   {selectedMaterial?.category ? ` — ${selectedMaterial.category}` : ""}
                 </h4>
                 {!formData.rawMaterial ? (
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
                     Select a raw material above — Cement / Sand / Other test fields will appear here
                     (same as Add Material).
                   </p>
                 ) : batchTestFields.length === 0 ? (
-                  <p className="text-sm text-gray-500">No tests configured for this category.</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No tests configured for this category.</p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {batchTestFields.map((test) => (
@@ -492,7 +492,7 @@ export default function RawMaterialsPage() {
                           onChange={(e) =>
                             setTestValues({ ...testValues, [test.code]: e.target.value })
                           }
-                          className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-gray-900"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                           placeholder={
                             test.code === "SIEVE_ANALYSIS" ? "e.g. Pass / % retained" : ""
                           }
@@ -514,7 +514,7 @@ export default function RawMaterialsPage() {
                 <textarea
                   value={formData.remarks || ""}
                   onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-900"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                   rows={2}
                 />
               </div>
@@ -558,22 +558,22 @@ export default function RawMaterialsPage() {
               )}
               {activeTab === "materials" ? (
                 <>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC Parameters</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">Code</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">Category</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">QC Parameters</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">Actions</th>
                 </>
               ) : (
                 <>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch No</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Results Preview</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">Batch No</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">Material</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">Category</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">Qty</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">Results Preview</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">Status</th>
                   {canDelete && (
-                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-300">Actions</th>
                   )}
                 </>
               )}
@@ -602,7 +602,7 @@ export default function RawMaterialsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Link href={`/qc/hub/raw-materials/${material._id}`} className="text-blue-600 hover:underline">
+                      <Link href={`/qc/hub/raw-materials/${material._id}`} className="text-blue-600 hover:underline dark:text-blue-300">
                         View
                       </Link>
                       {canDelete && (
@@ -634,7 +634,7 @@ export default function RawMaterialsPage() {
                     {batch.rawMaterial?._id ? (
                       <Link
                         href={`/qc/hub/raw-materials/${batch.rawMaterial._id}`}
-                        className="text-blue-600 hover:underline"
+                        className="text-blue-600 hover:underline dark:text-blue-300"
                       >
                         {batch.rawMaterial?.materialName || "N/A"}
                       </Link>
@@ -681,10 +681,10 @@ export default function RawMaterialsPage() {
           </tbody>
         </table>
         {activeTab === "materials" && materials.length === 0 && (
-          <div className="text-center py-8 text-gray-500">No materials found</div>
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">No materials found</div>
         )}
         {activeTab === "batches" && batches.length === 0 && (
-          <div className="text-center py-8 text-gray-500">No batches found</div>
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">No batches found</div>
         )}
       </div>
     </div>

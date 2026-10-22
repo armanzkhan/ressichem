@@ -277,6 +277,50 @@ exports.close = async (req, res) => {
   }
 };
 
+/** Cancel a draft/issued PO (keeps the record visible as cancelled so PR can open Create PO again). */
+exports.cancel = async (req, res) => {
+  try {
+    const company_id = getCompanyId(req);
+    const existing = await PurchaseOrder.findOne({
+      _id: req.params.id,
+      company_id,
+      isActive: { $ne: false },
+    });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Purchase order not found" });
+    }
+    const status = String(existing.status || "").toLowerCase();
+    if (!["draft", "issued"].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot cancel a PO in status "${existing.status}". Only draft or issued POs can be cancelled (receive/close first if goods arrived).`,
+      });
+    }
+
+    const data = await PurchaseOrder.findOneAndUpdate(
+      { _id: existing._id, company_id, status: { $in: ["draft", "issued"] } },
+      {
+        status: "cancelled",
+        cancelledAt: new Date(),
+        cancelledBy: req.user?._id,
+        cancelReason: String(req.body?.reason || "").trim(),
+        updatedBy: req.user?._id,
+      },
+      { new: true }
+    )
+      .populate("supplier", "supplierCode name")
+      .populate("suppliers", "supplierCode name")
+      .lean();
+
+    if (!data) {
+      return res.status(400).json({ success: false, message: "Purchase order could not be cancelled" });
+    }
+    return res.json({ success: true, data, message: "Purchase order cancelled" });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 exports.remove = async (req, res) => {
   try {
     if (!canDeletePurchaseOrder(req.user)) {

@@ -248,6 +248,26 @@ function getAllModules() {
   return Object.values(QC_MODULES);
 }
 
+/** Parameter keys that are 28-day delayed tests (flexural / compressive / adhesion, etc.). */
+function get28DayParamKeys(moduleKey) {
+  const mod = getModuleByKey(moduleKey);
+  if (!mod) return [];
+  return (mod.parameters || [])
+    .filter((p) => {
+      const key = String(p.key || "");
+      const label = String(p.label || "").toLowerCase();
+      return /28Days$/i.test(key) || label.includes("28 day") || label.includes("28-day");
+    })
+    .map((p) => p.key);
+}
+
+function isParamEmpty(value) {
+  if (value == null) return true;
+  if (typeof value === "string") return value.trim() === "";
+  if (typeof value === "number") return Number.isNaN(value);
+  return false;
+}
+
 module.exports = {
   QC_MODULES,
   RAW_MATERIAL_TYPES,
@@ -259,4 +279,6 @@ module.exports = {
   getModuleByKey,
   getModuleBySlug,
   getAllModules,
+  get28DayParamKeys,
+  isParamEmpty,
 };

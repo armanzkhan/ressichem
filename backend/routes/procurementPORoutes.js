@@ -16,6 +16,7 @@ router.put("/:id", permissionMiddleware(["procurement.po.update"]), ctrl.update)
 router.post("/:id/issue", permissionMiddleware(["procurement.po.approve"]), ctrl.issue);
 router.post("/:id/receive", permissionMiddleware(["procurement.po.update"]), ctrl.receive);
 router.post("/:id/close", permissionMiddleware(["procurement.po.update"]), ctrl.close);
+router.post("/:id/cancel", permissionMiddleware(["procurement.po.update"]), ctrl.cancel);
 // Admin-only delete (controller also enforces Procurement Admin / po.delete)
 router.delete("/:id", permissionMiddleware(["procurement.access"]), ctrl.remove);
 

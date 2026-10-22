@@ -27,6 +27,10 @@ const QCHubBatchRecordSchema = new mongoose.Schema(
     productName: { type: String, required: true, index: true },
     grade: { type: String, default: "", index: true },
     batchNo: { type: String, required: true, index: true },
+    /** External / logistics tracking reference for the batch */
+    trackingNo: { type: String, default: "", index: true },
+    /** Sample cast / mould date — 28-day flexural/compressive due = castDate + 28 */
+    castDate: { type: Date, index: true },
     testDate: { type: Date, default: Date.now, index: true },
 
     parameters: { type: mongoose.Schema.Types.Mixed, default: {} },
@@ -56,5 +60,6 @@ const QCHubBatchRecordSchema = new mongoose.Schema(
 
 QCHubBatchRecordSchema.index({ company_id: 1, module: 1, batchNo: 1, testDate: -1 });
 QCHubBatchRecordSchema.index({ company_id: 1, productName: 1, grade: 1, testDate: -1 });
+QCHubBatchRecordSchema.index({ company_id: 1, trackingNo: 1 });
 
 module.exports = mongoose.model("QCHubBatchRecord", QCHubBatchRecordSchema);

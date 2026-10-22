@@ -28,11 +28,17 @@ const purchaseOrderSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true, index: true },
     deletedAt: { type: Date },
     deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    /** Business cancel (record stays listed; PR can create a new PO) */
+    cancelledAt: { type: Date },
+    cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    cancelReason: { type: String, default: "" },
     ...commercialDocumentFields,
   },
   { timestamps: true }
 );
 
 purchaseOrderSchema.index({ company_id: 1, poNumber: 1 }, { unique: true });
+/** Speeds PR list fulfillment enrich (find POs by requisition ids) */
+purchaseOrderSchema.index({ company_id: 1, requisition: 1, isActive: 1 });
 
 module.exports = mongoose.model("PurchaseOrder", purchaseOrderSchema);

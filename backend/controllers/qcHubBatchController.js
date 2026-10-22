@@ -2,10 +2,35 @@ const QCHubBatchRecord = require("../models/QCHubBatchRecord");
 const QCAttachment = require("../models/QCAttachment");
 const { writeAudit } = require("../utils/qcAudit");
 const { autoIndexHubDocument } = require("../utils/qcHubAutoIndex");
-const { getModuleByKey, getAllModules } = require("../utils/qcHubDryMortarSrs");
+const {
+  getModuleByKey,
+  getAllModules,
+  get28DayParamKeys,
+  isParamEmpty,
+} = require("../utils/qcHubDryMortarSrs");
 
 function getCompanyId(req) {
   return req.headers["x-company-id"] || req.user?.company_id || "RESSICHEM";
+}
+
+function toLocalDateOnly(value) {
+  const d = value ? new Date(value) : new Date();
+  if (Number.isNaN(d.getTime())) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function addDaysLocal(dateOnly, days) {
+  const d = new Date(dateOnly.getTime());
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function sameLocalDay(a, b) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
 }
 
 exports.getModules = async (_req, res) => {
@@ -15,12 +40,13 @@ exports.getModules = async (_req, res) => {
 exports.list = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
-    const { module, category, productName, batchNo, status, from, to, page = 1, limit = 50 } = req.query;
+    const { module, category, productName, batchNo, trackingNo, status, from, to, page = 1, limit = 50 } = req.query;
     const filter = { company_id, isActive: true };
     if (module) filter.module = String(module);
     if (category) filter.category = String(category);
     if (productName) filter.productName = { $regex: productName, $options: "i" };
     if (batchNo) filter.batchNo = { $regex: batchNo, $options: "i" };
+    if (trackingNo) filter.trackingNo = { $regex: trackingNo, $options: "i" };
     if (status) filter.status = String(status);
     if (from || to) {
       filter.testDate = {};
@@ -71,6 +97,9 @@ exports.create = async (req, res) => {
       return res.status(400).json({ success: false, message: "productName and batchNo are required" });
     }
 
+    const testDate = body.testDate ? new Date(body.testDate) : new Date();
+    const castDate = body.castDate ? new Date(body.castDate) : testDate;
+
     const doc = await QCHubBatchRecord.create({
       company_id,
       module: body.module,
@@ -78,7 +107,9 @@ exports.create = async (req, res) => {
       productName: body.productName,
       grade: body.grade || "",
       batchNo: body.batchNo,
-      testDate: body.testDate ? new Date(body.testDate) : new Date(),
+      trackingNo: String(body.trackingNo || "").trim(),
+      castDate,
+      testDate,
       parameters: body.parameters || {},
       remarks: body.remarks || "",
       status: "draft",
@@ -120,6 +151,13 @@ exports.update = async (req, res) => {
         productName: body.productName ?? before.productName,
         grade: body.grade ?? before.grade,
         batchNo: body.batchNo ?? before.batchNo,
+        trackingNo:
+          body.trackingNo !== undefined ? String(body.trackingNo || "").trim() : before.trackingNo,
+        castDate: body.castDate
+          ? new Date(body.castDate)
+          : body.castDate === null
+            ? before.castDate
+            : before.castDate || before.testDate,
         testDate: body.testDate ? new Date(body.testDate) : before.testDate,
         parameters: body.parameters ?? before.parameters,
         remarks: body.remarks ?? before.remarks,
@@ -257,6 +295,96 @@ exports.uploadAttachment = async (req, res) => {
     res.status(201).json({ success: true, data: populated });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/**
+ * Samples whose 28-day flexural / compressive / adhesion tests are due today or overdue
+ * and still missing results. Due date = (castDate || testDate) + 28 days.
+ */
+exports.get28DayDue = async (req, res) => {
+  try {
+    const company_id = getCompanyId(req);
+    const moduleFilter = req.query.module ? String(req.query.module) : "";
+    const today = toLocalDateOnly(new Date());
+    // Look back far enough that overdue items still appear; cast+28 within ~2 years
+    const earliestCast = addDaysLocal(today, -400);
+
+    const filter = {
+      company_id,
+      isActive: true,
+      status: { $ne: "rejected" },
+      $or: [
+        { castDate: { $gte: earliestCast, $lte: today } },
+        { castDate: null, testDate: { $gte: earliestCast, $lte: today } },
+        { castDate: { $exists: false }, testDate: { $gte: earliestCast, $lte: today } },
+      ],
+    };
+    if (moduleFilter) filter.module = moduleFilter;
+
+    const rows = await QCHubBatchRecord.find(filter)
+      .sort({ castDate: 1, testDate: 1 })
+      .select(
+        "module category productName grade batchNo trackingNo castDate testDate parameters status"
+      )
+      .lean();
+
+    const dueToday = [];
+    const overdue = [];
+
+    for (const row of rows) {
+      const keys = get28DayParamKeys(row.module);
+      if (!keys.length) continue;
+
+      const pendingKeys = keys.filter((k) => isParamEmpty(row.parameters?.[k]));
+      if (!pendingKeys.length) continue;
+
+      const cast = toLocalDateOnly(row.castDate || row.testDate);
+      if (!cast) continue;
+      const dueDate = addDaysLocal(cast, 28);
+      if (dueDate > today) continue;
+
+      const mod = getModuleByKey(row.module);
+      const pendingLabels = pendingKeys.map((k) => {
+        const p = mod?.parameters?.find((x) => x.key === k);
+        return p?.label || k;
+      });
+
+      const item = {
+        _id: row._id,
+        module: row.module,
+        moduleLabel: mod?.label || row.module,
+        moduleSlug: mod?.slug || "",
+        category: row.category || "",
+        productName: row.productName,
+        grade: row.grade || "",
+        batchNo: row.batchNo,
+        trackingNo: row.trackingNo || "",
+        castDate: cast,
+        dueDate,
+        status: row.status,
+        pendingKeys,
+        pendingLabels,
+        daysOverdue: Math.round((today - dueDate) / (1000 * 60 * 60 * 24)),
+      };
+
+      if (sameLocalDay(dueDate, today)) dueToday.push(item);
+      else overdue.push(item);
+    }
+
+    overdue.sort((a, b) => b.daysOverdue - a.daysOverdue);
+
+    return res.json({
+      success: true,
+      data: {
+        asOf: today,
+        dueToday,
+        overdue,
+        total: dueToday.length + overdue.length,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 

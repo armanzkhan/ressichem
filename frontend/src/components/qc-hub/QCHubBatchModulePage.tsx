@@ -5,6 +5,9 @@ import {
   QcModuleDef,
   compactSievePassing,
   emptySievePassing,
+  get28DayDueDate,
+  get28DayParamKeys,
+  is28DayParamEmpty,
   normalizeSievePassing,
   type SievePassingMap,
 } from "@/lib/qcHubDryMortarSrs";
@@ -19,6 +22,8 @@ type BatchRecord = {
   productName: string;
   grade: string;
   batchNo: string;
+  trackingNo?: string;
+  castDate?: string;
   testDate: string;
   parameters: Record<string, string | number | Record<string, string>>;
   remarks?: string;
@@ -27,11 +32,31 @@ type BatchRecord = {
   attachments?: { _id: string; originalName: string; path: string }[];
 };
 
+function twentyEightDayStatus(r: BatchRecord, moduleKey: string): "ok" | "due_today" | "overdue" | "upcoming" | null {
+  const keys = get28DayParamKeys(moduleKey);
+  if (!keys.length) return null;
+  const pending = keys.some((k) => is28DayParamEmpty(r.parameters?.[k]));
+  if (!pending) return "ok";
+  const due = get28DayDueDate(r.castDate || r.testDate);
+  if (!due) return null;
+  const today = new Date();
+  const t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (due.getTime() === t0.getTime()) return "due_today";
+  if (due < t0) return "overdue";
+  return "upcoming";
+}
+
 type Props = { moduleDef: QcModuleDef };
 
-function isoDate(d?: string) {
+/** Shared light + dark field styles for hub batch forms */
+const fieldClass =
+  "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500";
+const selectClass = `${fieldClass}`;
+const labelClass = "block text-xs font-semibold mb-1 text-gray-800 dark:text-gray-200";
+
+function isoDate(d?: string | Date) {
   if (!d) return "";
-  const dt = new Date(d);
+  const dt = typeof d === "string" ? new Date(d) : d;
   return Number.isNaN(dt.getTime()) ? "" : dt.toISOString().slice(0, 10);
 }
 
@@ -85,12 +110,15 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
   const openCreate = () => {
     setEditing(null);
     setSievePassing(emptySievePassing());
+    const today = new Date().toISOString().slice(0, 10);
     setForm({
       category: moduleDef.categories[0] || "",
       productName: "",
       grade: "",
       batchNo: "",
-      testDate: new Date().toISOString().slice(0, 10),
+      trackingNo: "",
+      castDate: today,
+      testDate: today,
       parameters: {},
       remarks: "",
     });
@@ -106,6 +134,8 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
       productName: r.productName,
       grade: r.grade,
       batchNo: r.batchNo,
+      trackingNo: r.trackingNo || "",
+      castDate: isoDate(r.castDate) || isoDate(r.testDate),
       testDate: isoDate(r.testDate),
       parameters: { ...restParams },
       remarks: r.remarks || "",
@@ -208,14 +238,20 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
     }
   };
 
-  if (loading) return <div className="py-8 text-center text-sm text-gray-500">Loading {moduleDef.label}…</div>;
+  if (loading) {
+    return (
+      <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-300">
+        Loading {moduleDef.label}…
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-gray-900 dark:text-gray-100">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{moduleDef.label}</h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
+          <p className="text-sm text-gray-600 dark:text-gray-300">
             Batch-wise QC data entry, approval, attachments &amp; trend graphs (SRS 3.1)
           </p>
         </div>
@@ -239,19 +275,25 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
         </div>
       </div>
 
-      {error && <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>}
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
+          {error}
+        </div>
+      )}
       {message && (
-        <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-sm text-blue-700">{message}</div>
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200">
+          {message}
+        </div>
       )}
 
       {trendParams.length > 0 && (
-        <div className="rounded-2xl bg-white/80 dark:bg-gray-800/80 border shadow p-5 space-y-4">
+        <div className="rounded-2xl border border-gray-200 bg-white/80 shadow p-5 space-y-4 dark:border-gray-700 dark:bg-gray-800/80">
           <div className="flex flex-wrap items-center gap-3">
             <h3 className="text-lg font-bold text-gray-900 dark:text-white">Trend Graphs</h3>
             <select
               value={selectedTrendParam}
               onChange={(e) => setSelectedTrendParam(e.target.value)}
-              className="rounded-lg border px-3 py-1.5 text-sm dark:bg-gray-900"
+              className={`${selectClass} max-w-xs`}
             >
               {trendParams.map((p) => (
                 <option key={p.key} value={p.key}>
@@ -278,15 +320,20 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
       )}
 
       {showForm && (
-        <form onSubmit={save} className="rounded-2xl bg-white dark:bg-gray-800 border shadow p-6 space-y-4">
-          <h3 className="text-lg font-bold">{editing ? "Edit" : "New"} Batch Record</h3>
+        <form
+          onSubmit={save}
+          className="rounded-2xl border border-gray-200 bg-white shadow p-6 space-y-4 dark:border-gray-700 dark:bg-gray-800"
+        >
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+            {editing ? "Edit" : "New"} Batch Record
+          </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold mb-1">Category</label>
+              <label className={labelClass}>Category</label>
               <select
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="w-full rounded-lg border px-3 py-2 text-sm"
+                className={selectClass}
               >
                 {moduleDef.categories.map((c) => (
                   <option key={c} value={c}>
@@ -296,38 +343,60 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold mb-1">Product Name *</label>
+              <label className={labelClass}>Product Name *</label>
               <input
                 required
                 value={form.productName}
                 onChange={(e) => setForm({ ...form, productName: e.target.value })}
-                className="w-full rounded-lg border px-3 py-2 text-sm"
+                className={fieldClass}
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold mb-1">Grade</label>
+              <label className={labelClass}>Grade</label>
               <input
                 value={form.grade}
                 onChange={(e) => setForm({ ...form, grade: e.target.value })}
-                className="w-full rounded-lg border px-3 py-2 text-sm"
+                className={fieldClass}
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold mb-1">Batch No *</label>
+              <label className={labelClass}>Batch No *</label>
               <input
                 required
                 value={form.batchNo}
                 onChange={(e) => setForm({ ...form, batchNo: e.target.value })}
-                className="w-full rounded-lg border px-3 py-2 text-sm"
+                className={fieldClass}
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold mb-1">Test Date</label>
+              <label className={labelClass}>Tracking No.</label>
+              <input
+                value={form.trackingNo || ""}
+                onChange={(e) => setForm({ ...form, trackingNo: e.target.value })}
+                placeholder="Tracking / reference number"
+                className={fieldClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Cast Date *</label>
+              <input
+                type="date"
+                required
+                value={form.castDate || ""}
+                onChange={(e) => setForm({ ...form, castDate: e.target.value })}
+                className={fieldClass}
+              />
+              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                28-day flexural / compressive due = cast date + 28 days
+              </p>
+            </div>
+            <div>
+              <label className={labelClass}>Test Date</label>
               <input
                 type="date"
                 value={form.testDate}
                 onChange={(e) => setForm({ ...form, testDate: e.target.value })}
-                className="w-full rounded-lg border px-3 py-2 text-sm"
+                className={fieldClass}
               />
             </div>
           </div>
@@ -346,7 +415,7 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {formParameters.map((p) => (
                 <div key={p.key}>
-                  <label className="block text-xs font-semibold mb-1">
+                  <label className={labelClass}>
                     {p.label}
                     {p.unit ? ` (${p.unit})` : ""}
                   </label>
@@ -360,7 +429,7 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
                         parameters: { ...form.parameters, [p.key]: e.target.value },
                       })
                     }
-                    className="w-full rounded-lg border px-3 py-2 text-sm"
+                    className={fieldClass}
                   />
                 </div>
               ))}
@@ -368,11 +437,11 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold mb-1">Remarks</label>
+            <label className={labelClass}>Remarks</label>
             <textarea
               value={form.remarks}
               onChange={(e) => setForm({ ...form, remarks: e.target.value })}
-              className="w-full rounded-lg border px-3 py-2 text-sm"
+              className={fieldClass}
               rows={2}
             />
           </div>
@@ -381,16 +450,20 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
             <button type="submit" className="px-4 py-2 rounded-xl bg-sky-600 text-white text-sm font-semibold">
               Save Draft
             </button>
-            <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 rounded-xl border text-sm">
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="px-4 py-2 rounded-xl border border-gray-300 text-sm text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
               Cancel
             </button>
           </div>
         </form>
       )}
 
-      <div className="rounded-2xl bg-white/80 dark:bg-gray-800/80 border shadow overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-900/50">
+      <div className="rounded-2xl border border-gray-200 bg-white/80 shadow overflow-x-auto dark:border-gray-700 dark:bg-gray-800/80">
+        <table className="min-w-full text-sm text-gray-900 dark:text-gray-100">
+          <thead className="bg-gray-50 text-gray-700 dark:bg-gray-900 dark:text-gray-200">
             <tr>
               <th className="px-3 py-2 text-left w-10">
                 <input
@@ -402,15 +475,19 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
                 />
               </th>
               <th className="px-3 py-2 text-left">Batch</th>
+              <th className="px-3 py-2 text-left">Tracking No.</th>
               <th className="px-3 py-2 text-left">Product</th>
               <th className="px-3 py-2 text-left">Category</th>
-              <th className="px-3 py-2 text-left">Date</th>
+              <th className="px-3 py-2 text-left">Cast / Due</th>
               <th className="px-3 py-2 text-left">Status</th>
               <th className="px-3 py-2 text-left">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {records.map((r) => (
+            {records.map((r) => {
+              const d28 = twentyEightDayStatus(r, moduleDef.key);
+              const due = get28DayDueDate(r.castDate || r.testDate);
+              return (
               <tr key={r._id} className="border-t border-gray-100 dark:border-gray-700">
                 <td className="px-3 py-2">
                   <input
@@ -422,22 +499,40 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
                   />
                 </td>
                 <td className="px-3 py-2 font-mono">{r.batchNo}</td>
+                <td className="px-3 py-2 font-mono">{r.trackingNo || "—"}</td>
                 <td className="px-3 py-2">
                   {r.productName}
                   {r.grade ? ` (${r.grade})` : ""}
                 </td>
                 <td className="px-3 py-2">{r.category}</td>
-                <td className="px-3 py-2">{isoDate(r.testDate)}</td>
+                <td className="px-3 py-2">
+                  <div className="text-xs">
+                    <div>Cast {isoDate(r.castDate) || isoDate(r.testDate) || "—"}</div>
+                    {due ? (
+                      <div className="text-gray-500 dark:text-gray-400">28d {isoDate(due.toISOString())}</div>
+                    ) : null}
+                    {d28 === "due_today" ? (
+                      <span className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
+                        28-day due today
+                      </span>
+                    ) : null}
+                    {d28 === "overdue" ? (
+                      <span className="mt-0.5 inline-block rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-800 dark:bg-red-950/50 dark:text-red-200">
+                        28-day overdue
+                      </span>
+                    ) : null}
+                  </div>
+                </td>
                 <td className="px-3 py-2">
                   <span
                     className={`px-2 py-0.5 rounded text-xs font-semibold ${
                       r.status === "approved"
-                        ? "bg-green-100 text-green-800"
+                        ? "bg-green-100 text-green-800 dark:bg-green-950/50 dark:text-green-200"
                         : r.status === "rejected"
-                          ? "bg-red-100 text-red-800"
+                          ? "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-200"
                           : r.status === "submitted"
-                            ? "bg-amber-100 text-amber-800"
-                            : "bg-gray-100 text-gray-700"
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200"
+                            : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
                     }`}
                   >
                     {r.status}
@@ -448,7 +543,7 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
                     {r.status !== "approved" && (
                       <button
                         onClick={() => openEdit(r)}
-                        className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200"
+                        className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
                       >
                         Edit
                       </button>
@@ -456,7 +551,7 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
                     {r.status === "draft" && (
                       <button
                         onClick={() => workflow(r._id, "submit")}
-                        className="text-xs px-2 py-1 rounded bg-sky-100 text-sky-800"
+                        className="text-xs px-2 py-1 rounded bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-200"
                       >
                         Submit
                       </button>
@@ -465,19 +560,19 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
                       <>
                         <button
                           onClick={() => workflow(r._id, "approve")}
-                          className="text-xs px-2 py-1 rounded bg-green-100 text-green-800"
+                          className="text-xs px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-950/50 dark:text-green-200"
                         >
                           Approve
                         </button>
                         <button
                           onClick={() => workflow(r._id, "reject")}
-                          className="text-xs px-2 py-1 rounded bg-red-100 text-red-800"
+                          className="text-xs px-2 py-1 rounded bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-200"
                         >
                           Reject
                         </button>
                       </>
                     )}
-                    <label className="text-xs px-2 py-1 rounded bg-indigo-100 text-indigo-800 cursor-pointer">
+                    <label className="cursor-pointer rounded bg-indigo-100 px-2 py-1 text-xs text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-200">
                       Attach
                       <input
                         type="file"
@@ -493,20 +588,23 @@ export function QCHubBatchModulePage({ moduleDef }: Props) {
                       type="button"
                       disabled={deleting}
                       onClick={() => deleteOne(r)}
-                      className="text-xs px-2 py-1 rounded bg-red-100 text-red-800 hover:bg-red-200 disabled:opacity-60"
+                      className="text-xs px-2 py-1 rounded bg-red-100 text-red-800 hover:bg-red-200 disabled:opacity-60 dark:bg-red-950/50 dark:text-red-200 dark:hover:bg-red-900/50"
                     >
                       Delete
                     </button>
                   </div>
                   {(r.attachments || []).length > 0 && (
-                    <div className="mt-1 text-xs text-gray-500">{r.attachments!.length} file(s)</div>
+                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {r.attachments!.length} file(s)
+                    </div>
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {!records.length && (
               <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-gray-500">
+                <td colSpan={8} className="px-3 py-6 text-center text-gray-500 dark:text-gray-400">
                   No batch records yet.
                 </td>
               </tr>

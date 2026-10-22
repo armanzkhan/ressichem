@@ -60,7 +60,7 @@ function PassingInput({
       disabled={disabled}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-lg border px-2 py-1.5 text-sm dark:bg-gray-900"
+      className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
       placeholder="% Passing"
       aria-label={`% Passing for ${size}`}
     />
@@ -180,8 +180,8 @@ export function SieveAnalysisSection({ values, onChange, disabled, className }: 
           <table className="min-w-[320px] text-sm">
             <thead>
               <tr className="border-b border-emerald-200 dark:border-emerald-800">
-                <th className="px-2 py-1.5 text-left text-xs uppercase text-gray-500">Sieve Size</th>
-                <th className="px-2 py-1.5 text-left text-xs uppercase text-gray-500">% Passing</th>
+                <th className="px-2 py-1.5 text-left text-xs uppercase text-gray-500 dark:text-gray-300">Sieve Size</th>
+                <th className="px-2 py-1.5 text-left text-xs uppercase text-gray-500 dark:text-gray-300">% Passing</th>
                 <th className="px-2 py-1.5 w-20" />
               </tr>
             </thead>
@@ -197,7 +197,7 @@ export function SieveAnalysisSection({ values, onChange, disabled, className }: 
                       disabled={disabled}
                       value={row.size}
                       onChange={(e) => updateExtra(row.id, { size: e.target.value })}
-                      className="w-full max-w-[160px] rounded-lg border px-2 py-1.5 text-sm font-mono dark:bg-gray-900"
+                      className="w-full max-w-[160px] rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-sm font-mono text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                       placeholder="e.g. 4.00 mm"
                       aria-label="Custom sieve size"
                     />

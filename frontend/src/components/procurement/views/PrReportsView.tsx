@@ -13,7 +13,6 @@ import {
   StatusBadge,
   Table,
   procurementControlClass,
-  procurementDateTime,
   procurementSecondaryButtonClass,
   procurementUserLabel,
 } from "@/components/procurement/procurement-ui";
@@ -49,6 +48,21 @@ function qtyPair(row: PurchaseDocument) {
   const ordered = Number(row.qtyOrdered) || 0;
   const received = Number(row.qtyReceived) || 0;
   return `${received} / ${ordered}`;
+}
+
+function reportDate(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString(undefined, { dateStyle: "medium" });
+}
+
+function Truncate({ text, className = "max-w-[8rem]" }: { text: string; className?: string }) {
+  return (
+    <span className={`block truncate ${className}`} title={text}>
+      {text}
+    </span>
+  );
 }
 
 export function PrReportsView({ section }: Props) {
@@ -156,7 +170,7 @@ export function PrReportsView({ section }: Props) {
         filtering.
       </p>
 
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-3 mb-4 w-full min-w-0">
         <FormLabel>
           Month
           <select
@@ -347,39 +361,31 @@ export function PrReportsView({ section }: Props) {
           headers={[
             "PR #",
             "Department",
-            "Location",
-            "PR status",
+            "Status",
+            "Delivery",
             "PO #",
-            "Purchase / delivery",
-            "Recv / Ord",
-            "Follow-up",
+            "Recv/Ord",
             "Created",
-            "Submitted",
             "Requester",
-            "Assigned",
             "Lines",
             "Total",
           ]}
-          rows={rows.map((r) => [
-            r.requisitionNumber || "—",
-            r.title || "—",
-            r.location || "—",
-            <StatusBadge key={`st-${r._id}`} status={r.status} />,
-            r.poNumber || "—",
-            <StatusBadge
-              key={`stock-${r._id}`}
-              status={r.stockStatus || "n_a"}
-              label={r.fulfillmentLabel || undefined}
-            />,
-            qtyPair(r),
-            r.followUpStatus ? <StatusBadge key={`fu-${r._id}`} status={r.followUpStatus} /> : "—",
-            procurementDateTime(r.createdAt),
-            procurementDateTime(r.submittedAt),
-            userLabel(r.requestedBy || r.submittedBy),
-            userLabel(r.assignedApprover),
-            String(itemCount(r)),
-            String(r.total ?? 0),
-          ])}
+          rows={rows.map((r) => {
+            const dept = r.title || "—";
+            const requester = userLabel(r.requestedBy || r.submittedBy);
+            return [
+              r.requisitionNumber || "—",
+              <Truncate key={`dept-${r._id}`} text={dept} className="max-w-[12rem]" />,
+              <StatusBadge key={`st-${r._id}`} status={r.status} />,
+              <StatusBadge key={`stock-${r._id}`} status={r.stockStatus || "n_a"} />,
+              r.poNumber || "—",
+              qtyPair(r),
+              reportDate(r.createdAt),
+              <Truncate key={`req-${r._id}`} text={requester} className="max-w-[6rem]" />,
+              String(itemCount(r)),
+              String(r.total ?? 0),
+            ];
+          })}
         />
       )}
 

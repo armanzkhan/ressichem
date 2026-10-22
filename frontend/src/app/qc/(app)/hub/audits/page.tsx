@@ -81,8 +81,8 @@ export default function HubAuditsPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Internal Audit Reports</h1>
-          <p className="text-sm text-gray-500">SRS 3.2.1 — internal audit reports with findings</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Internal Audit Reports</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">SRS 3.2.1 — internal audit reports with findings</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canDelete && (
@@ -99,16 +99,16 @@ export default function HubAuditsPage() {
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
       {showForm && (
-        <form onSubmit={save} className="rounded-xl border p-4 space-y-3 bg-white dark:bg-gray-800">
-          <input required placeholder="Title" value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-          <input placeholder="Auditor" value={form.auditor || ""} onChange={(e) => setForm({ ...form, auditor: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-          <textarea placeholder="Scope" value={form.scope || ""} onChange={(e) => setForm({ ...form, scope: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-          <input type="date" value={form.auditDate || ""} onChange={(e) => setForm({ ...form, auditDate: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+        <form onSubmit={save} className="rounded-xl border border-gray-200 p-4 space-y-3 bg-white dark:border-gray-700 dark:bg-gray-800">
+          <input required placeholder="Title" value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+          <input placeholder="Auditor" value={form.auditor || ""} onChange={(e) => setForm({ ...form, auditor: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+          <textarea placeholder="Scope" value={form.scope || ""} onChange={(e) => setForm({ ...form, scope: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+          <input type="date" value={form.auditDate || ""} onChange={(e) => setForm({ ...form, auditDate: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
           <button type="submit" className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm">Create Audit</button>
         </form>
       )}
-      <div className="rounded-xl border overflow-x-auto">
-        <table className="min-w-full text-sm">
+      <div className="rounded-xl border border-gray-200 overflow-x-auto dark:border-gray-700">
+        <table className="min-w-full text-sm text-gray-900 dark:text-gray-100">
           <thead>
             <tr className="bg-gray-50 dark:bg-gray-900">
               {canDelete && (

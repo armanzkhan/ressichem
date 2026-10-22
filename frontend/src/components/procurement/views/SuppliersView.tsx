@@ -155,7 +155,7 @@ export function SuppliersView({ section }: Props) {
                 {canDelete ? (
                   <button
                     type="button"
-                    className="text-red-600 text-xs"
+                    className="text-red-600 text-xs dark:text-red-300"
                     onClick={async (e) => {
                       e.stopPropagation();
                       if (!confirm("Deactivate this supplier? (soft delete)")) return;

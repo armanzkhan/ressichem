@@ -81,8 +81,8 @@ export default function HubRndExperimentsPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">R&amp;D Experiments</h1>
-          <p className="text-sm text-gray-500">SRS 3.3 — trial batches T0/T1/T2, formulation comparison, cost reduction</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">R&amp;D Experiments</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">SRS 3.3 — trial batches T0/T1/T2, formulation comparison, cost reduction</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canDelete && (
@@ -99,11 +99,11 @@ export default function HubRndExperimentsPage() {
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
       {showForm && (
-        <form onSubmit={save} className="rounded-xl border p-4 space-y-3 bg-white dark:bg-gray-800">
-          <input required placeholder="Experiment name" value={form.experimentName || ""} onChange={(e) => setForm({ ...form, experimentName: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-          <textarea required placeholder="Objective" value={form.objective || ""} onChange={(e) => setForm({ ...form, objective: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-          <input placeholder="Target product" value={form.targetProduct || ""} onChange={(e) => setForm({ ...form, targetProduct: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-          <select value={form.productType} onChange={(e) => setForm({ ...form, productType: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+        <form onSubmit={save} className="rounded-xl border border-gray-200 p-4 space-y-3 bg-white dark:border-gray-700 dark:bg-gray-800">
+          <input required placeholder="Experiment name" value={form.experimentName || ""} onChange={(e) => setForm({ ...form, experimentName: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+          <textarea required placeholder="Objective" value={form.objective || ""} onChange={(e) => setForm({ ...form, objective: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+          <input placeholder="Target product" value={form.targetProduct || ""} onChange={(e) => setForm({ ...form, targetProduct: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+          <select value={form.productType} onChange={(e) => setForm({ ...form, productType: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white">
             <option value="TILE_ADHESIVE">Tile Adhesive</option>
             <option value="TILE_GROUT">Tile Grout</option>
             <option value="PREMIX_PLASTER">Premix Plaster</option>
@@ -115,8 +115,8 @@ export default function HubRndExperimentsPage() {
           <button type="submit" className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm">Create</button>
         </form>
       )}
-      <div className="rounded-xl border overflow-x-auto">
-        <table className="min-w-full text-sm">
+      <div className="rounded-xl border border-gray-200 overflow-x-auto dark:border-gray-700">
+        <table className="min-w-full text-sm text-gray-900 dark:text-gray-100">
           <thead>
             <tr className="bg-gray-50 dark:bg-gray-900">
               {canDelete && (

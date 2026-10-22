@@ -24,7 +24,17 @@ import {
   ProcurementCommercialForm,
   TermsConditionsField,
 } from "@/components/procurement/ProcurementCommercialForm";
-import { Alert, FormLabel, LoadingText, Modal, PageShell, StatusBadge, Table, procurementFieldClass } from "@/components/procurement/procurement-ui";
+import {
+  Alert,
+  FormLabel,
+  LoadingText,
+  Modal,
+  PageShell,
+  StatusBadge,
+  Table,
+  procurementFieldClass,
+  procurementSecondaryButtonClass,
+} from "@/components/procurement/procurement-ui";
 import { BulkImportModal } from "@/components/procurement/BulkImportModal";
 import {
   filterItemsBySection,
@@ -362,7 +372,7 @@ export function PurchaseOrdersView({ section }: Props) {
           </button>
           <button
             type="button"
-            className="px-3 py-1.5 rounded-lg border border-blue-200 text-blue-700 text-sm hover:bg-blue-50"
+            className={`${procurementSecondaryButtonClass} !min-h-0 px-3 py-1.5`}
             onClick={() => setSelectedIds([])}
           >
             Clear selection
@@ -451,7 +461,26 @@ export function PurchaseOrdersView({ section }: Props) {
                     Close
                   </button>
                 ) : null}
-                {canDelete ? (
+                {r.status === "draft" || r.status === "issued" ? (
+                  <button
+                    type="button"
+                    className="text-amber-700 text-xs dark:text-amber-300"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const label = r.poNumber || "this PO";
+                      if (!window.confirm(`Cancel ${label}? The PR can create a new PO afterward.`)) return;
+                      try {
+                        await procurementApi.cancelPurchaseOrder(r._id);
+                        await load();
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : "Cancel failed");
+                      }
+                    }}
+                  >
+                    Cancel
+                  </button>
+                ) : null}
+                {canDelete && r.status !== "cancelled" ? (
                   <button
                     type="button"
                     className="text-red-600 text-xs dark:text-red-300"
@@ -527,7 +556,7 @@ export function PurchaseOrdersView({ section }: Props) {
                     />
                   </div>
                   {suppliers.length === 0 ? (
-                    <p className="mt-1 text-xs text-blue-600">
+                    <p className="mt-1 text-xs text-blue-600 dark:text-blue-300">
                       No local suppliers in catalog. Use + Add supplier... in the field above.
                     </p>
                   ) : null}
@@ -547,7 +576,7 @@ export function PurchaseOrdersView({ section }: Props) {
                     />
                   </div>
                   {selectedSupplierIds.length > 1 ? (
-                    <p className="mt-2 text-xs text-blue-700">
+                    <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">
                       Multiple suppliers: assign each line item to a supplier below.
                     </p>
                   ) : null}
@@ -583,7 +612,7 @@ export function PurchaseOrdersView({ section }: Props) {
               <footer className="flex flex-wrap justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  className="px-4 py-2 rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50"
+                  className={procurementSecondaryButtonClass}
                   onClick={() => setShowForm(false)}
                 >
                   Cancel
@@ -591,7 +620,7 @@ export function PurchaseOrdersView({ section }: Props) {
                 {editingId ? (
                   <button
                     type="button"
-                    className="px-4 py-2 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50"
+                    className={procurementSecondaryButtonClass}
                     onClick={() => printDoc(editingId)}
                   >
                     Print preview
@@ -601,7 +630,7 @@ export function PurchaseOrdersView({ section }: Props) {
                   <button
                     type="button"
                     disabled={saving}
-                    className="px-4 py-2 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50"
+                    className={procurementSecondaryButtonClass}
                     onClick={() => savePurchaseOrder({ closeAfterSave: false })}
                   >
                     {saving ? "Saving..." : "Save"}

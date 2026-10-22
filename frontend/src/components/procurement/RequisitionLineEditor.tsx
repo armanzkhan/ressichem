@@ -82,7 +82,7 @@ export function RequisitionLineEditor({
           className={`rounded-xl border border-dashed border-blue-200 px-4 py-4 text-center dark:border-slate-600 ${procurementHintClass}`}
         >
           Add at least one item. Each line needs its own department (multi-dept PRs notify each mapped
-          approver).
+          approver). Vendors are chosen when you create the PO.
         </p>
       ) : (
         <section className="space-y-3">

@@ -33,8 +33,8 @@ const { enrichPrsWithFulfillment } = require("../utils/procurementPrFulfillment"
 
 const USER_AUDIT_FIELDS = "firstName lastName email role";
 
-function populateRequisitionAudit(query) {
-  return query
+function populateRequisitionAudit(query, { includeLineSuppliers = false } = {}) {
+  let q = query
     .populate("supplier", "supplierCode name")
     .populate("requestedBy", USER_AUDIT_FIELDS)
     .populate("submittedBy", USER_AUDIT_FIELDS)
@@ -44,6 +44,11 @@ function populateRequisitionAudit(query) {
     .populate("rejectedBy", USER_AUDIT_FIELDS)
     .populate("heldBy", USER_AUDIT_FIELDS)
     .populate("followUpBy", USER_AUDIT_FIELDS);
+  // Line vendors are chosen at Create PO — skip on list for speed
+  if (includeLineSuppliers) {
+    q = q.populate("items.supplier", "supplierCode name companyName");
+  }
+  return q;
 }
 
 function assertCanActOnPr(req, pr) {
@@ -124,7 +129,8 @@ exports.getById = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
     const data = await populateRequisitionAudit(
-      PurchaseRequisition.findOne({ _id: req.params.id, company_id, isActive: { $ne: false } })
+      PurchaseRequisition.findOne({ _id: req.params.id, company_id, isActive: { $ne: false } }),
+      { includeLineSuppliers: true }
     ).populate("supplier", "supplierCode name defaultCurrency");
     if (!data) return res.status(404).json({ success: false, message: "Requisition not found" });
 
@@ -709,7 +715,13 @@ exports.convertToPO = async (req, res) => {
       });
     }
 
-    const existingPo = await PurchaseOrder.findOne({ company_id, requisition: pr._id }).lean();
+    // Allow re-convert after a cancelled PO; block only active (non-cancelled) POs
+    const existingPo = await PurchaseOrder.findOne({
+      company_id,
+      requisition: pr._id,
+      isActive: { $ne: false },
+      status: { $ne: "cancelled" },
+    }).lean();
     if (existingPo) {
       return res.status(400).json({
         success: false,
@@ -718,27 +730,58 @@ exports.convertToPO = async (req, res) => {
       });
     }
 
-    const supplierId = req.body?.supplier || pr.supplier;
-    if (!supplierId) {
+    // Vendors are chosen at Create PO time (not on the PR form).
+    // Prefer body.lineSuppliers[i] per PR line; fall back to body.supplier for every line.
+    const defaultSupplierId = req.body?.supplier || pr.supplier || null;
+    const lineSuppliersBody = Array.isArray(req.body?.lineSuppliers) ? req.body.lineSuppliers : [];
+    const ProcurementSupplier = require("../models/ProcurementSupplier");
+
+    const rawItems = (pr.items || []).map((line, index) => {
+      const plain = typeof line.toObject === "function" ? line.toObject() : { ...line };
+      const fromBody = lineSuppliersBody[index] || null;
+      const lineSupplier = fromBody || defaultSupplierId || null;
+      return { plain, lineSupplier };
+    });
+
+    if (!rawItems.length) {
+      return res.status(400).json({ success: false, message: "Requisition has no line items to convert" });
+    }
+
+    const missing = rawItems.filter((r) => !r.lineSupplier);
+    if (missing.length) {
       return res.status(400).json({
         success: false,
-        message: "Select a supplier to convert this requisition into a purchase order",
+        message:
+          missing.length === rawItems.length
+            ? "Select a vendor for each line when creating the purchase order"
+            : `${missing.length} line(s) still need a vendor before creating the PO`,
       });
     }
 
-    const items = (pr.items || []).map((line) => {
-      const plain = typeof line.toObject === "function" ? line.toObject() : { ...line };
+    const supplierIds = [...new Set(rawItems.map((r) => String(r.lineSupplier)))];
+    const supplierDocs = await ProcurementSupplier.find({ _id: { $in: supplierIds } })
+      .select("supplierCode name")
+      .lean();
+    const nameById = new Map(supplierDocs.map((s) => [String(s._id), s.name || ""]));
+
+    const items = rawItems.map(({ plain, lineSupplier }) => {
+      const sid = String(lineSupplier);
       return {
         ...plain,
+        supplier: sid,
+        supplierName: plain.supplierName || nameById.get(sid) || "",
         receivedQuantity: 0,
         unitPrice: Number(plain.unitPrice) || 0,
-        lineTotal: Number(plain.lineTotal) || (Number(plain.quantity) || 0) * (Number(plain.unitPrice) || 0),
+        lineTotal:
+          Number(plain.lineTotal) || (Number(plain.quantity) || 0) * (Number(plain.unitPrice) || 0),
       };
     });
 
+    const primarySupplierId = supplierIds[0];
+
     const commercial = await prepareCommercialPayload({
-      supplier: supplierId,
-      suppliers: [supplierId],
+      supplier: primarySupplierId,
+      suppliers: supplierIds,
       purchaseType: pr.purchaseType || "foreign",
       currency: pr.currency || "USD",
       exchangeRate: pr.exchangeRate || 1,
@@ -753,8 +796,8 @@ exports.convertToPO = async (req, res) => {
       ...commercial,
       company_id,
       poNumber,
-      supplier: supplierId,
-      suppliers: [supplierId],
+      supplier: primarySupplierId,
+      suppliers: supplierIds,
       requisition: pr._id,
       status: "draft",
       documentDate: new Date(),
@@ -765,12 +808,15 @@ exports.convertToPO = async (req, res) => {
 
     const populated = await PurchaseOrder.findById(po._id)
       .populate("supplier", "supplierCode name banking")
+      .populate("suppliers", "supplierCode name banking")
       .populate("requisition", "requisitionNumber")
       .lean();
 
+    const vendorNote =
+      supplierIds.length > 1 ? ` with ${supplierIds.length} vendors` : "";
     return res.status(201).json({
       success: true,
-      message: `Created draft PO ${po.poNumber} from ${pr.requisitionNumber}`,
+      message: `Created draft PO ${po.poNumber} from ${pr.requisitionNumber}${vendorNote}`,
       data: populated,
     });
   } catch (err) {

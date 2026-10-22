@@ -481,14 +481,14 @@ export function ProcurementCommercialForm({
           <legend className={procurementLegendClass}>Bill to &amp; ship to (Ressichem)</legend>
           <p className={procurementHintClass}>Used on the printed local PO.</p>
           <p className={`${procurementHintClass} mt-1`}>
-            <strong className="text-blue-800">Bill to:</strong> {partySummary(form.billTo)}
+            <strong className="text-blue-800 dark:text-blue-100">Bill to:</strong> {partySummary(form.billTo)}
           </p>
           <p className={`${procurementHintClass} mt-0.5`}>
-            <strong className="text-blue-800">Ship to:</strong> {partySummary(form.shipTo)}
+            <strong className="text-blue-800 dark:text-blue-100">Ship to:</strong> {partySummary(form.shipTo)}
           </p>
           <button
             type="button"
-            className="mt-2 text-xs text-blue-600 hover:underline"
+            className="mt-2 text-xs text-blue-600 hover:underline dark:text-blue-300 dark:hover:text-blue-100"
             onClick={() => setShowLocalPartyDetails((v) => !v)}
           >
             {showLocalPartyDetails ? "Hide address details" : "Edit addresses"}
@@ -507,14 +507,14 @@ export function ProcurementCommercialForm({
             Ressichem is shipper/exporter on the printed PFI. Consignee and notify address appear in the sample invoice layout.
           </p>
           <p className={`${procurementHintClass} mt-1`}>
-            <strong className="text-blue-800">Consignee:</strong> {partySummary(form.billTo)}
+            <strong className="text-blue-800 dark:text-blue-100">Consignee:</strong> {partySummary(form.billTo)}
           </p>
           <p className={`${procurementHintClass} mt-0.5`}>
-            <strong className="text-blue-800">Notify address:</strong> {partySummary(form.shipTo)}
+            <strong className="text-blue-800 dark:text-blue-100">Notify address:</strong> {partySummary(form.shipTo)}
           </p>
           <button
             type="button"
-            className="mt-2 text-xs text-blue-600 hover:underline"
+            className="mt-2 text-xs text-blue-600 hover:underline dark:text-blue-300 dark:hover:text-blue-100"
             onClick={() => setShowExportCustomerDetails((v) => !v)}
           >
             {showExportCustomerDetails ? "Hide address details" : "Edit consignee / notify address"}

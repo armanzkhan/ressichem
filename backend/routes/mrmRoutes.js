@@ -2,23 +2,27 @@ const express = require("express");
 const router = express.Router();
 const mrmController = require("../controllers/mrmController");
 const authMiddleware = require("../middleware/authMiddleware");
-const { requireManagementLayer, enrichUserQcProfile } = require("../middleware/qcRndAccessMiddleware");
+const {
+  requireQCLayer,
+  requireManagementLayer,
+  enrichUserQcProfile,
+} = require("../middleware/qcRndAccessMiddleware");
 
 // All routes require authentication
 router.use(authMiddleware);
 router.use(enrichUserQcProfile);
 
-// MRM CRUD
-router.get("/", requireManagementLayer, mrmController.getAll);
-router.get("/:id", requireManagementLayer, mrmController.getById);
-router.post("/", requireManagementLayer, mrmController.create);
-router.post("/bulk-delete", requireManagementLayer, mrmController.bulkSoftDelete);
-router.put("/:id", requireManagementLayer, mrmController.update);
-router.delete("/:id", requireManagementLayer, mrmController.softDelete);
+// QC Hub users (qc.access / QC layer) can list & manage MRMs.
+// Formal approval stays Management-only.
+router.get("/", requireQCLayer, mrmController.getAll);
+router.get("/:id", requireQCLayer, mrmController.getById);
+router.post("/", requireQCLayer, mrmController.create);
+router.post("/bulk-delete", requireQCLayer, mrmController.bulkSoftDelete);
+router.put("/:id", requireQCLayer, mrmController.update);
+router.delete("/:id", requireQCLayer, mrmController.softDelete);
 
-// MRM workflow
-router.post("/:id/pull-data", requireManagementLayer, mrmController.pullData);
-router.post("/:id/complete", requireManagementLayer, mrmController.complete);
+router.post("/:id/pull-data", requireQCLayer, mrmController.pullData);
+router.post("/:id/complete", requireQCLayer, mrmController.complete);
 router.post("/:id/approve", requireManagementLayer, mrmController.approve);
 
 module.exports = router;

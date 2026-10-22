@@ -1,6 +1,7 @@
 /**
  * Derived purchase/delivery status from linked PO — does not change PR.status.
  * Used by PR list and monthly reports (additive only).
+ * Also stamps each PR line with line-level processed / delivery status.
  */
 
 const PO_STATUS_RANK = {
@@ -24,6 +25,18 @@ const FULFILLMENT_LABELS = {
   cancelled: "cancelled",
 };
 
+/** Per PR-line labels (shown on requisition detail / line list) */
+const LINE_FULFILLMENT_LABELS = {
+  n_a: "—",
+  awaiting_po: "awaiting PO",
+  po_draft: "on PO (draft)",
+  issued: "processed",
+  partial: "processed (partial)",
+  received: "processed (received)",
+  closed: "processed (received)",
+  cancelled: "cancelled",
+};
+
 function sumLineQtys(items = []) {
   let ordered = 0;
   let received = 0;
@@ -34,6 +47,14 @@ function sumLineQtys(items = []) {
   return { ordered, received };
 }
 
+function lineMatchKey(line = {}) {
+  const id = line.item && typeof line.item === "object" ? line.item._id : line.item;
+  if (id) return `id:${String(id)}`;
+  if (line.itemCode) return `code:${String(line.itemCode).trim().toLowerCase()}`;
+  if (line.itemName) return `name:${String(line.itemName).trim().toLowerCase()}`;
+  return "";
+}
+
 function pickLinkedPo(pos = []) {
   if (!pos.length) return null;
   return [...pos].sort((a, b) => {
@@ -41,6 +62,99 @@ function pickLinkedPo(pos = []) {
     if (rankDiff !== 0) return rankDiff;
     return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
   })[0];
+}
+
+/**
+ * Map a PR line to the linked PO line status.
+ * "processed" = line is on a PO that has been issued (or further).
+ */
+function deriveLineFulfillment(prStatus, po, poLine) {
+  const approved = String(prStatus || "").toLowerCase() === "approved";
+  if (!approved) {
+    return {
+      lineFulfillmentStatus: "n_a",
+      lineFulfillmentLabel: LINE_FULFILLMENT_LABELS.n_a,
+      processed: false,
+      qtyOrdered: 0,
+      qtyReceived: 0,
+      poLineId: null,
+    };
+  }
+
+  if (!po || String(po.status || "").toLowerCase() === "cancelled" || !poLine) {
+    return {
+      lineFulfillmentStatus: "awaiting_po",
+      lineFulfillmentLabel: LINE_FULFILLMENT_LABELS.awaiting_po,
+      processed: false,
+      qtyOrdered: 0,
+      qtyReceived: 0,
+      poLineId: null,
+    };
+  }
+
+  const poStatus = String(po.status || "draft").toLowerCase();
+  const ordered = Number(poLine.quantity) || 0;
+  const received = Number(poLine.receivedQuantity) || 0;
+
+  let status = "po_draft";
+  if (poStatus === "closed" || poStatus === "received" || (ordered > 0 && received >= ordered - 1e-9)) {
+    status = poStatus === "closed" ? "closed" : "received";
+  } else if (poStatus === "partial" || received > 0) {
+    status = "partial";
+  } else if (poStatus === "issued") {
+    status = "issued";
+  } else if (poStatus === "draft") {
+    status = "po_draft";
+  }
+
+  const processed = ["issued", "partial", "received", "closed"].includes(status);
+
+  return {
+    lineFulfillmentStatus: status,
+    lineFulfillmentLabel: LINE_FULFILLMENT_LABELS[status] || status,
+    processed,
+    qtyOrdered: ordered,
+    qtyReceived: received,
+    poLineId: poLine._id || null,
+  };
+}
+
+function enrichPrItemsWithLineFulfillment(pr, po) {
+  const prItems = Array.isArray(pr.items) ? pr.items : [];
+  if (!prItems.length) {
+    return { items: prItems, linesProcessed: 0, linesTotal: 0 };
+  }
+
+  const poItems = Array.isArray(po?.items) ? po.items : [];
+  const usedPoIdx = new Set();
+  let linesProcessed = 0;
+
+  const items = prItems.map((prLine, i) => {
+    const key = lineMatchKey(prLine);
+    let poLine = null;
+    if (key) {
+      const idx = poItems.findIndex((pl, j) => !usedPoIdx.has(j) && lineMatchKey(pl) === key);
+      if (idx >= 0) {
+        poLine = poItems[idx];
+        usedPoIdx.add(idx);
+      }
+    }
+    // Convert copies lines 1:1 — fall back to same index when keys do not match
+    if (!poLine && poItems[i] && !usedPoIdx.has(i)) {
+      poLine = poItems[i];
+      usedPoIdx.add(i);
+    }
+
+    const lineMeta = deriveLineFulfillment(pr.status, po, poLine);
+    if (lineMeta.processed) linesProcessed += 1;
+
+    return {
+      ...prLine,
+      ...lineMeta,
+    };
+  });
+
+  return { items, linesProcessed, linesTotal: items.length };
 }
 
 function deriveStockFulfillment(pr, po) {
@@ -122,15 +236,26 @@ async function enrichPrsWithFulfillment(PurchaseOrder, company_id, rows = []) {
 
   return rows.map((pr) => {
     const linked = pickLinkedPo(byPr.get(String(pr._id)) || []);
-    return { ...pr, ...deriveStockFulfillment(pr, linked) };
+    const header = deriveStockFulfillment(pr, linked);
+    const { items, linesProcessed, linesTotal } = enrichPrItemsWithLineFulfillment(pr, linked);
+    return {
+      ...pr,
+      ...header,
+      items,
+      linesProcessed,
+      linesTotal,
+    };
   });
 }
 
 module.exports = {
   PO_STATUS_RANK,
   FULFILLMENT_LABELS,
+  LINE_FULFILLMENT_LABELS,
   sumLineQtys,
   pickLinkedPo,
   deriveStockFulfillment,
+  deriveLineFulfillment,
+  enrichPrItemsWithLineFulfillment,
   enrichPrsWithFulfillment,
 };

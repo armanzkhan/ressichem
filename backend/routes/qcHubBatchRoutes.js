@@ -12,6 +12,7 @@ router.use(permissionMiddleware(["qc.access"]));
 
 router.get("/modules", permissionMiddleware(["qc.hub.forms.read"]), qcHubBatchController.getModules);
 router.get("/trends", permissionMiddleware(["qc.hub.forms.read"]), qcHubBatchController.getTrends);
+router.get("/28-day-due", permissionMiddleware(["qc.hub.forms.read"]), qcHubBatchController.get28DayDue);
 router.get("/", permissionMiddleware(["qc.hub.forms.read"]), qcHubBatchController.list);
 router.post("/", permissionMiddleware(["qc.hub.forms.create"]), qcHubBatchController.create);
 router.post("/bulk-delete", permissionMiddleware(["qc.hub.forms.update"]), qcHubBatchController.bulkSoftDelete);

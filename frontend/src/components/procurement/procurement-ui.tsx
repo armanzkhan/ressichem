@@ -64,16 +64,17 @@ export function PageShell({
 }) {
   return (
     <section className="space-y-3 sm:space-y-4 w-full min-w-0 pb-20 sm:pb-0">
-      <header className="relative overflow-hidden rounded-2xl border border-blue-100/80 bg-gradient-to-br from-blue-600 via-blue-600 to-sky-500 p-4 text-white shadow-lg shadow-blue-900/15 sm:rounded-none sm:border-0 sm:bg-none sm:from-transparent sm:via-transparent sm:to-transparent sm:p-0 sm:shadow-none sm:text-inherit dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-slate-900 sm:dark:bg-transparent">
+      <header className="relative overflow-hidden rounded-2xl border border-blue-100/80 bg-gradient-to-br from-blue-600 via-blue-600 to-sky-500 p-4 text-white shadow-lg shadow-blue-900/15 sm:rounded-none sm:border-0 sm:bg-none sm:from-transparent sm:via-transparent sm:to-transparent sm:p-0 sm:shadow-none dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-slate-900 sm:dark:bg-transparent sm:dark:border-0 sm:dark:shadow-none">
         <div className="pointer-events-none absolute -right-6 -top-8 h-28 w-28 rounded-full bg-white/10 sm:hidden" aria-hidden />
         <div className="pointer-events-none absolute -bottom-10 -left-4 h-24 w-24 rounded-full bg-sky-300/20 sm:hidden" aria-hidden />
         <div className="relative flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <h1 className={`${titleClassName} text-white sm:text-blue-800 dark:sm:text-blue-100`}>
+            {/* Avoid sm: + dark:sm: fights — light desktop uses blue-900; dark always uses light text */}
+            <h1 className={`${titleClassName} text-white sm:text-blue-900 dark:text-blue-50`}>
               {title}
             </h1>
             {summary ? (
-              <p className="mt-1 text-sm font-medium text-blue-50/90 sm:text-blue-600 dark:sm:text-blue-300">
+              <p className="mt-1 text-sm font-medium text-blue-50/90 sm:text-blue-600 dark:text-blue-200">
                 {summary}
               </p>
             ) : null}
@@ -325,13 +326,19 @@ export function Table({
         )}
       </div>
 
-      {/* Desktop / tablet: classic table */}
+      {/* Desktop / tablet: classic table — scroll only if content still exceeds panel */}
       <div className="hidden md:block overflow-x-auto overscroll-x-contain rounded-lg border border-blue-100 dark:border-slate-700">
-        <table className="w-full min-w-[40rem] text-sm text-blue-800 dark:text-blue-100">
+        <table className="w-full table-auto text-sm text-blue-900 dark:text-slate-100">
           <thead>
-            <tr className="border-b border-blue-200 text-left text-blue-700 dark:border-slate-600 dark:text-blue-300 bg-blue-50/80 dark:bg-slate-800/80">
+            <tr className="border-b border-blue-200 text-left text-blue-800 dark:border-slate-600 dark:text-slate-100 bg-blue-50/80 dark:bg-slate-800">
               {headers.map((h, i) => (
-                <th key={i} className="py-2.5 px-3 font-semibold whitespace-nowrap">
+                <th
+                  key={i}
+                  className={[
+                    "py-2.5 px-3 font-semibold",
+                    i === headers.length - 1 ? "whitespace-normal" : "whitespace-nowrap",
+                  ].join(" ")}
+                >
                   {h}
                 </th>
               ))}
@@ -340,7 +347,7 @@ export function Table({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={headers.length} className="py-6 px-3 text-blue-600 dark:text-blue-300">
+                <td colSpan={headers.length} className="py-6 px-3 text-blue-600 dark:text-slate-300">
                   No records.
                 </td>
               </tr>
@@ -367,7 +374,13 @@ export function Table({
                   role={onRowClick ? "button" : undefined}
                 >
                   {cells.map((cell, j) => (
-                    <td key={j} className="py-2.5 px-3 text-blue-800 dark:text-blue-100 whitespace-nowrap">
+                    <td
+                      key={j}
+                      className={[
+                        "py-2.5 px-3 text-blue-900 dark:text-slate-100 align-top",
+                        j === cells.length - 1 ? "whitespace-normal" : "whitespace-nowrap",
+                      ].join(" ")}
+                    >
                       {cell}
                     </td>
                   ))}
@@ -497,7 +510,7 @@ export function StatusBadge({ status, label: labelOverride }: { status: string; 
     approved: "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-200",
     rejected: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-200",
     held: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
-    cancelled: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
+    cancelled: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
     issued: "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200",
     partial: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
     received: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200",
@@ -513,7 +526,7 @@ export function StatusBadge({ status, label: labelOverride }: { status: string; 
     open: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
     in_progress: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-200",
     done: "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-200",
-    n_a: "bg-transparent text-slate-400 dark:text-slate-500",
+    n_a: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
   };
   const labels: Record<string, string> = {
     held: "on hold",

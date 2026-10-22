@@ -83,8 +83,8 @@ export default function HubCalibrationPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Calibration Records</h1>
-          <p className="text-sm text-gray-500">SRS 3.2.1 — equipment calibration tracking</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Calibration Records</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">SRS 3.2.1 — equipment calibration tracking</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canDelete && (
@@ -100,22 +100,22 @@ export default function HubCalibrationPage() {
         </div>
       </div>
       {dueSoon.length > 0 && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm">
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
           <strong>{dueSoon.length}</strong> calibration(s) due soon or overdue.
         </div>
       )}
       {error && <div className="text-red-600 text-sm">{error}</div>}
       {showForm && (
-        <form onSubmit={save} className="rounded-xl border p-4 space-y-3 bg-white dark:bg-gray-800">
-          <input required placeholder="Equipment name" value={form.equipmentName || ""} onChange={(e) => setForm({ ...form, equipmentName: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-          <input placeholder="Equipment ID" value={form.equipmentId || ""} onChange={(e) => setForm({ ...form, equipmentId: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-          <input type="date" value={form.calibrationDate || ""} onChange={(e) => setForm({ ...form, calibrationDate: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
-          <input type="date" placeholder="Next due" value={form.nextDueDate || ""} onChange={(e) => setForm({ ...form, nextDueDate: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" />
+        <form onSubmit={save} className="rounded-xl border border-gray-200 p-4 space-y-3 bg-white dark:border-gray-700 dark:bg-gray-800">
+          <input required placeholder="Equipment name" value={form.equipmentName || ""} onChange={(e) => setForm({ ...form, equipmentName: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+          <input placeholder="Equipment ID" value={form.equipmentId || ""} onChange={(e) => setForm({ ...form, equipmentId: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+          <input type="date" value={form.calibrationDate || ""} onChange={(e) => setForm({ ...form, calibrationDate: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+          <input type="date" placeholder="Next due" value={form.nextDueDate || ""} onChange={(e) => setForm({ ...form, nextDueDate: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
           <button type="submit" className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm">Save</button>
         </form>
       )}
-      <div className="rounded-xl border overflow-x-auto">
-        <table className="min-w-full text-sm">
+      <div className="rounded-xl border border-gray-200 overflow-x-auto dark:border-gray-700">
+        <table className="min-w-full text-sm text-gray-900 dark:text-gray-100">
           <thead>
             <tr className="bg-gray-50 dark:bg-gray-900">
               {canDelete && (

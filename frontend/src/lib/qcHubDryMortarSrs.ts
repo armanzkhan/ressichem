@@ -356,3 +356,31 @@ export function getModuleBySlug(slug: string): QcModuleDef | undefined {
 export function getAllModules(): QcModuleDef[] {
   return Object.values(QC_MODULES);
 }
+
+/** 28-day delayed test parameter keys for a product module. */
+export function get28DayParamKeys(moduleKey: string): string[] {
+  const mod = QC_MODULES[moduleKey as keyof typeof QC_MODULES];
+  if (!mod) return [];
+  return mod.parameters
+    .filter((p) => {
+      const label = String(p.label || "").toLowerCase();
+      return /28Days$/i.test(p.key) || label.includes("28 day") || label.includes("28-day");
+    })
+    .map((p) => p.key);
+}
+
+export function get28DayDueDate(castOrTestDate: string | Date | undefined | null): Date | null {
+  if (!castOrTestDate) return null;
+  const d = new Date(castOrTestDate);
+  if (Number.isNaN(d.getTime())) return null;
+  const due = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  due.setDate(due.getDate() + 28);
+  return due;
+}
+
+export function is28DayParamEmpty(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value === "string") return value.trim() === "";
+  if (typeof value === "number") return Number.isNaN(value);
+  return false;
+}

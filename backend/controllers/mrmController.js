@@ -5,7 +5,20 @@ const Complaint = require("../models/Complaint");
 const CAPA = require("../models/CAPA");
 const ElectronicSignature = require("../models/ElectronicSignature");
 const { writeAudit } = require("../utils/qcAudit");
-const { canConductMRM } = require("../middleware/qcRndAccessMiddleware");
+const { canAccessQcData, canConductMRM } = require("../middleware/qcRndAccessMiddleware");
+
+function assertQcHubAccess(user, res, actionLabel) {
+  if (!user) {
+    res.status(401).json({ success: false, message: "Authentication required" });
+    return false;
+  }
+  if (user.isSuperAdmin || canAccessQcData(user) || canConductMRM(user)) return true;
+  res.status(403).json({
+    success: false,
+    message: `QC Hub access required to ${actionLabel}`,
+  });
+  return false;
+}
 
 function getCompanyId(req) {
   return req.headers["x-company-id"] || req.user?.company_id || req.body?.company_id || "RESSICHEM";
@@ -179,10 +192,7 @@ exports.create = async (req, res) => {
     const user = req.user;
     const body = req.body || {};
 
-    // Access control: Only Management
-    if (user && !user.isSuperAdmin && !canConductMRM(user)) {
-      return res.status(403).json({ success: false, message: "Only Management can create MRMs" });
-    }
+    if (!assertQcHubAccess(user, res, "create MRMs")) return;
 
     // Generate MRM number if not provided
     if (!body.mrmNo) {
@@ -246,10 +256,7 @@ exports.update = async (req, res) => {
     const company_id = getCompanyId(req);
     const user = req.user;
 
-    // Access control: Only Management
-    if (user && !user.isSuperAdmin && !canConductMRM(user)) {
-      return res.status(403).json({ success: false, message: "Only Management can update MRMs" });
-    }
+    if (!assertQcHubAccess(user, res, "update MRMs")) return;
 
     const mrm = await MRM.findOne({ _id: req.params.id, company_id });
     if (!mrm) {
@@ -285,10 +292,7 @@ exports.pullData = async (req, res) => {
     const user = req.user;
     const { id } = req.params;
 
-    // Access control: Only Management
-    if (user && !user.isSuperAdmin && !canConductMRM(user)) {
-      return res.status(403).json({ success: false, message: "Only Management can pull MRM data" });
-    }
+    if (!assertQcHubAccess(user, res, "pull MRM data")) return;
 
     const mrm = await MRM.findOne({ _id: id, company_id });
     if (!mrm) {
@@ -335,10 +339,7 @@ exports.complete = async (req, res) => {
     const { id } = req.params;
     const { minutes, decisions, actionItems } = req.body || {};
 
-    // Access control: Only Management
-    if (user && !user.isSuperAdmin && !canConductMRM(user)) {
-      return res.status(403).json({ success: false, message: "Only Management can complete MRMs" });
-    }
+    if (!assertQcHubAccess(user, res, "complete MRMs")) return;
 
     const mrm = await MRM.findOne({ _id: id, company_id });
     if (!mrm) {

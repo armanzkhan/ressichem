@@ -168,6 +168,13 @@ export type LineItem = {
   currency?: string;
   lineTotal?: number;
   department?: string;
+  /** Derived from linked PO — true once that PO line is issued or further */
+  processed?: boolean;
+  lineFulfillmentStatus?: string;
+  lineFulfillmentLabel?: string;
+  qtyOrdered?: number;
+  qtyReceived?: number;
+  poLineId?: string;
 };
 
 export type PrApproval = {
@@ -239,6 +246,9 @@ export type PurchaseDocument = {
   poStatus?: string;
   qtyOrdered?: number;
   qtyReceived?: number;
+  /** Count of PR lines on an issued+ PO */
+  linesProcessed?: number;
+  linesTotal?: number;
 };
 
 export type CostingScenario = {
@@ -794,6 +804,11 @@ export const procurementApi = {
     request(`/api/procurement/purchase-orders/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   issuePurchaseOrder: (id: string) =>
     request(`/api/procurement/purchase-orders/${id}/issue`, { method: "POST" }),
+  cancelPurchaseOrder: (id: string, body?: { reason?: string }) =>
+    request(`/api/procurement/purchase-orders/${id}/cancel`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    }),
   deletePurchaseOrder: (id: string) =>
     request(`/api/procurement/purchase-orders/${id}`, { method: "DELETE" }),
   bulkDeletePurchaseOrders: (ids: string[]) =>
@@ -937,7 +952,14 @@ export const procurementApi = {
     request(`/api/procurement/costing/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteCosting: (id: string) => request(`/api/procurement/costing/${id}`, { method: "DELETE" }),
 
-  convertRequisitionToPO: (id: string, body?: { supplier?: string }) =>
+  /**
+   * Converts PR → one draft PO.
+   * `lineSuppliers[i]` = vendor for PR items[i]; `supplier` is fallback / primary header vendor.
+   */
+  convertRequisitionToPO: (
+    id: string,
+    body?: { supplier?: string; lineSuppliers?: string[] }
+  ) =>
     request<{ success: boolean; message?: string; data?: PurchaseDocument }>(
       `/api/procurement/requisitions/${id}/convert-to-po`,
       { method: "POST", body: JSON.stringify(body || {}) }

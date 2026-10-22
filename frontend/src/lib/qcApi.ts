@@ -626,7 +626,10 @@ export const mrmApi = {
     const response = await fetch(`${API_BASE}/api/qc/mrm?${query}`, {
       headers: getHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to fetch MRMs');
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.message || 'Failed to fetch MRMs');
+    }
     return response.json();
   },
 
@@ -999,7 +1002,28 @@ export const qcHubBatchApi = {
     if (!response.ok) throw new Error('Failed to fetch modules');
     return response.json();
   },
-  getAll: async (params?: { module?: string; category?: string; productName?: string; batchNo?: string; status?: string; page?: number; limit?: number }) => {
+  /** 28-day flexural/compressive/adhesion due today or overdue (missing results). */
+  get28DayDue: async (params?: { module?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.module) query.set("module", params.module);
+    const q = query.toString();
+    const response = await fetch(
+      `${API_BASE}/api/qc/hub/batch-records/28-day-due${q ? `?${q}` : ""}`,
+      { headers: getHeaders() }
+    );
+    if (!response.ok) throw new Error("Failed to fetch 28-day due reminders");
+    return response.json();
+  },
+  getAll: async (params?: {
+    module?: string;
+    category?: string;
+    productName?: string;
+    batchNo?: string;
+    trackingNo?: string;
+    status?: string;
+    page?: number;
+    limit?: number;
+  }) => {
     const query = new URLSearchParams();
     Object.entries(params || {}).forEach(([k, v]) => { if (v !== undefined && v !== '') query.append(k, String(v)); });
     const response = await fetch(`${API_BASE}/api/qc/hub/batch-records?${query}`, { headers: getHeaders() });

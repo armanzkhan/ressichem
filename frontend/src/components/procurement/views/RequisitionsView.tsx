@@ -140,7 +140,8 @@ export function RequisitionsView({ section }: Props) {
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [convertPr, setConvertPr] = useState<PurchaseDocument | null>(null);
-  const [convertSupplier, setConvertSupplier] = useState("");
+  /** Per PR-line vendor chosen at Create PO time (keyed by line index). */
+  const [convertLineVendors, setConvertLineVendors] = useState<Record<number, string>>({});
   const [converting, setConverting] = useState(false);
   const [accessLevel, setAccessLevel] = useState(() =>
     typeof window !== "undefined" ? accessLevelFromRole(localStorage.getItem("userRole")) : "user"
@@ -230,7 +231,8 @@ export function RequisitionsView({ section }: Props) {
     setCanDelete(canProcurementSoftDelete());
   }, []);
 
-  const load = useCallback(async () => {
+  /** Table rows only — keep this light so filters feel fast */
+  const loadRows = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -241,26 +243,6 @@ export function RequisitionsView({ section }: Props) {
       });
       setRows(filterRequisitionsBySection(res.data || [], section));
       setSelectedIds([]);
-
-      const level = accessLevelFromRole(localStorage.getItem("userRole") || "");
-      // Buyers/admins + requesters (who convert own approved PRs) need supplier picker
-      const needSuppliers =
-        level === "buyer" || level === "admin" || level === "user" || level === "creator_approver";
-
-      const [itemsRes, deptRes, suplRes] = await Promise.all([
-        procurementApi.listItems({ tradeScope: section }).catch(() => ({ data: [] as ProcurementItem[] })),
-        procurementApi.listPrDepartments().catch(() => ({ data: [] as string[] })),
-        needSuppliers
-          ? procurementApi.listSuppliers().catch(() => ({ data: [] as ProcurementSupplier[] }))
-          : Promise.resolve({ data: [] as ProcurementSupplier[] }),
-      ]);
-      setItems(filterItemsBySection(itemsRes.data || [], section));
-      setSuppliers(filterSuppliersBySection(suplRes.data || [], section));
-      const fromApi = Array.isArray(deptRes.data) ? deptRes.data : [];
-      const merged = Array.from(new Set([...PR_DEPARTMENTS, ...fromApi])).sort((a, b) =>
-        a.localeCompare(b)
-      );
-      setDepartmentOptions(merged);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load requisitions");
     } finally {
@@ -268,9 +250,45 @@ export function RequisitionsView({ section }: Props) {
     }
   }, [section, statusFilter, fulfillmentFilter]);
 
+  /** Catalogs once per section — not on every status/fulfillment filter change */
+  const loadCatalogs = useCallback(async () => {
+    try {
+      const [itemsRes, deptRes] = await Promise.all([
+        procurementApi.listItems({ tradeScope: section }).catch(() => ({ data: [] as ProcurementItem[] })),
+        procurementApi.listPrDepartments().catch(() => ({ data: [] as string[] })),
+      ]);
+      setItems(filterItemsBySection(itemsRes.data || [], section));
+      const fromApi = Array.isArray(deptRes.data) ? deptRes.data : [];
+      const merged = Array.from(new Set([...PR_DEPARTMENTS, ...fromApi])).sort((a, b) =>
+        a.localeCompare(b)
+      );
+      setDepartmentOptions(merged);
+    } catch {
+      /* non-blocking for the table */
+    }
+  }, [section]);
+
+  const ensureSuppliersLoaded = useCallback(async () => {
+    if (suppliers.length) return;
+    try {
+      const suplRes = await procurementApi.listSuppliers();
+      setSuppliers(filterSuppliersBySection(suplRes.data || [], section));
+    } catch {
+      setSuppliers([]);
+    }
+  }, [suppliers.length, section]);
+
+  const load = useCallback(async () => {
+    await Promise.all([loadRows(), loadCatalogs()]);
+  }, [loadRows, loadCatalogs]);
+
   useEffect(() => {
-    load();
-  }, [load]);
+    void loadRows();
+  }, [loadRows]);
+
+  useEffect(() => {
+    void loadCatalogs();
+  }, [loadCatalogs]);
 
   useEffect(() => {
     const openId = searchParams.get("open");
@@ -360,6 +378,21 @@ export function RequisitionsView({ section }: Props) {
       setShowForm(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load requisition");
+    }
+  };
+
+  const openConvertToPo = async (row: PurchaseDocument) => {
+    setError("");
+    setConvertLineVendors({});
+    setConvertPr(row);
+    try {
+      const [res] = await Promise.all([
+        procurementApi.getRequisition(row._id),
+        ensureSuppliersLoaded(),
+      ]);
+      setConvertPr(res.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load requisition details");
     }
   };
 
@@ -517,7 +550,7 @@ export function RequisitionsView({ section }: Props) {
           </button>
           <button
             type="button"
-            className="px-3 py-1.5 rounded-lg border border-blue-200 text-blue-700 text-sm hover:bg-blue-50"
+            className={`${procurementSecondaryButtonClass} !min-h-0 px-3 py-1.5`}
             onClick={() => setSelectedIds([])}
           >
             Clear selection
@@ -542,35 +575,16 @@ export function RequisitionsView({ section }: Props) {
                   />,
                   "PR #",
                   "Departments",
-                  "Location",
-                  "Created",
-                  "Created by",
-                  "Submitted at",
-                  "Approvals",
-                  "Assigned to",
                   "Status",
-                  "Purchase / delivery",
-                  "Follow-up",
+                  "Delivery",
+                  "Assigned",
                   "Actions",
                 ]
-              : [
-                  "PR #",
-                  "Departments",
-                  "Location",
-                  "Created",
-                  "Created by",
-                  "Submitted at",
-                  "Approvals",
-                  "Assigned to",
-                  "Status",
-                  "Purchase / delivery",
-                  "Follow-up",
-                  "Actions",
-                ]
+              : ["PR #", "Departments", "Status", "Delivery", "Assigned", "Actions"]
           }
           rows={rows.map((r) => {
             const actionCell = (
-              <span key={`act-${r._id}`} className="flex flex-wrap gap-2">
+              <span key={`act-${r._id}`} className="flex flex-wrap gap-x-2 gap-y-1 max-w-[14rem]">
                 {canEditOrSubmitPr(r) ? (
                   <button
                     type="button"
@@ -595,8 +609,7 @@ export function RequisitionsView({ section }: Props) {
                     className="text-indigo-600 text-xs dark:text-indigo-300"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setConvertSupplier("");
-                      setConvertPr(r);
+                      void openConvertToPo(r);
                     }}
                   >
                     Create PO
@@ -719,26 +732,32 @@ export function RequisitionsView({ section }: Props) {
               </span>
             );
 
+            const dept = r.title || "—";
             const baseCells = [
               r.requisitionNumber || "—",
-              r.title || "—",
-              r.location || "—",
-              procurementDateTime(r.createdAt),
-              procurementUserLabel(r.requestedBy),
-              procurementDateTime(r.submittedAt),
-              approvalProgressLabel(r),
-              r.assignedApprover ? procurementUserLabel(r.assignedApprover) : "—",
+              <span key={`dept-${r._id}`} className="block max-w-[9rem] truncate" title={dept}>
+                {dept}
+              </span>,
               <StatusBadge key={`st-${r._id}`} status={r.status} />,
-              r.fulfillmentLabel || r.stockStatus ? (
-                <StatusBadge
-                  key={`ff-${r._id}`}
-                  status={r.stockStatus || r.fulfillmentStatus || "n_a"}
-                  label={r.fulfillmentLabel || undefined}
-                />
+              r.stockStatus || r.fulfillmentStatus ? (
+                <span key={`ff-${r._id}`} className="inline-flex flex-col gap-0.5">
+                  <StatusBadge status={r.stockStatus || r.fulfillmentStatus || "n_a"} />
+                  {r.status === "approved" && (r.linesTotal || 0) > 0 ? (
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                      {r.linesProcessed || 0}/{r.linesTotal} processed
+                    </span>
+                  ) : null}
+                </span>
               ) : (
                 "—"
               ),
-              r.followUpStatus ? <StatusBadge key={`fu-${r._id}`} status={r.followUpStatus} /> : "—",
+              <span
+                key={`asg-${r._id}`}
+                className="block max-w-[7rem] truncate"
+                title={r.assignedApprover ? procurementUserLabel(r.assignedApprover) : ""}
+              >
+                {r.assignedApprover ? procurementUserLabel(r.assignedApprover) : "—"}
+              </span>,
               actionCell,
             ];
 
@@ -934,13 +953,35 @@ export function RequisitionsView({ section }: Props) {
             <div>
               <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">Line items ({lineCount(viewingRow)})</p>
               <ul className="space-y-1 text-gray-700 dark:text-gray-300">
-                {(viewingRow.items || []).map((item, i) => (
-                  <li key={i}>
-                    {item.department ? `[${item.department}] ` : ""}
-                    {item.itemName || item.itemCode || "Item"} — {item.quantity} {item.unit}
-                    {item.description ? ` (${item.description})` : ""}
-                  </li>
-                ))}
+                {(viewingRow.items || []).map((item, i) => {
+                  const lineStatus = item.lineFulfillmentStatus || "n_a";
+                  return (
+                    <li key={i} className="flex flex-wrap items-center gap-2">
+                      <span>
+                        {item.department ? `[${item.department}] ` : ""}
+                        {item.itemName || item.itemCode || "Item"} — {item.quantity} {item.unit}
+                        {item.description ? ` (${item.description})` : ""}
+                      </span>
+                      {viewingRow.status === "approved" ? (
+                        <StatusBadge
+                          status={lineStatus}
+                          label={item.lineFulfillmentLabel || undefined}
+                        />
+                      ) : null}
+                      {item.processed && (item.qtyReceived || 0) > 0 ? (
+                        <span className="text-[11px] text-slate-500 dark:text-slate-300">
+                          recv {item.qtyReceived}/{item.qtyOrdered || item.quantity}
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
+                {viewingRow.status === "approved" && (viewingRow.linesTotal || 0) > 0 ? (
+                  <p className="text-xs text-blue-600 dark:text-blue-300">
+                    Processed lines: {viewingRow.linesProcessed || 0}/{viewingRow.linesTotal}
+                    {viewingRow.poNumber ? ` · PO ${viewingRow.poNumber}` : ""}
+                  </p>
+                ) : null}
               </ul>
             </div>
             <footer className="flex justify-end gap-2 pt-2">
@@ -1097,47 +1138,219 @@ export function RequisitionsView({ section }: Props) {
       {convertPr ? (
         <Modal
           title={`Create PO from ${convertPr.requisitionNumber || "PR"}`}
-          onClose={() => setConvertPr(null)}
+          onClose={() => {
+            setConvertPr(null);
+            setConvertLineVendors({});
+          }}
+          wide
         >
-          <div className="space-y-3">
-            <p className="text-sm text-gray-600 dark:text-gray-300">
-              Select the supplier for this purchase order. A draft PO will be created from the approved PR lines.
-            </p>
-            <div>
-              <FormLabel>Supplier</FormLabel>
-              <SupplierSelect
-                section={section}
-                suppliers={suppliers}
-                value={convertSupplier}
-                onChange={setConvertSupplier}
-              />
-            </div>
-            <footer className="flex justify-end gap-2 pt-2">
-              <button type="button" className={procurementSecondaryButtonClass} onClick={() => setConvertPr(null)}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={converting || !convertSupplier}
-                className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50"
-                onClick={async () => {
-                  setConverting(true);
-                  setError("");
-                  try {
-                    await procurementApi.convertRequisitionToPO(convertPr._id, { supplier: convertSupplier });
-                    setConvertPr(null);
-                    await load();
-                  } catch (e) {
-                    setError(e instanceof Error ? e.message : "Convert failed");
-                  } finally {
-                    setConverting(false);
-                  }
-                }}
-              >
-                {converting ? "Creating…" : "Create draft PO"}
-              </button>
-            </footer>
-          </div>
+          {(() => {
+            const prLines = convertPr.items || [];
+            const scopedSuppliers = filterSuppliersBySection(suppliers, section);
+            const allLinesHaveVendor =
+              prLines.length > 0 && prLines.every((_, i) => Boolean(convertLineVendors[i]));
+            const uniqueVendors = [
+              ...new Set(Object.values(convertLineVendors).filter(Boolean)),
+            ];
+            const applyVendorToAll = (supplierId: string) => {
+              const next: Record<number, string> = {};
+              prLines.forEach((_, i) => {
+                next[i] = supplierId;
+              });
+              setConvertLineVendors(next);
+            };
+            return (
+              <div className="space-y-4">
+                <section className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 text-sm text-blue-900 dark:border-slate-700 dark:bg-slate-900 dark:text-blue-100">
+                  <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                        PR #
+                      </dt>
+                      <dd className="font-semibold">{convertPr.requisitionNumber || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                        Status
+                      </dt>
+                      <dd>
+                        <StatusBadge status={convertPr.status} />
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                        Departments
+                      </dt>
+                      <dd>{convertPr.title || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                        Location
+                      </dt>
+                      <dd>{convertPr.location || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                        Requested by
+                      </dt>
+                      <dd>{procurementUserLabel(convertPr.requestedBy)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                        Submitted
+                      </dt>
+                      <dd>{procurementDateTime(convertPr.submittedAt)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                        Type / currency
+                      </dt>
+                      <dd>
+                        {convertPr.purchaseType || "—"} · {convertPr.currency || "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                        Lines
+                      </dt>
+                      <dd>{prLines.length}</dd>
+                    </div>
+                  </dl>
+                  {convertPr.notes ? (
+                    <p className="mt-3 border-t border-blue-100 pt-2 text-xs dark:border-slate-700">
+                      <span className="font-medium">Notes:</span> {convertPr.notes}
+                    </p>
+                  ) : null}
+                </section>
+
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  Assign a vendor on each line below, then create <strong>one draft PO</strong>. Different
+                  vendors stay on the same PO.
+                </p>
+
+                {prLines.length > 1 ? (
+                  <div>
+                    <FormLabel>Apply one vendor to all lines</FormLabel>
+                    <SupplierSelect
+                      section={section}
+                      suppliers={scopedSuppliers}
+                      value=""
+                      onChange={applyVendorToAll}
+                      onSupplierCreated={(supplier) => {
+                        setSuppliers((prev) =>
+                          prev.some((s) => s._id === supplier._id) ? prev : [...prev, supplier]
+                        );
+                        applyVendorToAll(supplier._id);
+                      }}
+                      placeholder="Optional shortcut…"
+                    />
+                  </div>
+                ) : null}
+
+                <section className="max-h-[48vh] space-y-3 overflow-y-auto pr-1">
+                  {prLines.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-amber-200 px-3 py-4 text-sm text-amber-800 dark:border-amber-900 dark:text-amber-200">
+                      This PR has no line items — cannot create a PO.
+                    </p>
+                  ) : (
+                    prLines.map((item, i) => (
+                      <article
+                        key={item._id || i}
+                        className="rounded-xl border border-blue-100 bg-white p-3 dark:border-slate-700 dark:bg-slate-950"
+                      >
+                        <header className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-blue-950 dark:text-blue-50">
+                              Line {i + 1}: {item.itemName || item.itemCode || "Item"}
+                            </p>
+                            <p className="mt-0.5 text-xs text-blue-600 dark:text-blue-300">
+                              {[
+                                item.itemCode ? `Code ${item.itemCode}` : null,
+                                `${item.quantity ?? 0} ${item.unit || ""}`.trim(),
+                                item.department ? `Dept: ${item.department}` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          </div>
+                        </header>
+                        {item.description ? (
+                          <p className="mb-2 text-xs text-slate-600 dark:text-slate-300">
+                            {item.description}
+                          </p>
+                        ) : null}
+                        <FormLabel>
+                          Vendor <span className="text-red-600">*</span>
+                          <div className="mt-1">
+                            <SupplierSelect
+                              required
+                              section={section}
+                              suppliers={scopedSuppliers}
+                              value={convertLineVendors[i] || ""}
+                              onChange={(supplierId) =>
+                                setConvertLineVendors((prev) => ({ ...prev, [i]: supplierId }))
+                              }
+                              onSupplierCreated={(supplier) => {
+                                setSuppliers((prev) =>
+                                  prev.some((s) => s._id === supplier._id) ? prev : [...prev, supplier]
+                                );
+                                setConvertLineVendors((prev) => ({ ...prev, [i]: supplier._id }));
+                              }}
+                              placeholder="Select vendor for this line…"
+                            />
+                          </div>
+                        </FormLabel>
+                      </article>
+                    ))
+                  )}
+                </section>
+
+                {uniqueVendors.length > 1 ? (
+                  <p className="text-xs text-indigo-700 dark:text-indigo-300">
+                    {uniqueVendors.length} vendors selected — all will appear on the draft PO.
+                  </p>
+                ) : null}
+
+                <footer className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    className={procurementSecondaryButtonClass}
+                    onClick={() => {
+                      setConvertPr(null);
+                      setConvertLineVendors({});
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={converting || !allLinesHaveVendor}
+                    className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50"
+                    onClick={async () => {
+                      setConverting(true);
+                      setError("");
+                      try {
+                        const lineSuppliers = prLines.map((_, i) => convertLineVendors[i]);
+                        await procurementApi.convertRequisitionToPO(convertPr._id, {
+                          supplier: lineSuppliers[0],
+                          lineSuppliers,
+                        });
+                        setConvertPr(null);
+                        setConvertLineVendors({});
+                        await load();
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : "Convert failed");
+                      } finally {
+                        setConverting(false);
+                      }
+                    }}
+                  >
+                    {converting ? "Creating…" : "Create draft PO"}
+                  </button>
+                </footer>
+              </div>
+            );
+          })()}
         </Modal>
       ) : null}
       {followUpDraft ? (
