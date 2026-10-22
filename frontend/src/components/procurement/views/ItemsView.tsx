@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { procurementApi, type ProcurementItem, type ProcurementSupplier } from "@/lib/procurementApi";
-import { Alert, Field, FormLabel, LoadingText, Modal, PageShell, ProcurementSearchInput, Table, procurementControlClass } from "@/components/procurement/procurement-ui";
+import { Alert, Field, FormLabel, LoadingText, Modal, PageShell, ProcurementSearchBar, Table, procurementControlClass } from "@/components/procurement/procurement-ui";
 import { BulkImportModal } from "@/components/procurement/BulkImportModal";
 import { DEFAULT_ITEM_UNIT } from "@/lib/procurementOptions";
 import { UnitSelect } from "@/components/procurement/UnitSelect";
@@ -112,7 +112,13 @@ export function ItemsView({ section }: Props) {
       }}
     >
       {error ? <Alert message={error} /> : null}
-      <ProcurementSearchInput placeholder="Search code or name..." value={search} onChange={setSearch} />
+      <ProcurementSearchBar
+        label="Search items"
+        placeholder="Search code or name…"
+        value={search}
+        onChange={setSearch}
+        onClear={() => setSearch("")}
+      />
       {loading ? (
         <LoadingText />
       ) : (

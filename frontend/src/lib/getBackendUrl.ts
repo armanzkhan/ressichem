@@ -80,13 +80,33 @@ function shouldIgnoreEnvForBrowser(envUrl: string): boolean {
   return false;
 }
 
+/** Keep API scheme in sync with the page (HTTPS page must not call HTTP API — mixed content). */
+function matchPageProtocol(url: string): string {
+  if (typeof window === "undefined") return url;
+  try {
+    const u = new URL(url);
+    if (window.location.protocol === "https:" && u.protocol === "http:") {
+      u.protocol = "https:";
+      return u.toString().replace(/\/$/, "");
+    }
+    if (window.location.protocol === "http:" && u.protocol === "https:") {
+      u.protocol = "http:";
+      return u.toString().replace(/\/$/, "");
+    }
+  } catch {
+    /* ignore */
+  }
+  return url;
+}
+
 export function getBackendUrl(): string {
   const envUrl = envBackendUrl();
   if (envUrl) {
     if (typeof window !== "undefined") {
       if (!shouldIgnoreEnvForBrowser(envUrl)) {
-        console.log("[getBackendUrl] Using env API URL:", envUrl);
-        return envUrl;
+        const matched = matchPageProtocol(envUrl);
+        console.log("[getBackendUrl] Using env API URL:", matched);
+        return matched;
       }
     } else {
       console.log("[getBackendUrl] Using env API URL:", envUrl);

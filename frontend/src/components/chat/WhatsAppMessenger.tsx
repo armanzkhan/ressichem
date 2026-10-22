@@ -451,39 +451,55 @@ export default function WhatsAppMessenger() {
     setEmojiOpen(false);
   };
 
+  const canUseLiveMic = () => {
+    if (typeof window === "undefined") return false;
+    // Browsers only allow getUserMedia on HTTPS or localhost — not on http://192.168.x.x
+    const secure =
+      window.isSecureContext ||
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1";
+    return Boolean(secure && navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined");
+  };
+
   const startVoiceNote = async () => {
     if (!authed || active?._id === GUEST_AI_ID) {
       setError("Sign in to send voice notes");
       return;
     }
     setAttachMenuOpen(false);
+    setError("");
 
-    // Browsers block mic on plain HTTP (LAN/VPS) except localhost
-    const secure =
-      typeof window !== "undefined" &&
-      (window.isSecureContext ||
-        window.location.hostname === "localhost" ||
-        window.location.hostname === "127.0.0.1");
-    if (!secure || !navigator.mediaDevices?.getUserMedia) {
+    // Browsers block live mic on plain HTTP LAN — need https://… or localhost
+    if (!canUseLiveMic()) {
+      const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+      const port = typeof window !== "undefined" ? window.location.port || "3000" : "3000";
       setError(
-        "Live mic needs HTTPS (or localhost). On HTTP, pick an audio file instead."
+        `Live mic needs HTTPS. Open https://${host}:${port} (accept the cert warning once), or use http://localhost:${port}.`
       );
-      triggerFileInput(audioInputRef);
-      return;
-    }
-    if (typeof MediaRecorder === "undefined") {
-      setError("Voice recording is not supported in this browser. Pick an audio file instead.");
       triggerFileInput(audioInputRef);
       return;
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = MediaRecorder.isTypeSupported("audio/webm")
-        ? "audio/webm"
-        : MediaRecorder.isTypeSupported("audio/mp4")
-          ? "audio/mp4"
-          : "";
+      // Some Realtek setups reject advanced constraints — try simple first
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (firstErr) {
+        const firstName = firstErr instanceof DOMException ? firstErr.name : "";
+        if (firstName === "NotFoundError" || firstName === "DevicesNotFoundError") throw firstErr;
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+      }
+
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : MediaRecorder.isTypeSupported("audio/mp4")
+            ? "audio/mp4"
+            : "";
       const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
       recordChunksRef.current = [];
       recorder.ondataavailable = (ev) => {
@@ -494,38 +510,88 @@ export default function WhatsAppMessenger() {
         const blob = new Blob(recordChunksRef.current, {
           type: recorder.mimeType || mime || "audio/webm",
         });
+        setRecording(false);
         if (!blob.size) {
-          setError("No audio captured — try again or attach an audio file");
-          setRecording(false);
+          setError("No audio captured — hold a moment longer, then tap stop");
           return;
         }
         const ext = (recorder.mimeType || mime).includes("mp4") ? "mp4" : "webm";
-        const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: blob.type });
-        pickFile(file);
-        setRecording(false);
+        const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: blob.type || "audio/webm" });
+        void sendVoiceFile(file);
       };
       mediaRecorderRef.current = recorder;
-      recorder.start();
+      recorder.start(250);
       setRecording(true);
       setError("");
     } catch (err) {
       const name = err instanceof DOMException ? err.name : "";
       if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        setError("Allow microphone for this site in the browser address bar, then try again.");
+      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
         setError(
-          "Microphone blocked in the browser. Allow mic for this site, or attach an audio file."
+          "No microphone on this PC (Windows only shows Speakers). Enable a mic under Settings → System → Sound → Input, or plug in a headset, then retry."
         );
-      } else if (name === "NotFoundError") {
-        setError("No microphone found. Attach an audio file instead.");
+      } else if (name === "NotReadableError" || name === "TrackStartError") {
+        setError("Microphone is busy in another app. Close it and try again.");
       } else {
-        setError("Could not start microphone. Attach an audio file instead.");
+        setError(
+          err instanceof Error
+            ? `Microphone error: ${err.message}`
+            : "Could not start microphone. Attach an audio file instead."
+        );
       }
-      triggerFileInput(audioInputRef);
     }
   };
 
   const stopVoiceNote = () => {
-    mediaRecorderRef.current?.stop();
+    const rec = mediaRecorderRef.current;
+    if (!rec) return;
+    if (rec.state === "recording" || rec.state === "paused") {
+      try {
+        rec.requestData?.();
+      } catch {
+        /* ignore */
+      }
+      rec.stop();
+    }
     mediaRecorderRef.current = null;
+  };
+
+  const sendVoiceFile = async (file: File) => {
+    if (!active || sending || !authed || active._id === GUEST_AI_ID) return;
+    setSending(true);
+    setError("");
+    const replyId = replyTarget?._id;
+    setReplyTarget(null);
+    try {
+      const res = await chatApi.sendMessage(active._id, "", {
+        replyTo: replyId,
+        file,
+        fileName: file.name,
+      });
+      setMessages((prev) => (prev.some((m) => m._id === res.data._id) ? prev : [...prev, res.data]));
+      setConversations((prev) => {
+        const others = prev.filter((c) => c._id !== active._id);
+        return [
+          {
+            ...active,
+            lastMessage: {
+              text: res.data.text,
+              senderUserId: res.data.senderUserId,
+              senderName: res.data.senderName,
+              at: res.data.createdAt,
+            },
+            unreadCount: 0,
+          },
+          ...others,
+        ];
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Voice note failed to send");
+      pickFile(file);
+    } finally {
+      setSending(false);
+    }
   };
 
   const send = async (e?: React.FormEvent) => {
@@ -1146,7 +1212,8 @@ export default function WhatsAppMessenger() {
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => void startVoiceNote()}
                     >
-                      <Mic className="h-4 w-4 text-orange-400" /> Record voice
+                      <Mic className="h-4 w-4 text-orange-400" />{" "}
+                      {canUseLiveMic() ? "Record voice" : "Voice / audio file"}
                     </button>
                   </div>
                 ) : null}
@@ -1214,7 +1281,12 @@ export default function WhatsAppMessenger() {
                       type="button"
                       onClick={() => void startVoiceNote()}
                       className="h-11 w-11 rounded-full bg-[#25D366] text-[#111] flex items-center justify-center"
-                      aria-label="Record voice note"
+                      title={
+                        canUseLiveMic()
+                          ? "Record voice note"
+                          : "Attach audio (live mic needs HTTPS or localhost)"
+                      }
+                      aria-label={canUseLiveMic() ? "Record voice note" : "Attach audio file"}
                     >
                       <Mic className="h-5 w-5" />
                     </button>

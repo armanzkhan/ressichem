@@ -140,43 +140,43 @@ export default function ProcurementLayout({ children }: { children: React.ReactN
     window.location.href = "/procurement/login";
   };
 
-  return (
-    <div className="min-h-screen bg-white dark:bg-slate-950 flex">
-      {sidebarOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
-      )}
-
-      <aside
-        className={[
-          "fixed lg:static inset-y-0 left-0 z-50 w-72 h-screen bg-white text-blue-800 border-r border-blue-100 flex flex-col shadow-sm transition-transform duration-300 overflow-hidden relative dark:bg-slate-900 dark:text-blue-100 dark:border-slate-800",
-          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
-        ].join(" ")}
-      >
-        <div className="pointer-events-none absolute inset-0 z-0" aria-hidden="true">
-          <div className="absolute inset-0 flex items-center justify-center opacity-[0.07]">
-            <Image
-              src="/images/logo/logo.png"
-              alt=""
-              width={220}
-              height={220}
-              className="h-auto w-[78%] max-w-[220px] object-contain select-none"
-              priority
-            />
-          </div>
+  const renderSidebar = (opts?: { showClose?: boolean }) => (
+    <>
+      <div className="pointer-events-none absolute inset-0 z-0" aria-hidden="true">
+        <div className="absolute inset-0 flex items-center justify-center opacity-[0.07]">
+          <Image
+            src="/images/logo/logo.png"
+            alt=""
+            width={220}
+            height={220}
+            className="h-auto w-[78%] max-w-[220px] object-contain select-none"
+            priority
+          />
         </div>
+      </div>
 
-        <div className="relative z-10 flex flex-col flex-1 min-h-0">
-          <div className="p-6 border-b border-blue-100 flex flex-col items-center text-center dark:border-slate-800">
-            <Image
-              src="/images/logo/logo.png"
-              alt="Ressichem"
-              width={160}
-              height={160}
-              className="h-20 w-auto max-w-[200px] object-contain"
-              priority
-            />
-            <h1 className="mt-3 text-sm font-bold tracking-wide text-blue-800 dark:text-blue-100">PROCUREMENT SYSTEM</h1>
-          </div>
+      <div className="relative z-10 flex flex-col flex-1 min-h-0">
+        <div className="relative p-5 sm:p-6 border-b border-blue-100 flex flex-col items-center text-center dark:border-slate-800">
+          {opts?.showClose ? (
+            <button
+              type="button"
+              className="absolute right-3 top-3 p-2 rounded-lg text-blue-700 hover:bg-blue-50 dark:text-blue-200 dark:hover:bg-slate-800"
+              onClick={() => setSidebarOpen(false)}
+              aria-label="Close menu"
+            >
+              ✕
+            </button>
+          ) : null}
+          <Image
+            src="/images/logo/logo.png"
+            alt="Ressichem"
+            width={160}
+            height={160}
+            className="h-16 sm:h-20 w-auto max-w-[180px] object-contain"
+            priority
+          />
+          <h1 className="mt-3 text-sm font-bold tracking-wide text-blue-800 dark:text-blue-100">PROCUREMENT SYSTEM</h1>
+        </div>
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           <Link
             href={DASHBOARD_LINK.href}
@@ -197,7 +197,9 @@ export default function ProcurementLayout({ children }: { children: React.ReactN
                   onClick={() => toggleGroup(group.id)}
                   className={[
                     "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-semibold",
-                    active ? "bg-blue-50 text-blue-800 dark:bg-slate-800 dark:text-blue-100" : "text-blue-700 hover:bg-blue-50 dark:text-blue-200 dark:hover:bg-slate-800",
+                    active
+                      ? "bg-blue-50 text-blue-800 dark:bg-slate-800 dark:text-blue-100"
+                      : "text-blue-700 hover:bg-blue-50 dark:text-blue-200 dark:hover:bg-slate-800",
                   ].join(" ")}
                 >
                   <span className="flex items-center gap-2">
@@ -254,37 +256,79 @@ export default function ProcurementLayout({ children }: { children: React.ReactN
             Logout
           </button>
         </div>
+      </div>
+    </>
+  );
+
+  const asideShellClass =
+    "bg-white text-blue-800 border-r border-blue-100 flex flex-col shadow-sm overflow-hidden relative dark:bg-slate-900 dark:text-blue-100 dark:border-slate-800";
+
+  return (
+    <div className="min-h-dvh w-full max-w-[100vw] overflow-x-hidden bg-[radial-gradient(ellipse_at_top,_#eff6ff_0%,_#ffffff_55%)] dark:bg-slate-950 dark:bg-none flex flex-col lg:flex-row">
+      {/* Mobile drawer — portal-style overlay; never reserves a left column */}
+      {sidebarOpen ? (
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/55 backdrop-blur-sm"
+            aria-label="Close menu overlay"
+            onClick={() => setSidebarOpen(false)}
+          />
+          <aside
+            className={`absolute inset-y-0 left-0 w-[min(18rem,86vw)] h-dvh rounded-r-2xl shadow-2xl shadow-blue-950/20 ${asideShellClass}`}
+          >
+            {renderSidebar({ showClose: true })}
+          </aside>
         </div>
+      ) : null}
+
+      {/* Desktop sidebar only — hidden on phones so content is full width */}
+      <aside className={`hidden lg:flex w-72 h-dvh shrink-0 sticky top-0 ${asideShellClass}`}>
+        {renderSidebar()}
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-30 bg-white border-b border-blue-100 px-4 py-3 flex flex-wrap items-center justify-between gap-3 dark:bg-slate-900 dark:border-slate-800">
-          <div className="flex items-center gap-3 min-w-0 flex-1">
+      <div className="flex flex-col min-w-0 w-full flex-1">
+        <header className="sticky top-0 z-30 border-b border-blue-100/80 bg-white/85 px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2 backdrop-blur-xl dark:bg-slate-900/90 dark:border-slate-800">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <button
               type="button"
-              className="lg:hidden p-2 rounded-lg bg-blue-50 text-blue-800 border border-blue-100 dark:bg-slate-800 dark:text-blue-100 dark:border-slate-700"
+              className="lg:hidden shrink-0 flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-900/20 active:scale-95"
               onClick={() => setSidebarOpen(true)}
               aria-label="Open menu"
             >
-              ☰
+              <span className="text-lg leading-none">☰</span>
             </button>
-            <nav aria-label="Breadcrumb" className="flex items-center flex-wrap gap-x-2 gap-y-1 text-sm min-w-0">
-              {breadcrumbs.map((crumb, index) => (
-                <span key={`${crumb.label}-${index}`} className="flex items-center gap-2 min-w-0">
-                  {index > 0 ? <span className="text-blue-300 dark:text-slate-500">/</span> : null}
-                  {crumb.href && index < breadcrumbs.length - 1 ? (
-                    <Link href={crumb.href} className="text-blue-600 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-100 truncate">
-                      {crumb.label}
-                    </Link>
-                  ) : (
-                    <span className="font-semibold text-blue-800 dark:text-blue-100 truncate">{crumb.label}</span>
-                  )}
-                </span>
-              ))}
+            <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm min-w-0 overflow-hidden">
+              {breadcrumbs.map((crumb, index) => {
+                const isLast = index === breadcrumbs.length - 1;
+                if (!isLast && breadcrumbs.length > 1) {
+                  return (
+                    <span key={`${crumb.label}-${index}`} className="hidden sm:flex items-center gap-1.5 min-w-0">
+                      {index > 0 ? <span className="text-blue-300 dark:text-slate-500">/</span> : null}
+                      {crumb.href ? (
+                        <Link
+                          href={crumb.href}
+                          className="text-blue-600 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-100 truncate max-w-[8rem]"
+                        >
+                          {crumb.label}
+                        </Link>
+                      ) : (
+                        <span className="text-blue-600 dark:text-blue-300 truncate max-w-[8rem]">{crumb.label}</span>
+                      )}
+                    </span>
+                  );
+                }
+                return (
+                  <span key={`${crumb.label}-${index}`} className="flex items-center gap-1.5 min-w-0">
+                    {index > 0 ? <span className="hidden sm:inline text-blue-300 dark:text-slate-500">/</span> : null}
+                    <span className="font-semibold text-blue-900 dark:text-blue-100 truncate">{crumb.label}</span>
+                  </span>
+                );
+              })}
             </nav>
           </div>
 
-          <div className="flex items-center gap-3 ml-auto">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             <ThemeToggleSwitch />
             <ProcurementNotificationBell />
             <button
@@ -292,13 +336,15 @@ export default function ProcurementLayout({ children }: { children: React.ReactN
               onClick={logout}
               title="Logout"
               aria-label="Logout"
-              className="p-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 border border-blue-600 dark:bg-blue-600 dark:hover:bg-blue-500 dark:border-blue-500"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-900/15 hover:bg-blue-700"
             >
               <Power className="w-4 h-4" />
             </button>
           </div>
         </header>
-        <main className="flex-1 p-4 sm:p-6 overflow-auto bg-white text-blue-800 dark:bg-slate-950 dark:text-blue-100">{children}</main>
+        <main className="flex-1 w-full min-w-0 p-3 sm:p-6 overflow-x-hidden overflow-y-auto text-blue-800 dark:text-blue-100">
+          {children}
+        </main>
       </div>
     </div>
   );

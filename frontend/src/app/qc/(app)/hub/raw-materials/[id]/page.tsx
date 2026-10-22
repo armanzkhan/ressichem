@@ -9,6 +9,7 @@ import {
   hubRmTestsForCategory,
   normalizeSievePassing,
   sievePassingEntries,
+  SIEVE_ANALYSIS_ROWS,
 } from "@/lib/qcHubDryMortarSrs";
 
 function formatEntry(entry: any, code: string): string {
@@ -169,24 +170,57 @@ export default function HubRawMaterialDetailPage() {
         <h2 className="text-sm font-bold text-emerald-800 dark:text-emerald-300 mb-4">
           Sieve Analysis
         </h2>
-        <table className="min-w-[280px] text-sm">
-          <thead>
-            <tr className="border-b">
-              <th className="px-2 py-1 text-left text-xs uppercase text-gray-500">Sieve Size</th>
-              <th className="px-2 py-1 text-left text-xs uppercase text-gray-500">% Passing</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sievePassingEntries(
-              normalizeSievePassing(material.specifications?.sieveAnalysisPassing)
-            ).map(({ size, percentPassing }) => (
-              <tr key={size} className="border-t border-gray-100 dark:border-gray-700">
-                <td className="px-2 py-1.5 font-mono font-semibold">{size}</td>
-                <td className="px-2 py-1.5">{percentPassing || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {(() => {
+          const map = normalizeSievePassing(material.specifications?.sieveAnalysisPassing);
+          const extras = sievePassingEntries(map).filter(
+            (r) =>
+              !SIEVE_ANALYSIS_ROWS.some((pair) => pair.left === r.size || pair.right === r.size)
+          );
+          return (
+            <>
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="px-2 py-1 text-left text-xs uppercase text-gray-500">Sieve Size</th>
+                    <th className="px-2 py-1 text-left text-xs uppercase text-gray-500">% Passing</th>
+                    <th className="w-3 border-l border-gray-100 dark:border-gray-700" aria-hidden />
+                    <th className="px-2 py-1 text-left text-xs uppercase text-gray-500">Sieve Size</th>
+                    <th className="px-2 py-1 text-left text-xs uppercase text-gray-500">% Passing</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {SIEVE_ANALYSIS_ROWS.map(({ left, right }) => (
+                    <tr key={`${left}-${right}`} className="border-t border-gray-100 dark:border-gray-700">
+                      <td className="px-2 py-1.5 font-mono font-semibold">{left}</td>
+                      <td className="px-2 py-1.5">{map[left] || "—"}</td>
+                      <td className="border-l border-gray-100 dark:border-gray-700" aria-hidden />
+                      <td className="px-2 py-1.5 font-mono font-semibold">{right}</td>
+                      <td className="px-2 py-1.5">{map[right] || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {extras.length > 0 ? (
+                <table className="mt-4 min-w-[280px] text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="px-2 py-1 text-left text-xs uppercase text-gray-500">Extra size</th>
+                      <th className="px-2 py-1 text-left text-xs uppercase text-gray-500">% Passing</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {extras.map(({ size, percentPassing }) => (
+                      <tr key={size} className="border-t border-gray-100 dark:border-gray-700">
+                        <td className="px-2 py-1.5 font-mono font-semibold">{size}</td>
+                        <td className="px-2 py-1.5">{percentPassing || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
+            </>
+          );
+        })()}
       </div>
 
       <div className="rounded-2xl border border-blue-100 bg-white/80 dark:bg-gray-800/80 shadow overflow-x-auto">

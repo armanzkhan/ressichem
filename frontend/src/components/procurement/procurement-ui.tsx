@@ -49,7 +49,7 @@ export function PageShell({
   addLabel = "Add",
   onBulkImport,
   bulkImportLabel = "Bulk import",
-  titleClassName = "text-xl font-bold text-blue-700 dark:text-blue-300",
+  titleClassName = "text-lg sm:text-xl font-bold tracking-tight",
   children,
 }: {
   title: string;
@@ -63,32 +63,66 @@ export function PageShell({
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-4">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className={titleClassName}>{title}</h1>
-          {summary ? (
-            <p className="mt-1 text-sm font-medium text-blue-600 dark:text-blue-300">{summary}</p>
-          ) : null}
-        </div>
-        {onAdd || onBulkImport ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {onBulkImport ? (
-              <button type="button" onClick={onBulkImport} className={procurementSecondaryButtonClass}>
-                {bulkImportLabel}
-              </button>
-            ) : null}
-            {onAdd ? (
-              <button type="button" onClick={onAdd} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm">
-                + {addLabel}
-              </button>
+    <section className="space-y-3 sm:space-y-4 w-full min-w-0 pb-20 sm:pb-0">
+      <header className="relative overflow-hidden rounded-2xl border border-blue-100/80 bg-gradient-to-br from-blue-600 via-blue-600 to-sky-500 p-4 text-white shadow-lg shadow-blue-900/15 sm:rounded-none sm:border-0 sm:bg-none sm:from-transparent sm:via-transparent sm:to-transparent sm:p-0 sm:shadow-none sm:text-inherit dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-slate-900 sm:dark:bg-transparent">
+        <div className="pointer-events-none absolute -right-6 -top-8 h-28 w-28 rounded-full bg-white/10 sm:hidden" aria-hidden />
+        <div className="pointer-events-none absolute -bottom-10 -left-4 h-24 w-24 rounded-full bg-sky-300/20 sm:hidden" aria-hidden />
+        <div className="relative flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <h1 className={`${titleClassName} text-white sm:text-blue-800 dark:sm:text-blue-100`}>
+              {title}
+            </h1>
+            {summary ? (
+              <p className="mt-1 text-sm font-medium text-blue-50/90 sm:text-blue-600 dark:sm:text-blue-300">
+                {summary}
+              </p>
             ) : null}
           </div>
-        ) : null}
+          {onAdd || onBulkImport ? (
+            <div className="hidden sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-2">
+              {onBulkImport ? (
+                <button type="button" onClick={onBulkImport} className={procurementSecondaryButtonClass}>
+                  {bulkImportLabel}
+                </button>
+              ) : null}
+              {onAdd ? (
+                <button
+                  type="button"
+                  onClick={onAdd}
+                  className="inline-flex items-center justify-center min-h-11 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 shadow-sm"
+                >
+                  + {addLabel}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {onBulkImport ? (
+            <button
+              type="button"
+              onClick={onBulkImport}
+              className="relative sm:hidden inline-flex items-center justify-center min-h-10 w-full rounded-xl border border-white/35 bg-white/15 px-4 text-sm font-medium text-white backdrop-blur-sm active:bg-white/25"
+            >
+              {bulkImportLabel}
+            </button>
+          ) : null}
+        </div>
       </header>
-      <section className={`rounded-2xl p-6 space-y-4 ${procurementPanelClass}`}>
+
+      <section className={`rounded-2xl p-3.5 sm:p-6 space-y-3.5 sm:space-y-4 w-full min-w-0 ${procurementPanelClass}`}>
         {children}
       </section>
+
+      {/* Mobile primary action — floating, always reachable */}
+      {onAdd ? (
+        <button
+          type="button"
+          onClick={onAdd}
+          className="sm:hidden fixed bottom-5 right-4 z-40 inline-flex items-center gap-2 rounded-full bg-blue-600 px-5 py-3.5 text-sm font-semibold text-white shadow-xl shadow-blue-900/30 active:scale-[0.98]"
+        >
+          <span className="text-lg leading-none">+</span>
+          {addLabel}
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -111,21 +145,80 @@ export function ProcurementSearchInput({
   return (
     <input
       type="search"
+      enterKeyHint="search"
+      autoComplete="off"
       placeholder={placeholder}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className={[
-        "w-full max-w-md rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-blue-900",
+        // text-base (16px) on mobile avoids iOS zoom; full width so it isn't a tiny strip
+        "block w-full min-h-11 rounded-xl border border-blue-200 bg-white px-3.5 py-2.5 text-base sm:text-sm text-blue-900",
         "placeholder:text-blue-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-none",
         "dark:border-slate-600 dark:bg-slate-950 dark:text-blue-50 dark:placeholder:text-slate-400 dark:focus:ring-blue-900/40",
+        "sm:max-w-md",
         className,
       ].join(" ")}
     />
   );
 }
 
+/** Full-width search row for list pages (mobile-friendly). */
+export function ProcurementSearchBar({
+  label,
+  value,
+  onChange,
+  placeholder,
+  onClear,
+}: {
+  label?: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  onClear?: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-end w-full min-w-0">
+      <label className="block flex-1 min-w-0 w-full">
+        {label ? (
+          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+            {label}
+          </span>
+        ) : null}
+        <div className="relative">
+          <span
+            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-400 dark:text-slate-400"
+            aria-hidden
+          >
+            ⌕
+          </span>
+          <ProcurementSearchInput
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            className="max-w-none sm:max-w-none pl-10 bg-blue-50/60 border-blue-100 shadow-inner shadow-blue-900/5 dark:bg-slate-950"
+          />
+        </div>
+      </label>
+      {value.trim() && onClear ? (
+        <button
+          type="button"
+          onClick={onClear}
+          className="inline-flex items-center justify-center min-h-11 px-4 rounded-xl border border-blue-200 text-sm font-medium text-blue-700 hover:bg-blue-50 dark:border-slate-600 dark:text-blue-200 dark:hover:bg-slate-800 w-full sm:w-auto shrink-0"
+        >
+          Clear
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function LoadingText({ children = "Loading..." }: { children?: React.ReactNode }) {
   return <p className="text-sm text-blue-600 dark:text-blue-300">{children}</p>;
+}
+
+function headerText(h: React.ReactNode): string {
+  if (typeof h === "string" || typeof h === "number") return String(h);
+  return "";
 }
 
 export function Table({
@@ -138,56 +231,152 @@ export function Table({
   onRowClick?: (rowIndex: number) => void;
 }) {
   return (
-    <section className="overflow-x-auto">
-      <table className="w-full text-sm text-blue-800 dark:text-blue-100">
-        <thead>
-          <tr className="border-b border-blue-200 text-left text-blue-700 dark:border-slate-600 dark:text-blue-300">
-            {headers.map((h, i) => (
-              <th key={i} className="py-2 pr-4 font-semibold">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={headers.length} className="py-6 text-blue-600 dark:text-blue-300">
-                No records.
-              </td>
-            </tr>
-          ) : (
-            rows.map((cells, i) => (
-              <tr
+    <section className="w-full min-w-0">
+      {/* Mobile: stacked cards */}
+      <div className="space-y-3 md:hidden">
+        {rows.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-blue-200 bg-gradient-to-b from-blue-50/80 to-white px-4 py-10 text-center text-sm text-blue-600 dark:border-slate-600 dark:from-slate-900 dark:to-slate-950 dark:text-blue-300">
+            No records yet.
+          </p>
+        ) : (
+          rows.map((cells, i) => {
+            const titleCell = cells[1] ?? cells[0];
+            const codeCell = cells[0];
+            const interactive = Boolean(onRowClick);
+            const detailFields: React.ReactNode[] = [];
+            const actionFields: React.ReactNode[] = [];
+
+            headers.forEach((h, j) => {
+              if (j === 0 || j === 1) return;
+              const label = headerText(h);
+              const value = cells[j];
+              if (value == null || value === "") return;
+              if (!label) {
+                actionFields.push(
+                  <div key={j} className="pt-2.5 mt-1 border-t border-blue-50 dark:border-slate-800">
+                    {value}
+                  </div>
+                );
+                return;
+              }
+              detailFields.push(
+                <div key={j} className="flex items-start justify-between gap-3 text-sm">
+                  <dt className="shrink-0 text-xs uppercase tracking-wide text-blue-400 dark:text-blue-500">
+                    {label}
+                  </dt>
+                  <dd className="min-w-0 text-right font-medium text-blue-900 dark:text-blue-100 break-words">
+                    {value}
+                  </dd>
+                </div>
+              );
+            });
+
+            return (
+              <article
                 key={i}
-                className={[
-                  "border-b border-blue-100 dark:border-slate-700",
-                  onRowClick ? "cursor-pointer hover:bg-blue-50 dark:hover:bg-slate-800/80" : "",
-                ].join(" ")}
-                onClick={onRowClick ? () => onRowClick(i) : undefined}
-                onKeyDown={
-                  onRowClick
-                    ? (e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          onRowClick(i);
-                        }
-                      }
-                    : undefined
-                }
-                tabIndex={onRowClick ? 0 : undefined}
-                role={onRowClick ? "button" : undefined}
+                className="relative w-full overflow-hidden rounded-2xl border border-blue-100/90 bg-white p-4 shadow-md shadow-blue-900/5 ring-1 ring-blue-50 dark:border-slate-700 dark:bg-slate-900 dark:shadow-none dark:ring-slate-800"
               >
-                {cells.map((cell, j) => (
-                  <td key={j} className="py-2 pr-4 text-blue-800 dark:text-blue-100">
-                    {cell}
-                  </td>
-                ))}
+                <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-blue-500 to-sky-400" aria-hidden />
+                {/* Clickable body — div, not button, so Edit/Deactivate buttons stay valid */}
+                <div
+                  role={interactive ? "button" : undefined}
+                  tabIndex={interactive ? 0 : undefined}
+                  onClick={interactive ? () => onRowClick?.(i) : undefined}
+                  onKeyDown={
+                    interactive
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onRowClick?.(i);
+                          }
+                        }
+                      : undefined
+                  }
+                  className={[
+                    "pl-2 outline-none",
+                    interactive
+                      ? "cursor-pointer rounded-xl active:bg-blue-50/70 dark:active:bg-slate-800/80"
+                      : "",
+                  ].join(" ")}
+                >
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-[15px] text-blue-950 dark:text-blue-50 break-words leading-snug">
+                        {titleCell}
+                      </p>
+                      {codeCell != null && codeCell !== titleCell ? (
+                        <p className="mt-1 inline-flex max-w-full truncate rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-blue-600 dark:bg-slate-800 dark:text-blue-300">
+                          {codeCell}
+                        </p>
+                      ) : null}
+                    </div>
+                    {interactive ? (
+                      <span className="shrink-0 mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-slate-800 dark:text-blue-300">
+                        ›
+                      </span>
+                    ) : null}
+                  </div>
+                  {detailFields.length ? <dl className="space-y-2.5">{detailFields}</dl> : null}
+                </div>
+                {actionFields.length ? <div className="pl-2">{actionFields}</div> : null}
+              </article>
+            );
+          })
+        )}
+      </div>
+
+      {/* Desktop / tablet: classic table */}
+      <div className="hidden md:block overflow-x-auto overscroll-x-contain rounded-lg border border-blue-100 dark:border-slate-700">
+        <table className="w-full min-w-[40rem] text-sm text-blue-800 dark:text-blue-100">
+          <thead>
+            <tr className="border-b border-blue-200 text-left text-blue-700 dark:border-slate-600 dark:text-blue-300 bg-blue-50/80 dark:bg-slate-800/80">
+              {headers.map((h, i) => (
+                <th key={i} className="py-2.5 px-3 font-semibold whitespace-nowrap">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={headers.length} className="py-6 px-3 text-blue-600 dark:text-blue-300">
+                  No records.
+                </td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+            ) : (
+              rows.map((cells, i) => (
+                <tr
+                  key={i}
+                  className={[
+                    "border-b border-blue-100 dark:border-slate-700",
+                    onRowClick ? "cursor-pointer hover:bg-blue-50 dark:hover:bg-slate-800/80" : "",
+                  ].join(" ")}
+                  onClick={onRowClick ? () => onRowClick(i) : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onRowClick(i);
+                          }
+                        }
+                      : undefined
+                  }
+                  tabIndex={onRowClick ? 0 : undefined}
+                  role={onRowClick ? "button" : undefined}
+                >
+                  {cells.map((cell, j) => (
+                    <td key={j} className="py-2.5 px-3 text-blue-800 dark:text-blue-100 whitespace-nowrap">
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
@@ -227,16 +416,16 @@ export function Modal({
 
   const overlay = (
     <section
-      className={`fixed inset-0 flex items-center justify-center bg-black/50 p-2 sm:p-4 ${
+      className={`fixed inset-0 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4 ${
         stacked ? "z-[110]" : "z-[100]"
       }`}
     >
       <article
-        className={`w-full rounded-2xl p-6 shadow-xl max-h-[92vh] overflow-y-auto ${procurementPanelClass} ${widthClass}`}
+        className={`w-full rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 shadow-xl max-h-[94dvh] sm:max-h-[92vh] overflow-y-auto overflow-x-hidden ${procurementPanelClass} ${widthClass}`}
       >
-        <header className="flex justify-between items-center mb-4">
-          <h2 className={titleClassName}>{title}</h2>
-          <button type="button" onClick={onClose} className={closeClassName}>
+        <header className="flex justify-between items-center gap-3 mb-4 sticky top-0 z-10 bg-inherit pb-2">
+          <h2 className={`${titleClassName} min-w-0 break-words`}>{title}</h2>
+          <button type="button" onClick={onClose} className={`${closeClassName} shrink-0`}>
             Close
           </button>
         </header>

@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { procurementApi, type ProcurementSupplier } from "@/lib/procurementApi";
 import { SupplierFormModal, emptySupplierForm, supplierRecordToForm } from "@/components/procurement/SupplierFormModal";
 import { BulkImportModal } from "@/components/procurement/BulkImportModal";
-import { Alert, LoadingText, PageShell, ProcurementSearchInput, Table } from "@/components/procurement/procurement-ui";
+import { Alert, LoadingText, PageShell, ProcurementSearchBar, Table } from "@/components/procurement/procurement-ui";
 import {
   filterSuppliersBySection,
   pageTitle,
@@ -108,28 +108,13 @@ export function SuppliersView({ section }: Props) {
       onAdd={openCreate}
     >
       {error ? <Alert message={error} /> : null}
-      <div className="flex flex-col sm:flex-row sm:items-end gap-2 sm:gap-3">
-        <label className="flex-1 min-w-0 block">
-          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
-            Search suppliers
-          </span>
-          <ProcurementSearchInput
-            placeholder="Code, name, company, contact, email, phone, country…"
-            value={search}
-            onChange={setSearch}
-            className="max-w-none"
-          />
-        </label>
-        {search.trim() ? (
-          <button
-            type="button"
-            className="text-sm text-blue-600 hover:underline dark:text-blue-300 sm:mb-2"
-            onClick={() => setSearch("")}
-          >
-            Clear
-          </button>
-        ) : null}
-      </div>
+      <ProcurementSearchBar
+        label="Search suppliers"
+        placeholder="Code, name, contact, email, phone…"
+        value={search}
+        onChange={setSearch}
+        onClear={() => setSearch("")}
+      />
       {loading ? (
         <LoadingText />
       ) : filteredRows.length === 0 ? (

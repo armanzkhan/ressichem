@@ -3,21 +3,32 @@
  * Single source of truth for backend validation and Power BI export field mapping.
  */
 
-/** Fixed sieve sizes for Hub Sieve Analysis (% Passing entered per size) */
-const SIEVE_ANALYSIS_SIZES = [
+/**
+ * Fixed sieve sizes — lab-sheet two-column pattern (coarse | fine):
+ * 2.00/0.50, 1.60/0.315, 1.25/0.250, 1.00/0.125, 0.80/0.090, 0.63/0.063
+ */
+const SIEVE_ANALYSIS_COLUMN_LEFT = [
   "2.00 mm",
-  "0.50 mm",
   "1.60 mm",
-  "0.315 mm",
   "1.25 mm",
-  "0.250 mm",
   "1.00 mm",
-  "0.125 mm",
   "0.80 mm",
-  "0.090 mm",
   "0.63 mm",
+];
+
+const SIEVE_ANALYSIS_COLUMN_RIGHT = [
+  "0.50 mm",
+  "0.315 mm",
+  "0.250 mm",
+  "0.125 mm",
+  "0.090 mm",
   "0.063 mm",
 ];
+
+const SIEVE_ANALYSIS_SIZES = SIEVE_ANALYSIS_COLUMN_LEFT.flatMap((left, i) => [
+  left,
+  SIEVE_ANALYSIS_COLUMN_RIGHT[i],
+]);
 
 const QC_MODULES = {
   TILE_ADHESIVE: {
@@ -243,6 +254,8 @@ module.exports = {
   PACKAGING_MATERIAL_TYPES,
   TREND_PARAMETERS,
   SIEVE_ANALYSIS_SIZES,
+  SIEVE_ANALYSIS_COLUMN_LEFT,
+  SIEVE_ANALYSIS_COLUMN_RIGHT,
   getModuleByKey,
   getModuleBySlug,
   getAllModules,

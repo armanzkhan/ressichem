@@ -38,11 +38,13 @@ class RealtimeNotificationService {
   private maxReconnectAttempts = 5;
   private reconnectInterval = 3000;
   private isConnected = false;
+  private intentionalClose = false;
   private listeners: ((notification: RealtimeNotification) => void)[] = [];
   private chatListeners: ((payload: any) => void)[] = [];
   private token: string | null = null;
   private userType: string | null = null;
   private userId: string | null = null;
+  private lastWsUrl: string | null = null;
 
   constructor() {
     this.initializeAuth();
@@ -60,17 +62,26 @@ class RealtimeNotificationService {
     if (this.isConnected || !this.token) {
       return;
     }
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      return;
+    }
 
     try {
+      this.intentionalClose = false;
       const backendUrl = getBackendUrl();
       const wsUrl = backendUrl.replace(/^http(s?):\/\//, "ws$1://").replace(/\/$/, "") + "/ws";
-      
-      console.log('🔌 Connecting to WebSocket:', wsUrl);
-      
+      this.lastWsUrl = wsUrl;
+
+      if (process.env.NODE_ENV === "development") {
+        console.log("Connecting to WebSocket:", wsUrl);
+      }
+
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
-        console.log('✅ WebSocket connected');
+        if (process.env.NODE_ENV === "development") {
+          console.log("WebSocket connected");
+        }
         this.isConnected = true;
         this.reconnectAttempts = 0;
         this.authenticate();
@@ -79,28 +90,31 @@ class RealtimeNotificationService {
       this.ws.onmessage = (event) => {
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
-          console.log('🔔 WebSocket message received:', message);        
-          console.log('🔔 Message type:', message.type);
-          console.log('🔔 Full message data:', JSON.stringify(message, null, 2));
           this.handleMessage(message);
         } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
+          console.warn("Error parsing WebSocket message:", error);
         }
       };
 
       this.ws.onclose = () => {
-        console.log('🔌 WebSocket disconnected');
         this.isConnected = false;
-        this.reconnect();
+        if (!this.intentionalClose) {
+          this.reconnect();
+        }
       };
 
-      this.ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+      // Browser Event objects serialize as {} — do not console.error (Next.js overlay).
+      this.ws.onerror = () => {
         this.isConnected = false;
+        if (process.env.NODE_ENV === "development" && this.reconnectAttempts === 0) {
+          console.warn(
+            `WebSocket unreachable at ${this.lastWsUrl || "/ws"}. ` +
+              "Start the backend on port 5000 (realtime notifications optional)."
+          );
+        }
       };
-
     } catch (error) {
-      console.error('Failed to create WebSocket connection:', error);
+      console.warn("Failed to create WebSocket connection:", error);
       this.reconnect();
     }
   }
@@ -626,15 +640,22 @@ class RealtimeNotificationService {
   }
 
   private reconnect() {
+    if (this.intentionalClose || !this.token) return;
+
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
-      console.log(`🔄 Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-      
+      if (process.env.NODE_ENV === "development") {
+        console.warn(
+          `WebSocket reconnect ${this.reconnectAttempts}/${this.maxReconnectAttempts}…`
+        );
+      }
       setTimeout(() => {
         this.connect();
       }, this.reconnectInterval);
-    } else {
-      console.error('❌ Max reconnection attempts reached');
+    } else if (process.env.NODE_ENV === "development") {
+      console.warn(
+        "WebSocket offline — live notifications paused until backend is available."
+      );
     }
   }
 
@@ -676,8 +697,14 @@ class RealtimeNotificationService {
   }
 
   disconnect() {
+    this.intentionalClose = true;
+    this.reconnectAttempts = this.maxReconnectAttempts;
     if (this.ws) {
-      this.ws.close();
+      try {
+        this.ws.close();
+      } catch {
+        /* ignore */
+      }
       this.ws = null;
     }
     this.isConnected = false;
@@ -698,8 +725,10 @@ class RealtimeNotificationService {
     this.token = token;
     this.userType = userType;
     this.userId = userId;
-    
+
     if (token && userType && userId) {
+      this.intentionalClose = false;
+      this.reconnectAttempts = 0;
       this.connect();
     } else {
       this.disconnect();

@@ -1,20 +1,36 @@
 /** Dry Mortar SRS — QC Hub module definitions (frontend mirror of backend config) */
 
-/** Fixed sieve sizes for Hub Sieve Analysis (% Passing entered per size) */
-export const SIEVE_ANALYSIS_SIZES = [
+/**
+ * Fixed sieve sizes for Hub Sieve Analysis (% Passing per size).
+ * Lab-sheet pattern = two columns (coarse | fine), not one long list:
+ *   2.00 / 0.50 · 1.60 / 0.315 · 1.25 / 0.250 · 1.00 / 0.125 · 0.80 / 0.090 · 0.63 / 0.063
+ */
+export const SIEVE_ANALYSIS_COLUMN_LEFT = [
   "2.00 mm",
-  "0.50 mm",
   "1.60 mm",
-  "0.315 mm",
   "1.25 mm",
-  "0.250 mm",
   "1.00 mm",
-  "0.125 mm",
   "0.80 mm",
-  "0.090 mm",
   "0.63 mm",
+] as const;
+
+export const SIEVE_ANALYSIS_COLUMN_RIGHT = [
+  "0.50 mm",
+  "0.315 mm",
+  "0.250 mm",
+  "0.125 mm",
+  "0.090 mm",
   "0.063 mm",
 ] as const;
+
+/** Row pairs for the 2-column sieve sheet UI */
+export const SIEVE_ANALYSIS_ROWS = SIEVE_ANALYSIS_COLUMN_LEFT.map((left, i) => ({
+  left,
+  right: SIEVE_ANALYSIS_COLUMN_RIGHT[i],
+}));
+
+/** Flat list (left then right per row) — same set as before for storage/compat */
+export const SIEVE_ANALYSIS_SIZES = SIEVE_ANALYSIS_ROWS.flatMap((r) => [r.left, r.right]);
 
 export type SieveSize = (typeof SIEVE_ANALYSIS_SIZES)[number];
 

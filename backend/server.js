@@ -262,6 +262,7 @@ app.use("/api/procurement/ai", procurementAssistantRoutes);
 
 // ===== WebSocket Setup =====
 const http = require("http");
+const https = require("https");
 const realtimeService = require("./services/realtimeService");
 const backupService = require("./services/backupService");
 const qcHubExportScheduler = require("./services/qcHubExportScheduler");
@@ -277,6 +278,27 @@ function getLanIp() {
     }
   } catch {}
   return null;
+}
+
+function loadDevTlsOptions() {
+  // Opt-in only: ENABLE_DEV_HTTPS=1 (needs certs/). Default stays HTTP so Next.js
+  // proxies / .env (http://127.0.0.1:5000) keep working.
+  if (process.env.ENABLE_DEV_HTTPS !== "1") return null;
+  if (process.env.FORCE_HTTP === "1") return null;
+  const keyPath = path.join(__dirname, "..", "certs", "dev-key.pem");
+  const certPath = path.join(__dirname, "..", "certs", "dev-cert.pem");
+  try {
+    if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+      console.warn("ENABLE_DEV_HTTPS=1 but certs/dev-*.pem missing — using HTTP");
+      return null;
+    }
+    return {
+      key: fs.readFileSync(keyPath),
+      cert: fs.readFileSync(certPath),
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function startServer() {
@@ -297,16 +319,19 @@ async function startServer() {
 function startHttpServer() {
   const PORT = process.env.PORT || 5000;
   const HOST = process.env.HOST || "0.0.0.0";
-  const server = http.createServer(app);
+  const tls = loadDevTlsOptions();
+  const useHttps = Boolean(tls);
+  const server = useHttps ? https.createServer(tls, app) : http.createServer(app);
   realtimeService.initialize(server);
 
   server.listen(PORT, HOST, () => {
+    const scheme = useHttps ? "https" : "http";
     const lanIp = getLanIp();
     const lines = [
-      `🚀 Server running:`,
-      `   • Local:    http://localhost:${PORT}`,
+      `🚀 Server running${useHttps ? " (HTTPS — accept the browser cert warning once)" : ""}:`,
+      `   • Local:    ${scheme}://localhost:${PORT}`,
     ];
-    if (lanIp) lines.push(`   • Network:  http://${lanIp}:${PORT}`);
+    if (lanIp) lines.push(`   • Network:  ${scheme}://${lanIp}:${PORT}`);
     console.log(lines.join("\n"));
 
     const mongoUriForBackup = backupService.buildMongoUri(mongoUri);

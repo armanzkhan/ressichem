@@ -65,6 +65,9 @@ backend/exports/
 backend/connection-verification-results.json
 backend/uploads/
 
+# Local HTTPS certs (mic / getUserMedia on LAN)
+certs/
+
 # Uploads (optional - uncomment if you don't want to track uploads)
 # frontend/public/uploads/
 

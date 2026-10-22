@@ -108,31 +108,28 @@ export default function ProcurementDashboardPage() {
   }
 
   return (
-    <section className="space-y-6 text-blue-800 dark:text-blue-100">
-      <article className="rounded-2xl bg-white border border-blue-100 p-6 shadow-sm dark:bg-slate-900 dark:border-slate-700">
-        <h1 className="text-2xl font-bold text-blue-800 dark:text-blue-100">Procurement Dashboard</h1>
-        <p className="text-sm text-blue-600 dark:text-blue-300 mt-1">
-          Welcome{user?.firstName ? `, ${user.firstName}` : ""}.
-        </p>
-        <p className="text-sm text-blue-600 dark:text-blue-300 mt-1">
-          <span className="font-medium text-blue-700 dark:text-blue-200">{accessLevelLabel(accessLevel)}</span>
-          {areaKey !== "all" ? (
-            <>
-              {" "}
-              · <span className="font-medium text-blue-700 dark:text-blue-200">{areaLabel(areaKey)}</span>
-            </>
-          ) : (
-            <>
-              {" "}
-              · <span className="font-medium text-blue-700 dark:text-blue-200">All areas</span>
-            </>
-          )}
-          <span className="text-blue-500 dark:text-blue-400"> ({roleName})</span>
-        </p>
+    <section className="space-y-4 sm:space-y-6 text-blue-800 dark:text-blue-100 w-full min-w-0">
+      <article className="relative overflow-hidden rounded-2xl border border-blue-100/80 bg-gradient-to-br from-blue-600 via-blue-600 to-sky-500 p-5 sm:p-6 text-white shadow-lg shadow-blue-900/20 dark:border-slate-700 dark:from-slate-800 dark:via-slate-800 dark:to-slate-900">
+        <div className="pointer-events-none absolute -right-8 -top-10 h-36 w-36 rounded-full bg-white/10" aria-hidden />
+        <div className="pointer-events-none absolute -bottom-12 left-8 h-28 w-28 rounded-full bg-sky-300/25" aria-hidden />
+        <div className="relative">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-100/90">Ressichem</p>
+          <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight">Procurement</h1>
+          <p className="text-sm text-blue-50/95 mt-2">
+            Welcome{user?.firstName ? `, ${user.firstName}` : ""}.
+          </p>
+          <p className="mt-3 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-full bg-white/15 px-3 py-1.5 text-xs font-medium backdrop-blur-sm">
+            <span>{accessLevelLabel(accessLevel)}</span>
+            <span className="opacity-60">·</span>
+            <span>{areaKey !== "all" ? areaLabel(areaKey) : "All areas"}</span>
+            <span className="opacity-60">·</span>
+            <span className="opacity-90">{roleName}</span>
+          </p>
+        </div>
       </article>
 
       {cards.length ? (
-        <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {cards.map((card) => (
             <StatCard
               key={card.id}
@@ -149,25 +146,28 @@ export default function ProcurementDashboardPage() {
         </p>
       )}
 
-      <article className="rounded-2xl bg-white border border-blue-100 p-6 space-y-6 dark:bg-slate-900 dark:border-slate-700">
-        <h2 className="font-semibold text-blue-800 dark:text-blue-100">Modules</h2>
+      <article className="rounded-2xl border border-blue-100/80 bg-white/95 p-4 sm:p-6 space-y-5 sm:space-y-6 shadow-sm shadow-blue-900/5 dark:bg-slate-900 dark:border-slate-700">
+        <h2 className="font-semibold text-blue-900 dark:text-blue-100">Modules</h2>
         {visibleNavGroups.map((group) => (
           <section key={group.id}>
-            <h3 className="text-sm font-semibold text-blue-700 dark:text-blue-300 mb-2 flex items-center gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-500 dark:text-blue-400 mb-2.5 flex items-center gap-2">
               <span>{group.icon}</span>
               {group.label}
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-3">
               {group.items.map((link) => (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="rounded-xl border border-blue-100 p-4 hover:bg-blue-50 transition-colors dark:border-slate-700 dark:hover:bg-slate-800"
+                  className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-gradient-to-r from-white to-blue-50/40 p-3.5 shadow-sm shadow-blue-900/5 transition active:scale-[0.99] hover:border-blue-200 dark:border-slate-700 dark:from-slate-900 dark:to-slate-800 dark:hover:border-slate-600"
                 >
-                  <p className="font-medium text-blue-800 dark:text-blue-100 flex items-center gap-2">
-                    <span>{link.icon}</span>
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-lg text-white shadow-sm">
+                    {link.icon}
+                  </span>
+                  <span className="min-w-0 flex-1 font-medium text-blue-900 dark:text-blue-100 truncate">
                     {link.name}
-                  </p>
+                  </span>
+                  <span className="text-blue-300 dark:text-slate-500">›</span>
                 </Link>
               ))}
             </div>
@@ -175,12 +175,15 @@ export default function ProcurementDashboardPage() {
         ))}
         {isAdmin ? (
           <section>
-            <h3 className="text-sm font-semibold text-blue-700 dark:text-blue-300 mb-2">Administration</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-500 dark:text-blue-400 mb-2.5">
+              Administration
+            </h3>
             <Link
               href="/procurement/users"
-              className="inline-flex rounded-xl border border-blue-100 px-4 py-3 text-blue-800 hover:bg-blue-50 dark:border-slate-700 dark:text-blue-100 dark:hover:bg-slate-800"
+              className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-white px-4 py-3.5 text-blue-900 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-blue-100"
             >
-              👥 Users
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">👥</span>
+              <span className="font-medium">Users</span>
             </Link>
           </section>
         ) : null}
@@ -200,17 +203,20 @@ function StatCard({
   href?: string;
   emphasis?: "approval" | "draft";
 }) {
-  const borderClass =
+  const accentClass =
     emphasis === "approval"
-      ? "border-amber-200 hover:border-amber-400 dark:border-amber-800 dark:hover:border-amber-500"
+      ? "from-amber-500 to-orange-400"
       : emphasis === "draft"
-        ? "border-sky-200 hover:border-sky-400 dark:border-sky-800 dark:hover:border-sky-500"
-        : "border-blue-100 hover:border-blue-300 dark:border-slate-700 dark:hover:border-blue-500";
+        ? "from-sky-500 to-cyan-400"
+        : "from-blue-600 to-sky-400";
 
   const inner = (
     <>
-      <p className="text-xs uppercase tracking-wide text-blue-600 dark:text-blue-300">{title}</p>
-      <p className="text-3xl font-bold text-blue-800 dark:text-blue-100 mt-2">{value}</p>
+      <div className={`mb-3 h-1 w-10 rounded-full bg-gradient-to-r ${accentClass}`} />
+      <p className="text-xs uppercase tracking-wide text-blue-500 dark:text-blue-300 leading-snug break-words">
+        {title}
+      </p>
+      <p className="text-3xl font-bold tracking-tight text-blue-950 dark:text-blue-50 mt-1.5">{value}</p>
     </>
   );
 
@@ -218,7 +224,7 @@ function StatCard({
     return (
       <Link
         href={href}
-        className={`rounded-xl bg-white border p-5 shadow-sm transition-colors block dark:bg-slate-900 ${borderClass}`}
+        className="block min-w-0 rounded-2xl border border-blue-100/90 bg-white/95 p-4 sm:p-5 shadow-md shadow-blue-900/5 ring-1 ring-blue-50 transition active:scale-[0.99] dark:border-slate-700 dark:bg-slate-900 dark:ring-slate-800"
       >
         {inner}
       </Link>
@@ -226,6 +232,8 @@ function StatCard({
   }
 
   return (
-    <article className={`rounded-xl bg-white border p-5 shadow-sm dark:bg-slate-900 ${borderClass}`}>{inner}</article>
+    <article className="min-w-0 rounded-2xl border border-blue-100/90 bg-white/95 p-4 sm:p-5 shadow-md shadow-blue-900/5 ring-1 ring-blue-50 dark:border-slate-700 dark:bg-slate-900 dark:ring-slate-800">
+      {inner}
+    </article>
   );
 }

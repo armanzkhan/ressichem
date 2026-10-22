@@ -467,11 +467,11 @@ export function RequisitionsView({ section }: Props) {
       onAdd={canCreate ? openCreate : undefined}
     >
       {error ? <Alert message={error} /> : null}
-      <div className="flex flex-wrap items-end gap-3 mb-3">
-        <label className="text-xs text-blue-800 dark:text-blue-200">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-3 mb-3">
+        <label className="text-xs text-blue-800 dark:text-blue-200 w-full sm:w-auto">
           Approval status
           <select
-            className={`${procurementFieldClass} mt-1 min-w-[11rem]`}
+            className={`${procurementFieldClass} mt-1 w-full sm:min-w-[11rem]`}
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -482,10 +482,10 @@ export function RequisitionsView({ section }: Props) {
             ))}
           </select>
         </label>
-        <label className="text-xs text-blue-800 dark:text-blue-200">
+        <label className="text-xs text-blue-800 dark:text-blue-200 w-full sm:w-auto">
           Purchase / delivery
           <select
-            className={`${procurementFieldClass} mt-1 min-w-[12rem]`}
+            className={`${procurementFieldClass} mt-1 w-full sm:min-w-[12rem]`}
             value={fulfillmentFilter}
             onChange={(e) => setFulfillmentFilter(e.target.value)}
           >

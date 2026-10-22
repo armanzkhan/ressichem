@@ -83,13 +83,22 @@ export default function RawMaterialsPage() {
   const selection = useHubRowSelection(listRows);
 
   const selectedMaterial = useMemo(
-    () => materials.find((m) => m._id === formData.rawMaterial),
+    () => materials.find((m) => String(m._id) === String(formData.rawMaterial || "")),
     [materials, formData.rawMaterial]
   );
   const batchTestFields = useMemo(
     () => hubRmTestsForCategory(selectedMaterial?.category),
     [selectedMaterial?.category]
   );
+
+  const ensureMaterialsLoaded = async () => {
+    try {
+      const res = await rawMaterialApi.getAll();
+      setMaterials(res.data || []);
+    } catch (err: any) {
+      setError(err.message || "Failed to load materials");
+    }
+  };
   const materialFormTests = useMemo(
     () => hubRmTestsForCategory(formData.category),
     [formData.category]
@@ -186,7 +195,9 @@ export default function RawMaterialsPage() {
           specifications,
         });
       } else {
-        const material = materials.find((m) => m._id === formData.rawMaterial);
+        const material = materials.find(
+          (m) => String(m._id) === String(formData.rawMaterial || "")
+        );
         const fields = hubRmTestsForCategory(material?.category);
         const testResults: Record<string, unknown> = {};
         for (const test of fields) {
@@ -251,6 +262,9 @@ export default function RawMaterialsPage() {
               setFormData({});
               setTestValues({});
               setSievePassing(emptySievePassing());
+              if (opening && activeTab === "batches") {
+                void ensureMaterialsLoaded();
+              }
             }}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
@@ -258,7 +272,7 @@ export default function RawMaterialsPage() {
               ? "Cancel"
               : activeTab === "materials"
                 ? "Add Material"
-                : "Add Batch (with Sieve Analysis)"}
+                : "Add Batch"}
           </button>
         </div>
       </div>
@@ -286,26 +300,11 @@ export default function RawMaterialsPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-        <div className="rounded-xl border border-amber-200 bg-amber-50/80 dark:bg-amber-900/10 p-3">
-          <div className="font-bold text-amber-900 dark:text-amber-200 mb-1">Cement tests</div>
-          <div className="text-gray-700 dark:text-gray-300">
-            {hubRmTestsForCategory("CEMENT").map((t) => t.name).join(" · ")}
-          </div>
-        </div>
-        <div className="rounded-xl border border-sky-200 bg-sky-50/80 dark:bg-sky-900/10 p-3">
-          <div className="font-bold text-sky-900 dark:text-sky-200 mb-1">Sand tests</div>
-          <div className="text-gray-700 dark:text-gray-300">
-            {hubRmTestsForCategory("SAND").map((t) => t.name).join(" · ")}
-          </div>
-        </div>
-        <div className="rounded-xl border border-violet-200 bg-violet-50/80 dark:bg-violet-900/10 p-3">
-          <div className="font-bold text-violet-900 dark:text-violet-200 mb-1">Other RM tests</div>
-          <div className="text-gray-700 dark:text-gray-300">
-            {hubRmTestsForCategory("OTHER").map((t) => t.name).join(" · ")}
-          </div>
-        </div>
-      </div>
+      <p className="text-sm text-gray-600 dark:text-gray-400 rounded-xl border border-blue-100 dark:border-slate-700 bg-blue-50/40 dark:bg-slate-900/40 px-4 py-3">
+        Enter QC values with <strong>Add Material</strong> (pick Cement / Sand / Other category) or{" "}
+        <strong>Add Batch</strong> (pick a material — tests match that category). Sieve Analysis is on
+        both forms.
+      </p>
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">{error}</div>
@@ -418,12 +417,17 @@ export default function RawMaterialsPage() {
                   >
                     <option value="">Select material...</option>
                     {materials.map((m) => (
-                      <option key={m._id} value={m._id}>
+                      <option key={String(m._id)} value={String(m._id)}>
                         {m.materialCode} — {m.materialName}
                         {m.category ? ` (${m.category})` : ""}
                       </option>
                     ))}
                   </select>
+                  {!materials.length ? (
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                      No materials yet — switch to the Materials tab and use Add Material first.
+                    </p>
+                  ) : null}
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-2">Batch No</label>
@@ -457,24 +461,18 @@ export default function RawMaterialsPage() {
                 </div>
               </div>
 
-              {/* Sieve Analysis first so it is visible without scrolling past other tests */}
-              <SieveAnalysisSection
-                key={`batch-sieve-${showForm ? "open" : "closed"}`}
-                values={sievePassing}
-                onChange={setSievePassing}
-              />
-
               <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/10 p-4">
                 <h4 className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-3">
-                  Testing Results
-                  {selectedMaterial?.category
-                    ? ` — ${selectedMaterial.category}`
-                    : " (select a material)"}
+                  QC Parameters / Testing Results
+                  {selectedMaterial?.category ? ` — ${selectedMaterial.category}` : ""}
                 </h4>
                 {!formData.rawMaterial ? (
                   <p className="text-sm text-gray-500">
-                    Select a raw material to see category-specific tests.
+                    Select a raw material above — Cement / Sand / Other test fields will appear here
+                    (same as Add Material).
                   </p>
+                ) : batchTestFields.length === 0 ? (
+                  <p className="text-sm text-gray-500">No tests configured for this category.</p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {batchTestFields.map((test) => (
@@ -504,6 +502,12 @@ export default function RawMaterialsPage() {
                   </div>
                 )}
               </div>
+
+              <SieveAnalysisSection
+                key={`batch-sieve-${showForm ? "open" : "closed"}-${formData.rawMaterial || "none"}`}
+                values={sievePassing}
+                onChange={setSievePassing}
+              />
 
               <div>
                 <label className="block text-sm font-medium mb-2">Remarks</label>
