@@ -958,6 +958,12 @@ exports.softDelete = async (req, res) => {
       { new: true }
     );
     if (!data) return res.status(404).json({ success: false, message: "Requisition not found" });
+    try {
+      const procurementNotificationService = require("../services/procurementNotificationService");
+      await procurementNotificationService.deactivateForRequisition(company_id, data);
+    } catch (notifyErr) {
+      console.error("Failed to deactivate PR notifications after delete:", notifyErr.message);
+    }
     return res.json({ success: true, message: "Requisition deleted", data });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -979,6 +985,14 @@ exports.bulkSoftDelete = async (req, res) => {
       return res.status(400).json({ success: false, message: "Select at least one requisition" });
     }
 
+    const toDelete = await PurchaseRequisition.find({
+      _id: { $in: ids },
+      company_id,
+      isActive: { $ne: false },
+    })
+      .select("_id requisitionNumber")
+      .lean();
+
     const result = await PurchaseRequisition.updateMany(
       { _id: { $in: ids }, company_id, isActive: { $ne: false } },
       {
@@ -988,6 +1002,15 @@ exports.bulkSoftDelete = async (req, res) => {
         status: "cancelled",
       }
     );
+
+    try {
+      const procurementNotificationService = require("../services/procurementNotificationService");
+      for (const pr of toDelete) {
+        await procurementNotificationService.deactivateForRequisition(company_id, pr);
+      }
+    } catch (notifyErr) {
+      console.error("Failed to deactivate PR notifications after bulk delete:", notifyErr.message);
+    }
 
     return res.json({
       success: true,

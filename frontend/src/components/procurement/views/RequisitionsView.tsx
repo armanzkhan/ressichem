@@ -380,14 +380,44 @@ export function RequisitionsView({ section }: Props) {
     void loadCatalogs();
   }, [loadCatalogs]);
 
+  // Deep-link from PR notification bell: /procurement/.../pr?open=<id>
+  // Always fetch by id — do not require the PR to already be in the filtered table.
   useEffect(() => {
-    const openId = searchParams.get("open");
-    if (!openId || loading || !rows.length) return;
-    const row = rows.find((r) => r._id === openId);
-    if (!row) return;
-    setViewingRow(row);
-    router.replace(pathname, { scroll: false });
-  }, [searchParams, rows, loading, pathname, router]);
+    const openId = String(searchParams.get("open") || "").trim();
+    if (!openId || loading) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const fromList = rows.find(
+          (r) => String(r._id) === openId || String(r.requisitionNumber || "") === openId
+        );
+        const res = await procurementApi.getRequisition(fromList?._id || openId);
+        if (cancelled) return;
+        setViewingRow(res.data);
+        setShowForm(false);
+        setEditingId(null);
+        setError("");
+      } catch (err) {
+        if (cancelled) return;
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not open that purchase requisition from the notification"
+        );
+      } finally {
+        if (!cancelled) {
+          router.replace(pathname, { scroll: false });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally omit `rows` identity churn — only react to open= / loading / route
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, loading, pathname, router]);
 
   const openCreate = () => {
     setEditingId(null);
@@ -664,13 +694,14 @@ export function RequisitionsView({ section }: Props) {
                     onChange={toggleSelectAll}
                   />,
                   "PR #",
+                  "Created",
                   "Departments",
                   "Status",
                   "Delivery",
                   "Assigned",
                   "Actions",
                 ]
-              : ["PR #", "Departments", "Status", "Delivery", "Assigned", "Actions"]
+              : ["PR #", "Created", "Departments", "Status", "Delivery", "Assigned", "Actions"]
           }
           rows={rows.map((r) => {
             const actionCell = (
@@ -840,8 +871,32 @@ export function RequisitionsView({ section }: Props) {
             );
 
             const dept = r.title || "—";
+            const createdAt = r.createdAt || r.submittedAt || "";
+            const submittedAt = r.submittedAt || "";
+            const dateTitle =
+              submittedAt && submittedAt !== createdAt
+                ? `Created ${procurementDateTime(createdAt)} · Submitted ${procurementDateTime(submittedAt)}`
+                : procurementDateTime(createdAt);
             const baseCells = [
               r.requisitionNumber || "—",
+              <span
+                key={`dt-${r._id}`}
+                className="block max-w-[8.5rem] text-xs leading-snug text-blue-900 dark:text-slate-100"
+                title={dateTitle}
+              >
+                {createdAt ? (
+                  <>
+                    <span className="whitespace-nowrap">{procurementDateTime(createdAt)}</span>
+                    {submittedAt && submittedAt !== createdAt ? (
+                      <span className="mt-0.5 block text-[10px] text-slate-500 dark:text-slate-400">
+                        Sub {procurementDateTime(submittedAt)}
+                      </span>
+                    ) : null}
+                  </>
+                ) : (
+                  "—"
+                )}
+              </span>,
               <span key={`dept-${r._id}`} className="block max-w-[9rem] truncate" title={dept}>
                 {dept}
               </span>,

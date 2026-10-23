@@ -9,6 +9,7 @@ import {
   getNotificationUserId,
   isNotificationUnread,
   markNotificationRead,
+  notificationHref,
   type ProcurementNotification,
 } from "@/lib/procurementNotifications";
 
@@ -121,7 +122,7 @@ export function ProcurementNotificationBell() {
               <ul className="divide-y divide-blue-50 dark:divide-slate-800">
                 {items.map((n) => {
                   const unread = isNotificationUnread(n, userId);
-                  const href = n.data?.url || "/procurement/local/pr";
+                  const href = notificationHref(n);
                   return (
                     <li key={n._id}>
                       <Link

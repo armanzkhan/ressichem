@@ -17,6 +17,7 @@ export type ProcurementNotification = {
     requisitionNumber?: string;
     action?: string;
     audience?: "approver" | "requester";
+    purchaseType?: string;
     url?: string;
   };
   read_by?: { user_id: string; read_at?: string }[];
@@ -57,7 +58,7 @@ export function isNotificationUnread(n: ProcurementNotification, userId: string 
   return !(n.read_by || []).some((r) => r.user_id === userId);
 }
 
-export async function fetchProcurementNotifications(limit = 20): Promise<ProcurementNotification[]> {
+export async function fetchProcurementNotifications(limit = 50): Promise<ProcurementNotification[]> {
   const apiBase = getBackendUrl();
   const response = await fetch(`${apiBase}/api/procurement/notifications?limit=${limit}`, {
     headers: getHeaders(),
@@ -70,6 +71,15 @@ export async function fetchProcurementNotifications(limit = 20): Promise<Procure
   const list = json.data || [];
   const userId = getNotificationUserId();
   return list.filter((n) => isNotificationForCurrentUser(n, userId));
+}
+
+/** Build a PR deep-link from notification payload (supports older rows without data.url). */
+export function notificationHref(n: ProcurementNotification): string {
+  if (n.data?.url) return n.data.url;
+  const entityId = n.data?.entityId;
+  if (!entityId) return "/procurement/local/pr";
+  const section = n.data?.purchaseType === "local" ? "local" : "import";
+  return `/procurement/${section}/pr?open=${encodeURIComponent(entityId)}`;
 }
 
 export async function fetchUnreadProcurementNotificationCount(): Promise<number> {
