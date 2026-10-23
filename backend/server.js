@@ -266,6 +266,7 @@ const https = require("https");
 const realtimeService = require("./services/realtimeService");
 const backupService = require("./services/backupService");
 const qcHubExportScheduler = require("./services/qcHubExportScheduler");
+const procurementPrSlaScheduler = require("./services/procurementPrSlaScheduler");
 
 // Resolve LAN IPv4 for nicer logging
 function getLanIp() {
@@ -338,6 +339,7 @@ function startHttpServer() {
     backupService.restoreOnStartup({ mongoUri: mongoUriForBackup });
     backupService.initializeBackupService({ mongoUri: mongoUriForBackup });
     qcHubExportScheduler.initializeQcHubExportScheduler();
+    procurementPrSlaScheduler.initializeProcurementPrSlaScheduler();
   });
 }
 

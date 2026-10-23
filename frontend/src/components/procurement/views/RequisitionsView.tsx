@@ -23,7 +23,7 @@ import { recordTotalLabel } from "@/lib/procurementRecordSummary";
 import {
   accessLevelFromRole,
 } from "@/lib/procurementRoles";
-import { canProcurementSoftDelete } from "@/lib/procurementAccess";
+import { canProcurementSoftDelete, hasPrFullAccess } from "@/lib/procurementAccess";
 
 const emptyForm = () => ({
   title: "",
@@ -82,9 +82,45 @@ function departmentsFromLines(lines: RequisitionLine[]) {
 
 function approvalStageLabel(stage?: string) {
   const s = String(stage || "department").toLowerCase();
+  if (s === "lab") return "Lab";
   if (s === "finance") return "Finance";
   if (s === "boss") return "Boss";
   return "Dept";
+}
+
+function slaBadge(row: PurchaseDocument) {
+  const status = String(row.slaStatus || "").toLowerCase();
+  if (!status || status === "n_a" || status === "disabled") return null;
+  const label = row.slaLabel || status;
+  if (status === "overdue" || status === "closed_by_sla") {
+    return (
+      <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-800 dark:bg-red-950/50 dark:text-red-200">
+        {label}
+      </span>
+    );
+  }
+  if (status === "due_today_urgent") {
+    return (
+      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+        {label}
+      </span>
+    );
+  }
+  if (status === "due_today") {
+    return (
+      <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+        {label}
+      </span>
+    );
+  }
+  return null;
+}
+
+function approvalChainKey(row: PurchaseDocument) {
+  const key = String(row.approvalChain || "").toLowerCase();
+  if (key === "lab_then_finance" || key === "skip_finance" || key === "standard") return key;
+  if (row.skipFinanceApproval) return "skip_finance";
+  return "standard";
 }
 
 function approvalProgressLabel(row: PurchaseDocument) {
@@ -95,15 +131,24 @@ function approvalProgressLabel(row: PurchaseDocument) {
     return "—";
   }
   const done = approvals.filter((a) => a.status === "approved").length;
-  // Expected full chain = current rows, or at least depts + finance + boss once stages unlock
+  const chain = approvalChainKey(row);
+  const hasLab = approvals.some((a) => String(a.stage || "").toLowerCase() === "lab");
   const hasFinance = approvals.some((a) => String(a.stage || "").toLowerCase() === "finance");
   const hasBoss = approvals.some((a) => String(a.stage || "").toLowerCase() === "boss");
-  const expected =
-    hasFinance && hasBoss
-      ? approvals.length
-      : hasFinance
-        ? approvals.length + 1
-        : approvals.length + 2;
+  let expected = approvals.length;
+  if (chain === "lab_then_finance") {
+    if (hasLab && hasFinance) expected = approvals.length;
+    else if (hasLab || hasFinance) expected = approvals.length + 1;
+    else expected = approvals.length + 2;
+  } else if (chain === "skip_finance") {
+    if (!hasBoss) expected = approvals.length + 1;
+  } else if (hasFinance && hasBoss) {
+    expected = approvals.length;
+  } else if (hasFinance) {
+    expected = approvals.length + 1;
+  } else {
+    expected = approvals.length + 2;
+  }
   return `${done}/${expected}`;
 }
 
@@ -155,14 +200,18 @@ export function RequisitionsView({ section }: Props) {
     setCurrentUserId(localStorage.getItem("userId") || "");
   }, []);
 
+  const prFullAccess = typeof window !== "undefined" ? hasPrFullAccess() : false;
   const canApprove =
-    accessLevel === "approver" || accessLevel === "creator_approver" || accessLevel === "admin";
+    prFullAccess ||
+    accessLevel === "approver" ||
+    accessLevel === "creator_approver" ||
+    accessLevel === "admin";
   const canBulkImport =
     accessLevel !== "user" &&
     accessLevel !== "viewer" &&
     accessLevel !== "approver" &&
     accessLevel !== "creator_approver";
-  const canCreate = accessLevel !== "viewer" && accessLevel !== "approver";
+  const canCreate = prFullAccess || (accessLevel !== "viewer" && accessLevel !== "approver");
   // Requesters (and Requester & Approver) may create catalog items while raising a PR
   const canQuickAddItem =
     accessLevel === "user" ||
@@ -176,7 +225,31 @@ export function RequisitionsView({ section }: Props) {
     return Boolean(ownerId && String(ownerId) === String(currentUserId));
   };
 
-  const canConvertAnyApprovedPo = accessLevel === "buyer" || accessLevel === "admin";
+  /** True when this user has a pending/held approval row (e.g. department-mapped R&D/QC approver). */
+  const isPendingApproverOnPr = (row: PurchaseDocument) => {
+    if (!currentUserId) return false;
+    const open = ["submitted", "held", "partially_approved"].includes(String(row.status || ""));
+    if (!open) return false;
+    const approvals = row.approvals || [];
+    if (!approvals.length) {
+      const assigned =
+        typeof row.assignedApprover === "string" ? row.assignedApprover : row.assignedApprover?._id;
+      return Boolean(assigned && String(assigned) === String(currentUserId));
+    }
+    return approvals.some((a) => {
+      const id = typeof a.approver === "string" ? a.approver : a.approver?._id;
+      return (
+        Boolean(id && String(id) === String(currentUserId)) &&
+        (a.status === "pending" || a.status === "held")
+      );
+    });
+  };
+
+  /** Role-based approvers OR assigned department approvers (even if role is only "requester"). */
+  const canActAsApproverOnPr = (row: PurchaseDocument) =>
+    prFullAccess || canApprove || isPendingApproverOnPr(row);
+
+  const canConvertAnyApprovedPo = accessLevel === "buyer" || accessLevel === "admin" || prFullAccess;
   /**
    * Buyers/admins: any approved PR. Requesters: only their own approved PRs.
    * Hide once a PO already exists (drafting / purchased / delivered). Allow again if the only PO was cancelled.
@@ -189,18 +262,35 @@ export function RequisitionsView({ section }: Props) {
     return !alreadyHasPo;
   };
 
-  /** Only the requester (or admin) may edit / submit / resubmit draft or rejected PRs */
+  /** Only the requester (or admin / PR full-access) may edit / submit / resubmit draft or rejected PRs */
   const canEditOrSubmitPr = (row: PurchaseDocument) => {
+    if (prFullAccess) return true;
     if (!canCreate) return false;
     if (row.status !== "draft" && row.status !== "rejected") return false;
     if (accessLevel === "admin") return true;
     return isOwnPr(row);
   };
 
-  /** Assigned approver (or admin) may amend content before approve / hold / reject */
-  const canApproverAmendPr = (row: PurchaseDocument) =>
-    canApprove &&
-    (row.status === "submitted" || row.status === "held" || row.status === "partially_approved");
+  /** Assigned approver (or admin / PR full-access) may amend content before approve / hold / reject */
+  const canApproverAmendPr = (row: PurchaseDocument) => {
+    if (prFullAccess) return true;
+    return (
+      canActAsApproverOnPr(row) &&
+      (row.status === "submitted" || row.status === "held" || row.status === "partially_approved")
+    );
+  };
+
+  const canRejectPr = (row: PurchaseDocument) => {
+    if (prFullAccess) {
+      return ["submitted", "held", "partially_approved", "approved"].includes(String(row.status || ""));
+    }
+    return (
+      canActAsApproverOnPr(row) &&
+      (row.status === "submitted" ||
+        row.status === "held" ||
+        row.status === "partially_approved")
+    );
+  };
 
   const canOpenEditForm = (row: PurchaseDocument) => canEditOrSubmitPr(row) || canApproverAmendPr(row);
   const [viewingRow, setViewingRow] = useState<PurchaseDocument | null>(null);
@@ -627,7 +717,7 @@ export function RequisitionsView({ section }: Props) {
                     Edit
                   </button>
                 ) : null}
-                {canApprove &&
+                {canActAsApproverOnPr(r) &&
                 (r.status === "submitted" || r.status === "partially_approved") ? (
                   <>
                     <button
@@ -652,20 +742,22 @@ export function RequisitionsView({ section }: Props) {
                     >
                       Hold
                     </button>
-                    <button
-                      type="button"
-                      className="text-red-700 text-xs dark:text-red-300"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setReviewReason("");
-                        setReviewAction({ id: r._id, type: "reject", label: r.requisitionNumber || r._id });
-                      }}
-                    >
-                      Reject
-                    </button>
+                    {canRejectPr(r) ? (
+                      <button
+                        type="button"
+                        className="text-red-700 text-xs dark:text-red-300"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setReviewReason("");
+                          setReviewAction({ id: r._id, type: "reject", label: r.requisitionNumber || r._id });
+                        }}
+                      >
+                        Reject
+                      </button>
+                    ) : null}
                   </>
                 ) : null}
-                {canApprove && r.status === "held" ? (
+                {canActAsApproverOnPr(r) && r.status === "held" ? (
                   <>
                     <button
                       type="button"
@@ -689,18 +781,33 @@ export function RequisitionsView({ section }: Props) {
                     >
                       Release
                     </button>
-                    <button
-                      type="button"
-                      className="text-red-700 text-xs dark:text-red-300"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setReviewReason("");
-                        setReviewAction({ id: r._id, type: "reject", label: r.requisitionNumber || r._id });
-                      }}
-                    >
-                      Reject
-                    </button>
+                    {canRejectPr(r) ? (
+                      <button
+                        type="button"
+                        className="text-red-700 text-xs dark:text-red-300"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setReviewReason("");
+                          setReviewAction({ id: r._id, type: "reject", label: r.requisitionNumber || r._id });
+                        }}
+                      >
+                        Reject
+                      </button>
+                    ) : null}
                   </>
+                ) : null}
+                {prFullAccess && r.status === "approved" && canRejectPr(r) ? (
+                  <button
+                    type="button"
+                    className="text-red-700 text-xs dark:text-red-300"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setReviewReason("");
+                      setReviewAction({ id: r._id, type: "reject", label: r.requisitionNumber || r._id });
+                    }}
+                  >
+                    Reject
+                  </button>
                 ) : null}
                 <button
                   type="button"
@@ -738,7 +845,10 @@ export function RequisitionsView({ section }: Props) {
               <span key={`dept-${r._id}`} className="block max-w-[9rem] truncate" title={dept}>
                 {dept}
               </span>,
-              <StatusBadge key={`st-${r._id}`} status={r.status} />,
+              <span key={`st-${r._id}`} className="inline-flex flex-col gap-0.5">
+                <StatusBadge status={r.status} />
+                {slaBadge(r)}
+              </span>,
               r.stockStatus || r.fulfillmentStatus ? (
                 <span key={`ff-${r._id}`} className="inline-flex flex-col gap-0.5">
                   <StatusBadge status={r.stockStatus || r.fulfillmentStatus || "n_a"} />
@@ -864,15 +974,25 @@ export function RequisitionsView({ section }: Props) {
               <span className="font-medium text-blue-900 dark:text-blue-200">Location:</span>{" "}
               {viewingRow.location || "—"}
             </p>
-            <p>
+            <p className="flex flex-wrap items-center gap-2">
               <span className="font-medium text-blue-900 dark:text-blue-200">Status:</span>{" "}
               <StatusBadge status={viewingRow.status} />
+              {slaBadge(viewingRow)}
               {viewingRow.approvals?.length ? (
-                <span className="ml-2 text-xs text-blue-600 dark:text-blue-300">
+                <span className="text-xs text-blue-600 dark:text-blue-300">
                   Approvals {approvalProgressLabel(viewingRow)}
                 </span>
               ) : null}
             </p>
+            {viewingRow.slaDueAt || viewingRow.slaLabel ? (
+              <p className="text-xs text-amber-800 dark:text-amber-200">
+                Same-day SLA: must be approved/closed by end of submit day
+                {viewingRow.slaDueAt
+                  ? ` (due ${procurementDateTime(String(viewingRow.slaDueAt))})`
+                  : ""}
+                .
+              </p>
+            ) : null}
             {viewingRow.fulfillmentLabel || viewingRow.stockStatus ? (
               <p className="flex flex-wrap items-center gap-2">
                 <span className="font-medium text-blue-900 dark:text-blue-200">Purchase / delivery:</span>
@@ -898,7 +1018,11 @@ export function RequisitionsView({ section }: Props) {
             {viewingRow.approvals?.length ? (
               <div>
                 <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">
-                  Approval chain (departments → finance → boss)
+                  {approvalChainKey(viewingRow) === "lab_then_finance"
+                    ? "Approval chain (department → lab → finance)"
+                    : approvalChainKey(viewingRow) === "skip_finance"
+                      ? "Approval chain (department → boss)"
+                      : "Approval chain (departments → finance → boss)"}
                 </p>
                 <ul className="space-y-1 text-gray-700 dark:text-gray-300">
                   {viewingRow.approvals.map((a, i) => (
@@ -914,7 +1038,23 @@ export function RequisitionsView({ section }: Props) {
                     </li>
                   ))}
                 </ul>
-                {!viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
+                {approvalChainKey(viewingRow) === "lab_then_finance" ? (
+                  !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "lab") ? (
+                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
+                      After department manager approves → Lab, then Finance.
+                    </p>
+                  ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
+                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
+                      After Lab approves → Finance Manager for final approval.
+                    </p>
+                  ) : null
+                ) : approvalChainKey(viewingRow) === "skip_finance" ? (
+                  !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "boss") ? (
+                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
+                      After department approve → Boss (Finance skipped for this requester).
+                    </p>
+                  ) : null
+                ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
                   <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                     After all departments approve → Finance Manager, then Boss.
                   </p>
@@ -994,7 +1134,7 @@ export function RequisitionsView({ section }: Props) {
                   Edit before decision
                 </button>
               ) : null}
-              {canApprove &&
+              {canActAsApproverOnPr(viewingRow) &&
               (viewingRow.status === "submitted" || viewingRow.status === "partially_approved") ? (
                 <>
                   <button
@@ -1022,23 +1162,41 @@ export function RequisitionsView({ section }: Props) {
                   >
                     Hold
                   </button>
-                  <button
-                    type="button"
-                    className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm"
-                    onClick={() => {
-                      setReviewReason("");
-                      setReviewAction({
-                        id: viewingRow._id,
-                        type: "reject",
-                        label: viewingRow.requisitionNumber || viewingRow._id,
-                      });
-                    }}
-                  >
-                    Reject
-                  </button>
+                  {canRejectPr(viewingRow) ? (
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm"
+                      onClick={() => {
+                        setReviewReason("");
+                        setReviewAction({
+                          id: viewingRow._id,
+                          type: "reject",
+                          label: viewingRow.requisitionNumber || viewingRow._id,
+                        });
+                      }}
+                    >
+                      Reject
+                    </button>
+                  ) : null}
                 </>
               ) : null}
-              {canApprove && viewingRow.status === "held" ? (
+              {prFullAccess && viewingRow.status === "approved" && canRejectPr(viewingRow) ? (
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm"
+                  onClick={() => {
+                    setReviewReason("");
+                    setReviewAction({
+                      id: viewingRow._id,
+                      type: "reject",
+                      label: viewingRow.requisitionNumber || viewingRow._id,
+                    });
+                  }}
+                >
+                  Reject
+                </button>
+              ) : null}
+              {canActAsApproverOnPr(viewingRow) && viewingRow.status === "held" ? (
                 <>
                   <button
                     type="button"

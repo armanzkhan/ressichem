@@ -9,6 +9,10 @@ const {
   isPrRequester,
   applyPurchaseRequisitionVisibility,
   normalizeDepartment,
+  requesterApprovalChain,
+  resolveApprovalChainForSubmit,
+  hasPrFullAccess,
+  normalizeEmail,
 } = require("../utils/procurementPrRouting");
 const {
   collectDepartmentsFromPr,
@@ -26,10 +30,18 @@ const {
   firstPendingApproverId,
   uniqueApproverIds,
   approvalApproverId,
+  applyRequesterDepartmentApproverOverride,
+  approvalOptionsForPrDoc,
 } = require("../utils/procurementPrApprovals");
 const procurementPrNotificationService = require("../services/procurementPrNotificationService");
 const PurchaseOrder = require("../models/PurchaseOrder");
 const { enrichPrsWithFulfillment } = require("../utils/procurementPrFulfillment");
+const {
+  slaEnabled,
+  computeSlaDueAt,
+  isPastSlaDeadline,
+  slaStatusForPr,
+} = require("../utils/procurementPrSameDaySla");
 
 const USER_AUDIT_FIELDS = "firstName lastName email role";
 
@@ -52,18 +64,19 @@ function populateRequisitionAudit(query, { includeLineSuppliers = false } = {}) 
 }
 
 function assertCanActOnPr(req, pr) {
-  if (isProcurementAdminUser(req.user)) return true;
+  if (isProcurementAdminUser(req.user) || hasPrFullAccess(req.user)) return true;
   return userHasApprovalRoleOnPr(req.user, pr);
 }
 
 function assertCanEditOrSubmitPr(req, pr) {
-  if (isProcurementAdminUser(req.user)) return true;
+  if (isProcurementAdminUser(req.user) || hasPrFullAccess(req.user)) return true;
   return isPrRequester(req.user, pr);
 }
 
-/** Requester: draft/rejected. Assigned approver (or admin): submitted/held/partially_approved before decision. */
+/** Requester: draft/rejected. Assigned approver (or admin): submitted/held/partially_approved before decision.
+ *  PR full-access users (e.g. salim@gmail.com) may amend any status including approved. */
 function assertCanAmendPr(req, pr) {
-  if (isProcurementAdminUser(req.user)) return true;
+  if (isProcurementAdminUser(req.user) || hasPrFullAccess(req.user)) return true;
   const status = String(pr.status || "").toLowerCase();
   if (status === "draft" || status === "rejected") {
     return isPrRequester(req.user, pr);
@@ -97,6 +110,15 @@ exports.list = async (req, res) => {
 
     // Additive enrichment — never mutates PR.status
     data = await enrichPrsWithFulfillment(PurchaseOrder, company_id, data);
+    data = data.map((row) => {
+      const sla = slaStatusForPr(row);
+      return {
+        ...row,
+        slaStatus: sla.status,
+        slaLabel: sla.label,
+        slaDueAt: row.slaDueAt || sla.dueAt || null,
+      };
+    });
 
     const fulfillmentFilter = String(fulfillmentStatus || "")
       .trim()
@@ -112,7 +134,7 @@ exports.list = async (req, res) => {
 };
 
 function userCanViewPr(req, pr) {
-  if (isProcurementAdminUser(req.user)) return true;
+  if (isProcurementAdminUser(req.user) || hasPrFullAccess(req.user)) return true;
   if (isPrRequester(req.user, pr)) return true;
   if (canApproveRequisitions(req.user)) return userHasApprovalRoleOnPr(req.user, pr);
   if (canCreatePurchaseOrders(req.user) && String(pr.status || "").toLowerCase() === "approved") {
@@ -141,7 +163,17 @@ exports.getById = async (req, res) => {
     const [enriched] = await enrichPrsWithFulfillment(PurchaseOrder, company_id, [
       data.toObject ? data.toObject() : data,
     ]);
-    return res.json({ success: true, data: enriched || data });
+    const row = enriched || (data.toObject ? data.toObject() : data);
+    const sla = slaStatusForPr(row);
+    return res.json({
+      success: true,
+      data: {
+        ...row,
+        slaStatus: sla.status,
+        slaLabel: sla.label,
+        slaDueAt: row.slaDueAt || sla.dueAt || null,
+      },
+    });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -224,7 +256,8 @@ exports.update = async (req, res) => {
       updates.title = syncTitleFromItems(items, body.title ?? existing.title);
 
       // If still in department approval stage and departments changed, rebuild dept rows
-      const stage = getActionableApprovalStage(existing.approvals || []);
+      const stageOpts = await approvalOptionsForPrDoc(existing);
+      const stage = getActionableApprovalStage(existing.approvals || [], stageOpts);
       if (
         (existing.status === "submitted" ||
           existing.status === "held" ||
@@ -241,18 +274,36 @@ exports.update = async (req, res) => {
           .join("|");
         if (oldKeys !== newKeys) {
           const departments = collectDepartmentsFromPr({ items, title: updates.title });
-          const built = await buildApprovalsForDepartments(company_id, departments);
+          let built = await buildApprovalsForDepartments(company_id, departments);
           if (built.missing.length) {
             return res.status(400).json({
               success: false,
               message: `No active approver for department(s): ${built.missing.map((d) => `"${d}"`).join(", ")}`,
             });
           }
+          const chain = requesterApprovalChain(
+            normalizeEmail(existing.requestedBy?.email || req.user?.email)
+          );
+          if (chain?.departmentApproverEmail) {
+            const overridden = await applyRequesterDepartmentApproverOverride(
+              company_id,
+              built.approvals,
+              chain
+            );
+            if (overridden.missingEmail) {
+              return res.status(400).json({
+                success: false,
+                message: `No active user for required department approver ${overridden.missingEmail}`,
+              });
+            }
+            built = { ...built, approvals: overridden.approvals };
+          }
           const corporate = (existing.approvals || [])
             .map((a) => (typeof a.toObject === "function" ? a.toObject() : { ...a }))
             .filter((a) => approvalStage(a) !== "department");
           updates.approvals = [...built.approvals, ...corporate];
-          updates.assignedApprover = firstPendingApproverId(updates.approvals) || existing.assignedApprover;
+          updates.assignedApprover =
+            firstPendingApproverId(updates.approvals, stageOpts) || existing.assignedApprover;
         }
       }
     } else if (body.title != null) {
@@ -347,13 +398,24 @@ exports.submit = async (req, res) => {
     // New departments introduced by the submitter are auto-mapped to them as approver.
     await ensureDepartmentsMappedToUser(company_id, departments, req.user);
 
-    const corporateMissing = await assertCorporateApproversConfigured(company_id);
+    const requesterEmail = normalizeEmail(req.user?.email);
+    const resolvedChain = resolveApprovalChainForSubmit(requesterEmail, departments);
+    const stageOpts = resolvedChain.options;
+    const requesterChain = resolvedChain.requesterChain;
+
+    const corporateMissing = await assertCorporateApproversConfigured(company_id, stageOpts);
     if (corporateMissing.length) {
+      const hint =
+        resolvedChain.key === "lab_then_finance"
+          ? "Lab (lab@ressichem.com) and Finance Manager"
+          : resolvedChain.key === "skip_finance"
+            ? "Boss"
+            : "Finance Manager and Boss";
       return res.status(400).json({
         success: false,
         message: `Corporate approvers not configured: ${corporateMissing
           .map((d) => `"${d}"`)
-          .join(", ")}. Map Finance Manager and Boss under PR Approvers before submitting.`,
+          .join(", ")}. Ensure ${hint} users exist / are mapped before submitting.`,
       });
     }
 
@@ -367,7 +429,22 @@ exports.submit = async (req, res) => {
       });
     }
 
-    const assignedApprover = firstPendingApproverId(approvals);
+    if (requesterChain?.departmentApproverEmail) {
+      const overridden = await applyRequesterDepartmentApproverOverride(
+        company_id,
+        approvals,
+        requesterChain
+      );
+      if (overridden.missingEmail) {
+        return res.status(400).json({
+          success: false,
+          message: `No active user for required department approver ${overridden.missingEmail}`,
+        });
+      }
+      approvals = overridden.approvals;
+    }
+
+    const assignedApprover = firstPendingApproverId(approvals, stageOpts);
     const title = departmentsTitleLabel(departments);
 
     const data = await populateRequisitionAudit(
@@ -380,6 +457,11 @@ exports.submit = async (req, res) => {
           submittedAt: new Date(),
           assignedApprover,
           approvals,
+          approvalChain: resolvedChain.key,
+          skipFinanceApproval: resolvedChain.key === "skip_finance",
+          slaDueAt: computeSlaDueAt(new Date()),
+          slaReminderSentAt: null,
+          slaClosedByDeadline: false,
           approvedBy: undefined,
           approvedAt: undefined,
           rejectionReason: "",
@@ -421,6 +503,19 @@ exports.approve = async (req, res) => {
     if (!assertCanActOnPr(req, existing)) {
       return res.status(403).json({ success: false, message: "This PR is assigned to another approver" });
     }
+    if (slaEnabled()) {
+      if (!existing.slaDueAt) {
+        existing.slaDueAt = computeSlaDueAt(existing);
+        await existing.save();
+      }
+      if (isPastSlaDeadline(existing) && !hasPrFullAccess(req.user) && !isProcurementAdminUser(req.user)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Same-day SLA expired: this PR must be approved or closed on the calendar day it was submitted. It will be auto-closed if still open.",
+        });
+      }
+    }
 
     let approvals = (existing.approvals || []).map((a) =>
       typeof a.toObject === "function" ? a.toObject() : { ...a }
@@ -449,8 +544,10 @@ exports.approve = async (req, res) => {
       return res.json({ success: true, data });
     }
 
-    // Only the current stage can be approved (departments → finance → boss).
-    const actionable = actionableApprovalRows(approvals, req.user);
+    const stageOpts = await approvalOptionsForPrDoc(existing);
+
+    // Only the current stage can be approved (departments → [finance] → boss).
+    const actionable = actionableApprovalRows(approvals, req.user, stageOpts);
     if (!actionable.length) {
       return res.status(403).json({
         success: false,
@@ -467,7 +564,7 @@ exports.approve = async (req, res) => {
 
     let newlyAdded = [];
     try {
-      const advanced = await advanceCorporateApprovalStages(company_id, approvals);
+      const advanced = await advanceCorporateApprovalStages(company_id, approvals, stageOpts);
       approvals = advanced.approvals;
       newlyAdded = advanced.newlyAdded || [];
     } catch (advErr) {
@@ -477,11 +574,11 @@ exports.approve = async (req, res) => {
       throw advErr;
     }
 
-    const nextStatus = deriveStatusAfterApprovals(approvals);
+    const nextStatus = deriveStatusAfterApprovals(approvals, stageOpts);
     const patch = {
       approvals,
       status: nextStatus,
-      assignedApprover: firstPendingApproverId(approvals) || existing.assignedApprover,
+      assignedApprover: firstPendingApproverId(approvals, stageOpts) || existing.assignedApprover,
       holdReason: "",
       heldBy: undefined,
       heldAt: undefined,
@@ -529,10 +626,13 @@ exports.reject = async (req, res) => {
     if (!reason) {
       return res.status(400).json({ success: false, message: "Rejection reason is required" });
     }
+    const fullAccess = hasPrFullAccess(req.user) || isProcurementAdminUser(req.user);
     const existing = await PurchaseRequisition.findOne({
       _id: req.params.id,
       company_id,
-      status: { $in: ["submitted", "held", "partially_approved"] },
+      status: fullAccess
+        ? { $in: ["submitted", "held", "partially_approved", "approved"] }
+        : { $in: ["submitted", "held", "partially_approved"] },
     });
     if (!existing) {
       return res.status(400).json({ success: false, message: "Requisition not found or not awaiting approval" });
@@ -554,7 +654,13 @@ exports.reject = async (req, res) => {
 
     const data = await populateRequisitionAudit(
       PurchaseRequisition.findOneAndUpdate(
-        { _id: existing._id, company_id, status: { $in: ["submitted", "held", "partially_approved"] } },
+        {
+          _id: existing._id,
+          company_id,
+          status: fullAccess
+            ? { $in: ["submitted", "held", "partially_approved", "approved"] }
+            : { $in: ["submitted", "held", "partially_approved"] },
+        },
         {
           status: "rejected",
           approvals,
@@ -564,6 +670,8 @@ exports.reject = async (req, res) => {
           holdReason: "",
           heldBy: undefined,
           heldAt: undefined,
+          approvedBy: undefined,
+          approvedAt: undefined,
         },
         { new: true }
       )
@@ -600,7 +708,8 @@ exports.hold = async (req, res) => {
     const approvals = (existing.approvals || []).map((a) =>
       typeof a.toObject === "function" ? a.toObject() : { ...a }
     );
-    const actionable = actionableApprovalRows(approvals, req.user);
+    const stageOpts = await approvalOptionsForPrDoc(existing);
+    const actionable = actionableApprovalRows(approvals, req.user, stageOpts);
     if (!actionable.length) {
       return res.status(403).json({
         success: false,
@@ -661,7 +770,10 @@ exports.releaseHold = async (req, res) => {
       }
       return row;
     });
-    const nextStatus = approvals.length ? deriveStatusAfterApprovals(approvals) : "submitted";
+    const stageOpts = await approvalOptionsForPrDoc(existing);
+    const nextStatus = approvals.length
+      ? deriveStatusAfterApprovals(approvals, stageOpts)
+      : "submitted";
     // derive returns approved only if all approved; held rows now pending → submitted or partially_approved
     const status = nextStatus === "approved" ? "approved" : nextStatus === "partially_approved" ? "partially_approved" : "submitted";
 
@@ -674,7 +786,8 @@ exports.releaseHold = async (req, res) => {
           holdReason: "",
           heldBy: undefined,
           heldAt: undefined,
-          assignedApprover: firstPendingApproverId(approvals) || existing.assignedApprover,
+          assignedApprover:
+            firstPendingApproverId(approvals, stageOpts) || existing.assignedApprover,
         },
         { new: true }
       )

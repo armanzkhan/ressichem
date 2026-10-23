@@ -1,6 +1,8 @@
 import { jwtDecode } from "jwt-decode";
 
 const SOFT_DELETE_EMAILS = new Set(["arman@ressichem.com"]);
+/** View / edit / delete / reject any PR (approved or not). */
+const PR_FULL_ACCESS_EMAILS = new Set(["salim@gmail.com"]);
 
 function storedEmail(): string {
   if (typeof window === "undefined") return "";
@@ -31,10 +33,17 @@ export function isProcurementAdmin(): boolean {
   );
 }
 
-/** Soft-delete UI — only for allow-listed emails (arman@ressichem.com). */
+/** Full access to all purchase requisitions (view/edit/delete/reject including approved). */
+export function hasPrFullAccess(): boolean {
+  if (typeof window === "undefined") return false;
+  return PR_FULL_ACCESS_EMAILS.has(storedEmail());
+}
+
+/** Soft-delete UI — allow-listed emails (arman + PR full-access). */
 export function canProcurementSoftDelete(): boolean {
   if (typeof window === "undefined") return false;
-  return SOFT_DELETE_EMAILS.has(storedEmail());
+  const email = storedEmail();
+  return SOFT_DELETE_EMAILS.has(email) || PR_FULL_ACCESS_EMAILS.has(email);
 }
 
 export function setProcurementAdminFlag(user?: {

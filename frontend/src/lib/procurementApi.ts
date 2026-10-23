@@ -226,6 +226,14 @@ export type PurchaseDocument = {
   submittedAt?: string;
   assignedApprover?: ProcurementUser | string;
   approvals?: PrApproval[];
+  /** standard | skip_finance | lab_then_finance */
+  approvalChain?: "standard" | "skip_finance" | "lab_then_finance" | string;
+  /** When true, PR skips Finance Manager and goes department → Boss only */
+  skipFinanceApproval?: boolean;
+  slaDueAt?: string | Date | null;
+  slaStatus?: string;
+  slaLabel?: string;
+  slaClosedByDeadline?: boolean;
   approvedBy?: ProcurementUser | string;
   approvedAt?: string;
   rejectedBy?: ProcurementUser | string;

@@ -34,10 +34,27 @@ router.patch(
   ctrl.updateFollowUp
 );
 router.post("/:id/submit", permissionMiddleware(["procurement.requisitions.update"]), ctrl.submit);
-router.post("/:id/approve", permissionMiddleware(["procurement.requisitions.approve"]), ctrl.approve);
-router.post("/:id/reject", permissionMiddleware(["procurement.requisitions.approve"]), ctrl.reject);
-router.post("/:id/hold", permissionMiddleware(["procurement.requisitions.approve"]), ctrl.hold);
-router.post("/:id/release-hold", permissionMiddleware(["procurement.requisitions.approve"]), ctrl.releaseHold);
+// Department-mapped approvers may only have create/read — controller still enforces assignee via assertCanActOnPr
+router.post(
+  "/:id/approve",
+  permissionMiddleware.any(["procurement.requisitions.approve", "procurement.access"]),
+  ctrl.approve
+);
+router.post(
+  "/:id/reject",
+  permissionMiddleware.any(["procurement.requisitions.approve", "procurement.access"]),
+  ctrl.reject
+);
+router.post(
+  "/:id/hold",
+  permissionMiddleware.any(["procurement.requisitions.approve", "procurement.access"]),
+  ctrl.hold
+);
+router.post(
+  "/:id/release-hold",
+  permissionMiddleware.any(["procurement.requisitions.approve", "procurement.access"]),
+  ctrl.releaseHold
+);
 // Buyers: po.create. Requesters: convert their own approved PRs via requisitions.create
 router.post(
   "/:id/convert-to-po",

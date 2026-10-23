@@ -7,11 +7,11 @@ const prApprovalSchema = new mongoose.Schema(
     departmentKey: { type: String, default: "" },
     /**
      * department = line/dept managers (parallel);
-     * finance / boss = corporate stages after all departments approve (sequential).
+     * lab / finance / boss = corporate stages after all departments approve (sequential).
      */
     stage: {
       type: String,
-      enum: ["department", "finance", "boss"],
+      enum: ["department", "lab", "finance", "boss"],
       default: "department",
     },
     approver: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
@@ -50,10 +50,19 @@ const purchaseRequisitionSchema = new mongoose.Schema(
     /** Primary / first pending approver (legacy + list convenience). */
     assignedApprover: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     /**
-     * Approval chain: department row(s) → Finance Manager → Boss.
-     * Fully approved only when every row (all stages) is approved.
+     * Approval chain variants:
+     * - standard: department → finance → boss
+     * - skip_finance: department → boss (e.g. Siraj)
+     * - lab_then_finance: department → lab → finance (Production/Maintenance)
      */
     approvals: [prApprovalSchema],
+    approvalChain: {
+      type: String,
+      enum: ["standard", "skip_finance", "lab_then_finance"],
+      default: "standard",
+    },
+    /** @deprecated use approvalChain === "skip_finance" */
+    skipFinanceApproval: { type: Boolean, default: false },
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     approvedAt: { type: Date },
     rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
@@ -64,6 +73,12 @@ const purchaseRequisitionSchema = new mongoose.Schema(
     holdReason: { type: String, default: "" },
     submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     submittedAt: { type: Date },
+    /**
+     * Strict same-day SLA: must be approved/rejected by end of submit calendar day (Asia/Karachi).
+     */
+    slaDueAt: { type: Date },
+    slaReminderSentAt: { type: Date },
+    slaClosedByDeadline: { type: Boolean, default: false },
     /**
      * Optional site / plant location for location-wise reports.
      * Empty on existing records — does not affect approval workflow.

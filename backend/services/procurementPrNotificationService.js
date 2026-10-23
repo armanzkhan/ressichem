@@ -264,6 +264,83 @@ async function notifyPrDeliveryUpdate(pr, actor, po) {
   });
 }
 
+async function notifyPrSameDayReminder(pr, approverMongoIds = []) {
+  const uniqueIds = [...new Set((approverMongoIds || []).map((id) => String(id)).filter(Boolean))];
+  const results = [];
+  for (const approverMongoId of uniqueIds) {
+    const notification = await notifyProcurementUser({
+      company_id: pr.company_id,
+      targetMongoUserId: approverMongoId,
+      title: "PR same-day deadline — afternoon reminder",
+      message: `${prLabel(pr)} must be approved or closed today. Please action it before end of day.`,
+      type: "approval_required",
+      priority: "urgent",
+      sender: null,
+      data: {
+        entityId: String(pr._id),
+        requisitionNumber: pr.requisitionNumber,
+        action: "sla_afternoon_reminder",
+        audience: "approver",
+        purchaseType: pr.purchaseType,
+        url: prListPath(pr),
+      },
+      actions: [{ label: "Review PR", action: "view", url: prListPath(pr) }],
+    });
+    if (notification) results.push(notification);
+  }
+
+  const requesterId = requesterMongoId(pr);
+  if (requesterId) {
+    const notification = await notifyProcurementUser({
+      company_id: pr.company_id,
+      targetMongoUserId: requesterId,
+      title: "Your PR is still open today",
+      message: `${prLabel(pr)} is not fully approved yet. Same-day SLA: it must be closed today.`,
+      type: "warning",
+      priority: "high",
+      sender: null,
+      data: {
+        entityId: String(pr._id),
+        requisitionNumber: pr.requisitionNumber,
+        action: "sla_afternoon_reminder",
+        audience: "requester",
+        purchaseType: pr.purchaseType,
+        url: prListPath(pr),
+      },
+      actions: [{ label: "View PR", action: "view", url: prListPath(pr) }],
+    });
+    if (notification) results.push(notification);
+  }
+  return results;
+}
+
+async function notifyPrClosedBySameDaySla(pr) {
+  const results = [];
+  const requesterId = requesterMongoId(pr);
+  if (requesterId) {
+    const notification = await notifyProcurementUser({
+      company_id: pr.company_id,
+      targetMongoUserId: requesterId,
+      title: "PR closed — same-day deadline missed",
+      message: `${prLabel(pr)} was automatically rejected because it was not approved/closed on the same calendar day.`,
+      type: "error",
+      priority: "high",
+      sender: null,
+      data: {
+        entityId: String(pr._id),
+        requisitionNumber: pr.requisitionNumber,
+        action: "sla_auto_closed",
+        audience: "requester",
+        purchaseType: pr.purchaseType,
+        url: prListPath(pr),
+      },
+      actions: [{ label: "View PR", action: "view", url: prListPath(pr) }],
+    });
+    if (notification) results.push(notification);
+  }
+  return results;
+}
+
 module.exports = {
   notifyPrSubmitted,
   notifyPrSubmittedToApprovers,
@@ -273,4 +350,6 @@ module.exports = {
   notifyPrHeld,
   notifyPrPurchased,
   notifyPrDeliveryUpdate,
+  notifyPrSameDayReminder,
+  notifyPrClosedBySameDaySla,
 };

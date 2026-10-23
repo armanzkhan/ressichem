@@ -3,9 +3,55 @@ const ProcurementDepartmentApprover = require("../models/ProcurementDepartmentAp
 const {
   resolveApproverEmail,
   normalizeDepartment,
+  normalizeEmail,
   isProcurementAdminUser,
+  hasPrFullAccess,
   CORPORATE_APPROVAL_STAGES,
+  corporateStagesForOptions,
+  requesterApprovalChain,
 } = require("./procurementPrRouting");
+
+async function resolveUserIdByEmail(company_id, email) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+  const user = await User.findOne({
+    company_id,
+    email: new RegExp(`^${normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
+    isActive: true,
+  })
+    .select("_id email")
+    .lean();
+  return user?._id || null;
+}
+
+function approvalOptionsFromPr(pr, requesterEmail) {
+  const chainKey = String(pr?.approvalChain || "").toLowerCase();
+  const chain = requesterApprovalChain(requesterEmail);
+
+  if (chainKey === "lab_then_finance" || pr?.labThenFinanceApproval) {
+    return { labThenFinance: true, skipFinance: false };
+  }
+  if (chainKey === "skip_finance" || pr?.skipFinanceApproval || chain?.skipFinance) {
+    return {
+      skipFinance: true,
+      bossApproverEmail: chain?.bossApproverEmail || undefined,
+    };
+  }
+  return {};
+}
+
+async function resolveRequesterEmail(pr) {
+  if (pr?.requestedBy?.email) return normalizeEmail(pr.requestedBy.email);
+  const id = pr?.requestedBy?._id || pr?.requestedBy;
+  if (!id) return "";
+  const user = await User.findById(id).select("email").lean();
+  return normalizeEmail(user?.email);
+}
+
+async function approvalOptionsForPrDoc(pr) {
+  const email = await resolveRequesterEmail(pr);
+  return approvalOptionsFromPr(pr, email);
+}
 
 /**
  * Departments on a PR: unique line departments, else title (supports "A, B" legacy).
@@ -152,41 +198,57 @@ function approvalStage(entry) {
   return String(entry?.stage || "department").toLowerCase();
 }
 
+/**
+ * For requester-specific chains (e.g. Siraj), force every department row onto the configured approver.
+ */
+async function applyRequesterDepartmentApproverOverride(company_id, approvals, chain) {
+  const email = normalizeEmail(chain?.departmentApproverEmail);
+  if (!email || !approvals?.length) return { approvals, missingEmail: null };
+  const userId = await resolveUserIdByEmail(company_id, email);
+  if (!userId) return { approvals, missingEmail: email };
+  return {
+    approvals: approvals.map((row) =>
+      approvalStage(row) === "department" ? { ...row, approver: userId } : row
+    ),
+    missingEmail: null,
+  };
+}
+
 function approvalApproverId(entry) {
   if (!entry) return "";
   return String(entry.approver?._id || entry.approver || "");
 }
 
-async function resolveCorporateApproverUserId(company_id, stageDef) {
+async function resolveCorporateApproverUserId(company_id, stageDef, options = {}) {
+  const overrideEmail =
+    stageDef.stage === "boss" ? normalizeEmail(options.bossApproverEmail) : "";
   const envEmail = String(process.env[stageDef.envKey] || "")
     .trim()
     .toLowerCase();
+  const fixedEmail = normalizeEmail(stageDef.fixedEmail);
   const email =
+    overrideEmail ||
+    fixedEmail ||
     envEmail ||
     (await resolveApproverEmail(company_id, stageDef.department)) ||
     null;
   if (!email) {
     return { ...stageDef, email: null, userId: null };
   }
-  const user = await User.findOne({
-    company_id,
-    email: new RegExp(`^${email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
-    isActive: true,
-  })
-    .select("_id email")
-    .lean();
+  const userId = await resolveUserIdByEmail(company_id, email);
   return {
     ...stageDef,
     email,
-    userId: user?._id || null,
+    userId,
   };
 }
 
-/** Ensure Finance Manager + Boss are mapped before a PR can be submitted. */
-async function assertCorporateApproversConfigured(company_id) {
+/** Ensure required corporate stages are mapped before a PR can be submitted. */
+async function assertCorporateApproversConfigured(company_id, options = {}) {
   const missing = [];
-  for (const stageDef of CORPORATE_APPROVAL_STAGES) {
-    const resolved = await resolveCorporateApproverUserId(company_id, stageDef);
+  const stages = corporateStagesForOptions(options);
+  for (const stageDef of stages) {
+    const resolved = await resolveCorporateApproverUserId(company_id, stageDef, options);
     if (!resolved.userId) missing.push(stageDef.department);
   }
   return missing;
@@ -202,20 +264,21 @@ function stagesComplete(approvals, stage) {
 }
 
 /**
- * Current actionable stage:
- * department (parallel) → finance → boss → done
+ * Current actionable stage walks the corporate chain for this PR:
+ * - standard: department → finance → boss
+ * - skip_finance: department → boss
+ * - lab_then_finance: department → lab → finance
  */
-function getActionableApprovalStage(approvals = []) {
+function getActionableApprovalStage(approvals = [], options = {}) {
   const depts = departmentApprovals(approvals);
   if (!depts.length) return "department";
   if (!depts.every((a) => a.status === "approved")) return "department";
 
-  const finance = approvals.find((a) => approvalStage(a) === "finance");
-  if (!finance || finance.status !== "approved") return "finance";
-
-  const boss = approvals.find((a) => approvalStage(a) === "boss");
-  if (!boss || boss.status !== "approved") return "boss";
-
+  const stages = corporateStagesForOptions(options);
+  for (const stageDef of stages) {
+    const row = approvals.find((a) => approvalStage(a) === stageDef.stage);
+    if (!row || row.status !== "approved") return stageDef.stage;
+  }
   return "done";
 }
 
@@ -223,30 +286,31 @@ function getActionableApprovalStage(approvals = []) {
  * After department (or finance) completes, append the next corporate row if missing.
  * Returns newly added rows (for notifications).
  */
-async function advanceCorporateApprovalStages(company_id, approvals = []) {
+async function advanceCorporateApprovalStages(company_id, approvals = [], options = {}) {
   const next = [...approvals];
   const newlyAdded = [];
+  const stages = corporateStagesForOptions(options);
 
   if (!stagesComplete(next, "department")) {
     return { approvals: next, newlyAdded };
   }
 
-  for (let i = 0; i < CORPORATE_APPROVAL_STAGES.length; i += 1) {
-    const stageDef = CORPORATE_APPROVAL_STAGES[i];
+  for (let i = 0; i < stages.length; i += 1) {
+    const stageDef = stages[i];
     const existing = next.find((a) => approvalStage(a) === stageDef.stage);
     if (existing) {
       if (existing.status !== "approved") break;
       continue;
     }
 
-    // Prior corporate stages must already be present and approved (finance before boss).
-    const priorOk = CORPORATE_APPROVAL_STAGES.slice(0, i).every((p) => {
+    // Prior corporate stages (for this PR's chain) must already be present and approved.
+    const priorOk = stages.slice(0, i).every((p) => {
       const row = next.find((a) => approvalStage(a) === p.stage);
       return row && row.status === "approved";
     });
     if (!priorOk) break;
 
-    const resolved = await resolveCorporateApproverUserId(company_id, stageDef);
+    const resolved = await resolveCorporateApproverUserId(company_id, stageDef, options);
     if (!resolved.userId) {
       const err = new Error(
         `No active ${stageDef.department} approver configured. Map them under PR Approvers (or set ${stageDef.envKey}).`
@@ -272,10 +336,12 @@ async function advanceCorporateApprovalStages(company_id, approvals = []) {
   return { approvals: next, newlyAdded };
 }
 
-function actionableApprovalRows(approvals = [], user, { allowAdmin = true } = {}) {
-  const stage = getActionableApprovalStage(approvals);
+function actionableApprovalRows(approvals = [], user, options = {}) {
+  const { allowAdmin = true, ...stageOptions } = options;
+  const stage = getActionableApprovalStage(approvals, stageOptions);
   if (stage === "done") return [];
-  const isAdmin = allowAdmin && isProcurementAdminUser(user);
+  const isAdmin =
+    allowAdmin && (isProcurementAdminUser(user) || hasPrFullAccess(user));
   const actorId = String(user?._id || "");
   return approvals.filter((a) => {
     if (approvalStage(a) !== stage) return false;
@@ -287,7 +353,7 @@ function actionableApprovalRows(approvals = [], user, { allowAdmin = true } = {}
 
 function userHasApprovalRoleOnPr(user, pr) {
   if (!user?._id) return false;
-  if (isProcurementAdminUser(user)) return true;
+  if (isProcurementAdminUser(user) || hasPrFullAccess(user)) return true;
   const actorId = String(user._id);
   const approvals = pr.approvals || [];
   if (approvals.length) {
@@ -300,7 +366,7 @@ function userHasApprovalRoleOnPr(user, pr) {
 function pendingApprovalsForUser(pr, userId) {
   const actorId = String(userId || "");
   const approvals = pr.approvals || [];
-  const stage = getActionableApprovalStage(approvals);
+  const stage = getActionableApprovalStage(approvals, approvalOptionsFromPr(pr));
   return approvals.filter(
     (a) =>
       approvalApproverId(a) === actorId &&
@@ -316,22 +382,27 @@ function countApprovalProgress(approvals = []) {
   return { total, approved, pending };
 }
 
-function deriveStatusAfterApprovals(approvals = []) {
+function deriveStatusAfterApprovals(approvals = [], options = {}) {
   if (!approvals.length) return "approved";
   if (approvals.some((a) => a.status === "rejected")) return "rejected";
-  // Fully approved only when departments + finance + boss are all present and approved
-  const hasFinance = approvals.some((a) => approvalStage(a) === "finance");
-  const hasBoss = approvals.some((a) => approvalStage(a) === "boss");
-  const deptsDone = stagesComplete(approvals, "department");
-  if (deptsDone && hasFinance && hasBoss && approvals.every((a) => a.status === "approved")) {
+  if (!stagesComplete(approvals, "department")) {
+    if (approvals.some((a) => a.status === "approved")) return "partially_approved";
+    return "submitted";
+  }
+  const stages = corporateStagesForOptions(options);
+  const corporateDone = stages.every((stageDef) => {
+    const row = approvals.find((a) => approvalStage(a) === stageDef.stage);
+    return row && row.status === "approved";
+  });
+  if (corporateDone && approvals.every((a) => a.status === "approved")) {
     return "approved";
   }
   if (approvals.some((a) => a.status === "approved")) return "partially_approved";
   return "submitted";
 }
 
-function firstPendingApproverId(approvals = []) {
-  const stage = getActionableApprovalStage(approvals);
+function firstPendingApproverId(approvals = [], options = {}) {
+  const stage = getActionableApprovalStage(approvals, options);
   const pending = approvals.find(
     (a) => approvalStage(a) === stage && (a.status === "pending" || a.status === "held")
   );
@@ -359,6 +430,7 @@ module.exports = {
   ensureDepartmentMappedToUser,
   ensureDepartmentsMappedToUser,
   buildApprovalsForDepartments,
+  applyRequesterDepartmentApproverOverride,
   advanceCorporateApprovalStages,
   getActionableApprovalStage,
   actionableApprovalRows,
@@ -370,5 +442,8 @@ module.exports = {
   uniqueApproverIds,
   approvalApproverId,
   approvalStage,
+  approvalOptionsFromPr,
+  approvalOptionsForPrDoc,
+  resolveRequesterEmail,
   CORPORATE_APPROVAL_STAGES,
 };
