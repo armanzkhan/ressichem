@@ -30,8 +30,9 @@ const CORPORATE_APPROVAL_STAGES = [
 ];
 
 /**
- * Production / Maintenance (any location: Hub, Lahore, etc.):
+ * Production / Maintenance (Hub / non-Lahore):
  * assigned department manager → Lab → Finance (no Boss).
+ * Lahore Production/Maintenance: same, then final → tahira@ (Boss stage).
  */
 const LAB_THEN_FINANCE_STAGES = [
   {
@@ -49,6 +50,9 @@ const LAB_THEN_FINANCE_STAGES = [
 ];
 
 const PRODUCTION_MAINTENANCE_DEPARTMENTS = new Set(["production", "maintenance"]);
+
+/** Lahore PRs: final corporate approval is Tahira (replaces default Boss). */
+const LAHORE_FINAL_APPROVER_EMAIL = "tahira@ressichem.com";
 
 /**
  * Per-requester approval overrides.
@@ -70,6 +74,17 @@ function normalizeEmail(email) {
   return String(email || "")
     .trim()
     .toLowerCase();
+}
+
+/** True when PR location is Lahore (e.g. "Lahore", "Lahore plant"). */
+function isLahoreLocation(location) {
+  return /\blahore\b/i.test(String(location || "").trim());
+}
+
+function lahoreFinalApproverEmail() {
+  return (
+    normalizeEmail(process.env.PROCUREMENT_LAHORE_APPROVER_EMAIL) || LAHORE_FINAL_APPROVER_EMAIL
+  );
 }
 
 function requesterApprovalChain(email) {
@@ -102,7 +117,14 @@ function isProductionOrMaintenanceOnlyPr(departments = []) {
 }
 
 function corporateStagesForOptions(options = {}) {
-  if (options.labThenFinance) return LAB_THEN_FINANCE_STAGES;
+  if (options.labThenFinance) {
+    // Lahore: unlock Boss (Tahira) after Finance so every Lahore PR ends with her.
+    if (options.lahoreFinalBoss) {
+      const boss = CORPORATE_APPROVAL_STAGES.find((s) => s.stage === "boss");
+      return boss ? [...LAB_THEN_FINANCE_STAGES, boss] : [...LAB_THEN_FINANCE_STAGES];
+    }
+    return LAB_THEN_FINANCE_STAGES;
+  }
   if (options.skipFinance) {
     return CORPORATE_APPROVAL_STAGES.filter((s) => s.stage !== "finance");
   }
@@ -112,15 +134,19 @@ function corporateStagesForOptions(options = {}) {
 /**
  * Resolve which corporate chain a new PR should use.
  * Requester overrides win; else Production/Maintenance → lab→finance; else standard.
+ * Lahore location: final Boss stage is always tahira@ressichem.com.
  */
-function resolveApprovalChainForSubmit(requesterEmail, departments = []) {
+function resolveApprovalChainForSubmit(requesterEmail, departments = [], location = "") {
+  const lahore = isLahoreLocation(location);
+  const lahoreBossEmail = lahore ? lahoreFinalApproverEmail() : null;
+
   const chain = requesterApprovalChain(requesterEmail);
   if (chain?.skipFinance) {
     return {
       key: "skip_finance",
       options: {
         skipFinance: true,
-        bossApproverEmail: chain.bossApproverEmail,
+        bossApproverEmail: lahoreBossEmail || chain.bossApproverEmail,
       },
       requesterChain: chain,
     };
@@ -128,11 +154,20 @@ function resolveApprovalChainForSubmit(requesterEmail, departments = []) {
   if (isProductionOrMaintenanceOnlyPr(departments)) {
     return {
       key: "lab_then_finance",
-      options: { labThenFinance: true },
+      options: {
+        labThenFinance: true,
+        ...(lahore
+          ? { lahoreFinalBoss: true, bossApproverEmail: lahoreBossEmail }
+          : {}),
+      },
       requesterChain: null,
     };
   }
-  return { key: "standard", options: {}, requesterChain: null };
+  return {
+    key: "standard",
+    options: lahoreBossEmail ? { bossApproverEmail: lahoreBossEmail } : {},
+    requesterChain: null,
+  };
 }
 
 function normalizeDepartment(name) {
@@ -271,8 +306,11 @@ module.exports = {
   REQUESTER_APPROVAL_CHAINS,
   PROCUREMENT_PR_FULL_ACCESS_EMAILS,
   PROCUREMENT_SOFT_DELETE_EMAILS,
+  LAHORE_FINAL_APPROVER_EMAIL,
   normalizeDepartment,
   normalizeEmail,
+  isLahoreLocation,
+  lahoreFinalApproverEmail,
   approverEmailForDepartment,
   resolveApproverEmail,
   requesterApprovalChain,

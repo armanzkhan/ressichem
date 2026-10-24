@@ -123,6 +123,10 @@ function approvalChainKey(row: PurchaseDocument) {
   return "standard";
 }
 
+function isLahorePrLocation(location?: string) {
+  return /\blahore\b/i.test(String(location || "").trim());
+}
+
 function approvalProgressLabel(row: PurchaseDocument) {
   const approvals = row.approvals || [];
   if (!approvals.length) {
@@ -132,14 +136,15 @@ function approvalProgressLabel(row: PurchaseDocument) {
   }
   const done = approvals.filter((a) => a.status === "approved").length;
   const chain = approvalChainKey(row);
+  const lahore = isLahorePrLocation(row.location);
   const hasLab = approvals.some((a) => String(a.stage || "").toLowerCase() === "lab");
   const hasFinance = approvals.some((a) => String(a.stage || "").toLowerCase() === "finance");
   const hasBoss = approvals.some((a) => String(a.stage || "").toLowerCase() === "boss");
   let expected = approvals.length;
   if (chain === "lab_then_finance") {
-    if (hasLab && hasFinance) expected = approvals.length;
-    else if (hasLab || hasFinance) expected = approvals.length + 1;
-    else expected = approvals.length + 2;
+    // Non-Lahore: lab + finance. Lahore: lab + finance + final (Tahira as Boss).
+    const remaining = [!hasLab, !hasFinance, lahore && !hasBoss].filter(Boolean).length;
+    expected = approvals.length + remaining;
   } else if (chain === "skip_finance") {
     if (!hasBoss) expected = approvals.length + 1;
   } else if (hasFinance && hasBoss) {
@@ -1074,10 +1079,16 @@ export function RequisitionsView({ section }: Props) {
               <div>
                 <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">
                   {approvalChainKey(viewingRow) === "lab_then_finance"
-                    ? "Approval chain (department → lab → finance)"
+                    ? isLahorePrLocation(viewingRow.location)
+                      ? "Approval chain (department → lab → finance → Lahore final)"
+                      : "Approval chain (department → lab → finance)"
                     : approvalChainKey(viewingRow) === "skip_finance"
-                      ? "Approval chain (department → boss)"
-                      : "Approval chain (departments → finance → boss)"}
+                      ? isLahorePrLocation(viewingRow.location)
+                        ? "Approval chain (department → Lahore final)"
+                        : "Approval chain (department → boss)"
+                      : isLahorePrLocation(viewingRow.location)
+                        ? "Approval chain (departments → finance → Lahore final)"
+                        : "Approval chain (departments → finance → boss)"}
                 </p>
                 <ul className="space-y-1 text-gray-700 dark:text-gray-300">
                   {viewingRow.approvals.map((a, i) => (
@@ -1096,26 +1107,43 @@ export function RequisitionsView({ section }: Props) {
                 {approvalChainKey(viewingRow) === "lab_then_finance" ? (
                   !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "lab") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                      After department manager approves → Lab, then Finance.
+                      After department manager approves → Lab, then Finance
+                      {isLahorePrLocation(viewingRow.location)
+                        ? ", then Lahore final (tahira@ressichem.com)."
+                        : "."}
                     </p>
                   ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                      After Lab approves → Finance Manager for final approval.
+                      After Lab approves → Finance Manager
+                      {isLahorePrLocation(viewingRow.location)
+                        ? ", then Lahore final (tahira@ressichem.com)."
+                        : " for final approval."}
+                    </p>
+                  ) : isLahorePrLocation(viewingRow.location) &&
+                    !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "boss") ? (
+                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
+                      After Finance Manager approves → Lahore final (tahira@ressichem.com).
                     </p>
                   ) : null
                 ) : approvalChainKey(viewingRow) === "skip_finance" ? (
                   !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "boss") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                      After department approve → Boss (Finance skipped for this requester).
+                      {isLahorePrLocation(viewingRow.location)
+                        ? "After department approve → Lahore final (tahira@ressichem.com)."
+                        : "After department approve → Boss (Finance skipped for this requester)."}
                     </p>
                   ) : null
                 ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
                   <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                    After all departments approve → Finance Manager, then Boss.
+                    {isLahorePrLocation(viewingRow.location)
+                      ? "After all departments approve → Finance Manager, then Lahore final (tahira@ressichem.com)."
+                      : "After all departments approve → Finance Manager, then Boss."}
                   </p>
                 ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "boss") ? (
                   <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                    After Finance Manager approves → Boss for final approval.
+                    {isLahorePrLocation(viewingRow.location)
+                      ? "After Finance Manager approves → Lahore final (tahira@ressichem.com)."
+                      : "After Finance Manager approves → Boss for final approval."}
                   </p>
                 ) : null}
               </div>

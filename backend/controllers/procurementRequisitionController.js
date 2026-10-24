@@ -399,18 +399,29 @@ exports.submit = async (req, res) => {
     await ensureDepartmentsMappedToUser(company_id, departments, req.user);
 
     const requesterEmail = normalizeEmail(req.user?.email);
-    const resolvedChain = resolveApprovalChainForSubmit(requesterEmail, departments);
+    const resolvedChain = resolveApprovalChainForSubmit(
+      requesterEmail,
+      departments,
+      existing.location
+    );
     const stageOpts = resolvedChain.options;
     const requesterChain = resolvedChain.requesterChain;
 
     const corporateMissing = await assertCorporateApproversConfigured(company_id, stageOpts);
     if (corporateMissing.length) {
+      const lahoreFinal = Boolean(stageOpts?.lahoreFinalBoss || stageOpts?.bossApproverEmail);
       const hint =
         resolvedChain.key === "lab_then_finance"
-          ? "Lab (lab@ressichem.com) and Finance Manager"
+          ? lahoreFinal
+            ? "Lab (lab@ressichem.com), Finance Manager, and Lahore final approver (tahira@ressichem.com)"
+            : "Lab (lab@ressichem.com) and Finance Manager"
           : resolvedChain.key === "skip_finance"
-            ? "Boss"
-            : "Finance Manager and Boss";
+            ? lahoreFinal
+              ? "Lahore final approver (tahira@ressichem.com)"
+              : "Boss"
+            : lahoreFinal
+              ? "Finance Manager and Lahore final approver (tahira@ressichem.com)"
+              : "Finance Manager and Boss";
       return res.status(400).json({
         success: false,
         message: `Corporate approvers not configured: ${corporateMissing

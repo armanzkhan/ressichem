@@ -9,6 +9,8 @@ const {
   CORPORATE_APPROVAL_STAGES,
   corporateStagesForOptions,
   requesterApprovalChain,
+  isLahoreLocation,
+  lahoreFinalApproverEmail,
 } = require("./procurementPrRouting");
 
 async function resolveUserIdByEmail(company_id, email) {
@@ -27,17 +29,23 @@ async function resolveUserIdByEmail(company_id, email) {
 function approvalOptionsFromPr(pr, requesterEmail) {
   const chainKey = String(pr?.approvalChain || "").toLowerCase();
   const chain = requesterApprovalChain(requesterEmail);
+  const lahore = isLahoreLocation(pr?.location);
+  const lahoreBoss = lahore ? { bossApproverEmail: lahoreFinalApproverEmail() } : {};
 
   if (chainKey === "lab_then_finance" || pr?.labThenFinanceApproval) {
-    return { labThenFinance: true, skipFinance: false };
+    return {
+      labThenFinance: true,
+      skipFinance: false,
+      ...(lahore ? { lahoreFinalBoss: true, ...lahoreBoss } : {}),
+    };
   }
   if (chainKey === "skip_finance" || pr?.skipFinanceApproval || chain?.skipFinance) {
     return {
       skipFinance: true,
-      bossApproverEmail: chain?.bossApproverEmail || undefined,
+      bossApproverEmail: lahoreBoss.bossApproverEmail || chain?.bossApproverEmail || undefined,
     };
   }
-  return {};
+  return { ...lahoreBoss };
 }
 
 async function resolveRequesterEmail(pr) {
@@ -236,8 +244,14 @@ async function resolveCorporateApproverUserId(company_id, stageDef, options = {}
     return { ...stageDef, email: null, userId: null };
   }
   const userId = await resolveUserIdByEmail(company_id, email);
+  const lahoreFinal = lahoreFinalApproverEmail();
+  const department =
+    stageDef.stage === "boss" && email === lahoreFinal
+      ? "Lahore Final Approver"
+      : stageDef.department;
   return {
     ...stageDef,
+    department,
     email,
     userId,
   };
