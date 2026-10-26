@@ -9,7 +9,7 @@ const {
   CORPORATE_APPROVAL_STAGES,
   corporateStagesForOptions,
   requesterApprovalChain,
-  isLahoreLocation,
+  isLahorePr,
   lahoreFinalApproverEmail,
 } = require("./procurementPrRouting");
 
@@ -29,7 +29,7 @@ async function resolveUserIdByEmail(company_id, email) {
 function approvalOptionsFromPr(pr, requesterEmail) {
   const chainKey = String(pr?.approvalChain || "").toLowerCase();
   const chain = requesterApprovalChain(requesterEmail);
-  const lahore = isLahoreLocation(pr?.location);
+  const lahore = isLahorePr(pr);
   const lahoreBoss = lahore ? { bossApproverEmail: lahoreFinalApproverEmail() } : {};
 
   if (chainKey === "lab_then_finance" || pr?.labThenFinanceApproval) {
@@ -46,6 +46,43 @@ function approvalOptionsFromPr(pr, requesterEmail) {
     };
   }
   return { ...lahoreBoss };
+}
+
+/**
+ * If a Lahore PR already has a pending Boss row on the wrong user (e.g. default Boss
+ * zulfiqar@), reassign it to tahira@ so in-flight PRs pick up the Lahore final rule.
+ */
+async function ensureLahoreBossApprover(company_id, approvals = [], options = {}) {
+  const targetEmail = normalizeEmail(options.bossApproverEmail);
+  if (!targetEmail || targetEmail !== lahoreFinalApproverEmail()) {
+    return { approvals, reassigned: false };
+  }
+
+  const next = approvals.map((a) =>
+    typeof a?.toObject === "function" ? a.toObject() : { ...a }
+  );
+  const bossRow = next.find(
+    (a) =>
+      approvalStage(a) === "boss" &&
+      (a.status === "pending" || a.status === "held")
+  );
+  if (!bossRow) return { approvals: next, reassigned: false };
+
+  const userId = await resolveUserIdByEmail(company_id, targetEmail);
+  if (!userId) return { approvals: next, reassigned: false };
+
+  const currentId = approvalApproverId(bossRow);
+  if (currentId === String(userId)) {
+    if (bossRow.department !== "Lahore Final Approver") {
+      bossRow.department = "Lahore Final Approver";
+      return { approvals: next, reassigned: true };
+    }
+    return { approvals: next, reassigned: false };
+  }
+
+  bossRow.approver = userId;
+  bossRow.department = "Lahore Final Approver";
+  return { approvals: next, reassigned: true };
 }
 
 async function resolveRequesterEmail(pr) {
@@ -301,7 +338,8 @@ function getActionableApprovalStage(approvals = [], options = {}) {
  * Returns newly added rows (for notifications).
  */
 async function advanceCorporateApprovalStages(company_id, approvals = [], options = {}) {
-  const next = [...approvals];
+  const repaired = await ensureLahoreBossApprover(company_id, approvals, options);
+  const next = [...repaired.approvals];
   const newlyAdded = [];
   const stages = corporateStagesForOptions(options);
 
@@ -458,6 +496,7 @@ module.exports = {
   approvalStage,
   approvalOptionsFromPr,
   approvalOptionsForPrDoc,
+  ensureLahoreBossApprover,
   resolveRequesterEmail,
   CORPORATE_APPROVAL_STAGES,
 };

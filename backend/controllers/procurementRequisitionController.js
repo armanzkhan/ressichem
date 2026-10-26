@@ -32,6 +32,7 @@ const {
   approvalApproverId,
   applyRequesterDepartmentApproverOverride,
   approvalOptionsForPrDoc,
+  ensureLahoreBossApprover,
 } = require("../utils/procurementPrApprovals");
 const procurementPrNotificationService = require("../services/procurementPrNotificationService");
 const PurchaseOrder = require("../models/PurchaseOrder");
@@ -107,6 +108,38 @@ exports.list = async (req, res) => {
     let data = await populateRequisitionAudit(PurchaseRequisition.find(query))
       .sort({ createdAt: -1 })
       .lean();
+
+    // Repair in-flight Lahore PRs that still have default Boss (e.g. zulfiqar@) pending.
+    let repairedAny = false;
+    for (const row of data) {
+      const open = ["submitted", "held", "partially_approved"].includes(String(row.status || ""));
+      if (!open || !(row.approvals || []).length) continue;
+      try {
+        const stageOpts = await approvalOptionsForPrDoc(row);
+        if (!stageOpts.bossApproverEmail) continue;
+        const repaired = await ensureLahoreBossApprover(company_id, row.approvals, stageOpts);
+        if (!repaired.reassigned) continue;
+        const nextAssigned =
+          firstPendingApproverId(repaired.approvals, stageOpts) || row.assignedApprover;
+        await PurchaseRequisition.updateOne(
+          { _id: row._id, company_id },
+          {
+            approvals: repaired.approvals,
+            assignedApprover: nextAssigned,
+          }
+        );
+        repairedAny = true;
+      } catch (repairErr) {
+        console.error("Lahore boss repair failed:", repairErr.message);
+      }
+    }
+    if (repairedAny) {
+      data = await populateRequisitionAudit(
+        PurchaseRequisition.find({ _id: { $in: data.map((r) => r._id) }, company_id })
+      )
+        .sort({ createdAt: -1 })
+        .lean();
+    }
 
     // Additive enrichment — never mutates PR.status
     data = await enrichPrsWithFulfillment(PurchaseOrder, company_id, data);
@@ -402,7 +435,7 @@ exports.submit = async (req, res) => {
     const resolvedChain = resolveApprovalChainForSubmit(
       requesterEmail,
       departments,
-      existing.location
+      existing
     );
     const stageOpts = resolvedChain.options;
     const requesterChain = resolvedChain.requesterChain;
@@ -556,6 +589,13 @@ exports.approve = async (req, res) => {
     }
 
     const stageOpts = await approvalOptionsForPrDoc(existing);
+
+    // Lahore PRs tagged via title/dept (e.g. "Administration (Lahore)") must end with tahira@,
+    // even if a pending Boss row was already created for the default Boss mapping.
+    {
+      const repaired = await ensureLahoreBossApprover(company_id, approvals, stageOpts);
+      approvals = repaired.approvals;
+    }
 
     // Only the current stage can be approved (departments → [finance] → boss).
     const actionable = actionableApprovalRows(approvals, req.user, stageOpts);

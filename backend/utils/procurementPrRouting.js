@@ -76,9 +76,24 @@ function normalizeEmail(email) {
     .toLowerCase();
 }
 
-/** True when PR location is Lahore (e.g. "Lahore", "Lahore plant"). */
-function isLahoreLocation(location) {
-  return /\blahore\b/i.test(String(location || "").trim());
+/** True when a free-text field names Lahore (e.g. "Lahore", "Lahore plant", "Administration (Lahore)"). */
+function isLahoreLocation(value) {
+  return /\blahore\b/i.test(String(value || "").trim());
+}
+
+/**
+ * Lahore PRs are often tagged via location OR department/title
+ * (e.g. title "Administration (Lahore)" with empty location field).
+ */
+function isLahorePr(pr, departments = []) {
+  if (isLahoreLocation(pr?.location) || isLahoreLocation(pr?.title)) return true;
+  const deptList =
+    departments.length > 0
+      ? departments
+      : (pr?.items || []).map((line) => line?.department).filter(Boolean);
+  if (deptList.some((d) => isLahoreLocation(d))) return true;
+  if (typeof pr === "string" && isLahoreLocation(pr)) return true;
+  return false;
 }
 
 function lahoreFinalApproverEmail() {
@@ -134,10 +149,13 @@ function corporateStagesForOptions(options = {}) {
 /**
  * Resolve which corporate chain a new PR should use.
  * Requester overrides win; else Production/Maintenance → lab→finance; else standard.
- * Lahore location: final Boss stage is always tahira@ressichem.com.
+ * Lahore (location / title / dept): final Boss stage is always tahira@ressichem.com.
  */
-function resolveApprovalChainForSubmit(requesterEmail, departments = [], location = "") {
-  const lahore = isLahoreLocation(location);
+function resolveApprovalChainForSubmit(requesterEmail, departments = [], locationOrPr = "") {
+  const lahore =
+    typeof locationOrPr === "object" && locationOrPr
+      ? isLahorePr(locationOrPr, departments)
+      : isLahorePr({ location: locationOrPr, title: "" }, departments);
   const lahoreBossEmail = lahore ? lahoreFinalApproverEmail() : null;
 
   const chain = requesterApprovalChain(requesterEmail);
@@ -267,15 +285,46 @@ function isPrRequester(user, pr) {
 }
 
 /**
+ * Finance / Lab / Boss (and Lahore final) need the company-wide PR list.
+ * Department managers stay scoped to PRs they own or are assigned on —
+ * otherwise Finance only sees rows already stamped with their user id
+ * (often just 1–2 PRs) and misses the rest of the queue.
+ */
+function isCorporatePipelineApproverUser(user) {
+  const email = userEmail(user);
+  if (!email) return false;
+
+  const known = new Set(
+    [
+      "finance@ressichem.com",
+      "lab@ressichem.com",
+      LAHORE_FINAL_APPROVER_EMAIL,
+      process.env.PROCUREMENT_FINANCE_APPROVER_EMAIL,
+      process.env.PROCUREMENT_LAB_APPROVER_EMAIL,
+      process.env.PROCUREMENT_BOSS_APPROVER_EMAIL,
+      process.env.PROCUREMENT_LAHORE_APPROVER_EMAIL,
+      ...Object.values(REQUESTER_APPROVAL_CHAINS).map((c) => c.bossApproverEmail),
+    ]
+      .map((e) => normalizeEmail(e))
+      .filter(Boolean)
+  );
+  return known.has(email);
+}
+
+/**
  * Scope PR list/report queries by role:
- * - admin: company-wide
- * - approver: own + assigned for approval
+ * - admin / PR full-access / corporate (finance/lab/boss): company-wide
+ * - department approver: own + assigned for approval
  * - buyer (po.create): own + approved (for PO conversion)
  * - requester (create only): own only
  * - viewer / read-only: company-wide
  */
 function applyPurchaseRequisitionVisibility(query, user) {
   if (!query || !user || isProcurementAdminUser(user) || hasPrFullAccess(user)) return query;
+
+  if (isCorporatePipelineApproverUser(user)) {
+    return query;
+  }
 
   if (canApproveRequisitions(user)) {
     query.$or = [
@@ -310,6 +359,7 @@ module.exports = {
   normalizeDepartment,
   normalizeEmail,
   isLahoreLocation,
+  isLahorePr,
   lahoreFinalApproverEmail,
   approverEmailForDepartment,
   resolveApproverEmail,
@@ -319,6 +369,7 @@ module.exports = {
   resolveApprovalChainForSubmit,
   corporateStagesForOptions,
   isProcurementAdminUser,
+  isCorporatePipelineApproverUser,
   hasPrFullAccess,
   canSoftDeleteProcurement,
   canApproveRequisitions,

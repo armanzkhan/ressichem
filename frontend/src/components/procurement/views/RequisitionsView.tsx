@@ -123,8 +123,16 @@ function approvalChainKey(row: PurchaseDocument) {
   return "standard";
 }
 
-function isLahorePrLocation(location?: string) {
-  return /\blahore\b/i.test(String(location || "").trim());
+/** Lahore may be on location, title, or department (e.g. "Administration (Lahore)"). */
+function isLahorePr(row?: {
+  location?: string;
+  title?: string;
+  items?: { department?: string }[];
+}) {
+  const hasLahore = (value?: string) => /\blahore\b/i.test(String(value || "").trim());
+  if (!row) return false;
+  if (hasLahore(row.location) || hasLahore(row.title)) return true;
+  return (row.items || []).some((line) => hasLahore(line.department));
 }
 
 function approvalProgressLabel(row: PurchaseDocument) {
@@ -136,7 +144,7 @@ function approvalProgressLabel(row: PurchaseDocument) {
   }
   const done = approvals.filter((a) => a.status === "approved").length;
   const chain = approvalChainKey(row);
-  const lahore = isLahorePrLocation(row.location);
+  const lahore = isLahorePr(row);
   const hasLab = approvals.some((a) => String(a.stage || "").toLowerCase() === "lab");
   const hasFinance = approvals.some((a) => String(a.stage || "").toLowerCase() === "finance");
   const hasBoss = approvals.some((a) => String(a.stage || "").toLowerCase() === "boss");
@@ -592,7 +600,7 @@ export function RequisitionsView({ section }: Props) {
 
   const auditRows = (row: PurchaseDocument) => {
     const rows: Array<{ label: string; by?: string; at?: string }> = [
-      { label: "Created", by: procurementUserLabel(row.requestedBy), at: row.createdAt },
+      { label: "Created by", by: procurementUserLabel(row.requestedBy), at: row.createdAt },
     ];
     if (row.submittedAt || row.submittedBy) {
       rows.push({ label: "Submitted", by: procurementUserLabel(row.submittedBy), at: row.submittedAt });
@@ -700,13 +708,23 @@ export function RequisitionsView({ section }: Props) {
                   />,
                   "PR #",
                   "Created",
+                  "Created by",
                   "Departments",
                   "Status",
                   "Delivery",
                   "Assigned",
                   "Actions",
                 ]
-              : ["PR #", "Created", "Departments", "Status", "Delivery", "Assigned", "Actions"]
+              : [
+                  "PR #",
+                  "Created",
+                  "Created by",
+                  "Departments",
+                  "Status",
+                  "Delivery",
+                  "Assigned",
+                  "Actions",
+                ]
           }
           rows={rows.map((r) => {
             const actionCell = (
@@ -882,6 +900,7 @@ export function RequisitionsView({ section }: Props) {
               submittedAt && submittedAt !== createdAt
                 ? `Created ${procurementDateTime(createdAt)} · Submitted ${procurementDateTime(submittedAt)}`
                 : procurementDateTime(createdAt);
+            const createdByLabel = procurementUserLabel(r.requestedBy);
             const baseCells = [
               r.requisitionNumber || "—",
               <span
@@ -901,6 +920,13 @@ export function RequisitionsView({ section }: Props) {
                 ) : (
                   "—"
                 )}
+              </span>,
+              <span
+                key={`by-${r._id}`}
+                className="block max-w-[8rem] truncate text-xs text-blue-900 dark:text-slate-100"
+                title={createdByLabel}
+              >
+                {createdByLabel}
               </span>,
               <span key={`dept-${r._id}`} className="block max-w-[9rem] truncate" title={dept}>
                 {dept}
@@ -1027,6 +1053,16 @@ export function RequisitionsView({ section }: Props) {
         <Modal title={`Requisition ${viewingRow.requisitionNumber || ""}`} onClose={() => setViewingRow(null)}>
           <div className="space-y-3 text-sm text-blue-800 dark:text-blue-100">
             <p>
+              <span className="font-medium text-blue-900 dark:text-blue-200">Created by:</span>{" "}
+              {procurementUserLabel(viewingRow.requestedBy)}
+              {viewingRow.createdAt ? (
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {" "}
+                  · {procurementDateTime(viewingRow.createdAt)}
+                </span>
+              ) : null}
+            </p>
+            <p>
               <span className="font-medium text-blue-900 dark:text-blue-200">Departments:</span>{" "}
               {viewingRow.title || "—"}
             </p>
@@ -1079,14 +1115,14 @@ export function RequisitionsView({ section }: Props) {
               <div>
                 <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">
                   {approvalChainKey(viewingRow) === "lab_then_finance"
-                    ? isLahorePrLocation(viewingRow.location)
+                    ? isLahorePr(viewingRow)
                       ? "Approval chain (department → lab → finance → Lahore final)"
                       : "Approval chain (department → lab → finance)"
                     : approvalChainKey(viewingRow) === "skip_finance"
-                      ? isLahorePrLocation(viewingRow.location)
+                      ? isLahorePr(viewingRow)
                         ? "Approval chain (department → Lahore final)"
                         : "Approval chain (department → boss)"
-                      : isLahorePrLocation(viewingRow.location)
+                      : isLahorePr(viewingRow)
                         ? "Approval chain (departments → finance → Lahore final)"
                         : "Approval chain (departments → finance → boss)"}
                 </p>
@@ -1108,18 +1144,18 @@ export function RequisitionsView({ section }: Props) {
                   !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "lab") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                       After department manager approves → Lab, then Finance
-                      {isLahorePrLocation(viewingRow.location)
+                      {isLahorePr(viewingRow)
                         ? ", then Lahore final (tahira@ressichem.com)."
                         : "."}
                     </p>
                   ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                       After Lab approves → Finance Manager
-                      {isLahorePrLocation(viewingRow.location)
+                      {isLahorePr(viewingRow)
                         ? ", then Lahore final (tahira@ressichem.com)."
                         : " for final approval."}
                     </p>
-                  ) : isLahorePrLocation(viewingRow.location) &&
+                  ) : isLahorePr(viewingRow) &&
                     !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "boss") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                       After Finance Manager approves → Lahore final (tahira@ressichem.com).
@@ -1128,20 +1164,20 @@ export function RequisitionsView({ section }: Props) {
                 ) : approvalChainKey(viewingRow) === "skip_finance" ? (
                   !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "boss") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                      {isLahorePrLocation(viewingRow.location)
+                      {isLahorePr(viewingRow)
                         ? "After department approve → Lahore final (tahira@ressichem.com)."
                         : "After department approve → Boss (Finance skipped for this requester)."}
                     </p>
                   ) : null
                 ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
                   <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                    {isLahorePrLocation(viewingRow.location)
+                    {isLahorePr(viewingRow)
                       ? "After all departments approve → Finance Manager, then Lahore final (tahira@ressichem.com)."
                       : "After all departments approve → Finance Manager, then Boss."}
                   </p>
                 ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "boss") ? (
                   <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                    {isLahorePrLocation(viewingRow.location)
+                    {isLahorePr(viewingRow)
                       ? "After Finance Manager approves → Lahore final (tahira@ressichem.com)."
                       : "After Finance Manager approves → Boss for final approval."}
                   </p>
