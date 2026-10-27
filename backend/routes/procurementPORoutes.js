@@ -13,7 +13,7 @@ router.get("/:id/print", permissionMiddleware(["procurement.po.read"]), ctrl.pri
 router.get("/:id", permissionMiddleware(["procurement.po.read"]), ctrl.getById);
 router.post("/", permissionMiddleware(["procurement.po.create"]), ctrl.create);
 router.put("/:id", permissionMiddleware(["procurement.po.update"]), ctrl.update);
-router.post("/:id/issue", permissionMiddleware(["procurement.po.approve"]), ctrl.issue);
+router.post("/:id/issue", permissionMiddleware(["procurement.po.update"]), ctrl.issue);
 router.post("/:id/receive", permissionMiddleware(["procurement.po.update"]), ctrl.receive);
 router.post("/:id/close", permissionMiddleware(["procurement.po.update"]), ctrl.close);
 router.post("/:id/cancel", permissionMiddleware(["procurement.po.update"]), ctrl.cancel);
