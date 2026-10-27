@@ -11,6 +11,7 @@ const {
   requesterApprovalChain,
   isLahorePr,
   lahoreFinalApproverEmail,
+  isCorporateStageApproverUser,
 } = require("./procurementPrRouting");
 
 async function resolveUserIdByEmail(company_id, email) {
@@ -392,8 +393,11 @@ function actionableApprovalRows(approvals = [], user, options = {}) {
   const { allowAdmin = true, ...stageOptions } = options;
   const stage = getActionableApprovalStage(approvals, stageOptions);
   if (stage === "done") return [];
+  // finance@/lab@/boss must only act on their own pending row — even if company admin
   const isAdmin =
-    allowAdmin && (isProcurementAdminUser(user) || hasPrFullAccess(user));
+    allowAdmin &&
+    !isCorporateStageApproverUser(user) &&
+    (isProcurementAdminUser(user) || hasPrFullAccess(user));
   const actorId = String(user?._id || "");
   return approvals.filter((a) => {
     if (approvalStage(a) !== stage) return false;
@@ -405,7 +409,8 @@ function actionableApprovalRows(approvals = [], user, options = {}) {
 
 function userHasApprovalRoleOnPr(user, pr) {
   if (!user?._id) return false;
-  if (isProcurementAdminUser(user) || hasPrFullAccess(user)) return true;
+  if (hasPrFullAccess(user)) return true;
+  if (isProcurementAdminUser(user) && !isCorporateStageApproverUser(user)) return true;
   const actorId = String(user._id);
   const approvals = pr.approvals || [];
   if (approvals.length) {

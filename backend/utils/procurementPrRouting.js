@@ -285,15 +285,12 @@ function isPrRequester(user, pr) {
 }
 
 /**
- * Finance / Lab / Boss (and Lahore final) need the company-wide PR list.
- * Department managers stay scoped to PRs they own or are assigned on —
- * otherwise Finance only sees rows already stamped with their user id
- * (often just 1–2 PRs) and misses the rest of the queue.
+ * Finance / Lab / Boss / Lahore-final accounts — even if marked company admin —
+ * must only see their own approval queue, not every PR in the company.
  */
-function isCorporatePipelineApproverUser(user) {
+function isCorporateStageApproverUser(user) {
   const email = userEmail(user);
   if (!email) return false;
-
   const known = new Set(
     [
       "finance@ressichem.com",
@@ -311,28 +308,37 @@ function isCorporatePipelineApproverUser(user) {
   return known.has(email);
 }
 
+/** Own PRs + currently assigned + rows where this user is (or was) an approver. */
+function scopeApproverPrQuery(query, user) {
+  query.$or = [
+    { requestedBy: user._id },
+    { assignedApprover: user._id },
+    { "approvals.approver": user._id },
+  ];
+  return query;
+}
+
 /**
  * Scope PR list/report queries by role:
- * - admin / PR full-access / corporate (finance/lab/boss): company-wide
- * - department approver: own + assigned for approval
- * - buyer (po.create): own + approved (for PO conversion)
- * - requester (create only): own only
- * - viewer / read-only: company-wide
+ * - PR full-access: company-wide
+ * - corporate stage accounts (finance/lab/boss): own queue only (even if admin)
+ * - other admins: company-wide
+ * - department approver: own + assigned / on approvals
+ * - buyer / requester / viewer: as before
  */
 function applyPurchaseRequisitionVisibility(query, user) {
-  if (!query || !user || isProcurementAdminUser(user) || hasPrFullAccess(user)) return query;
+  if (!query || !user) return query;
+  if (hasPrFullAccess(user)) return query;
 
-  if (isCorporatePipelineApproverUser(user)) {
-    return query;
+  // finance@ etc. must never fall through to company-wide admin visibility
+  if (isCorporateStageApproverUser(user)) {
+    return scopeApproverPrQuery(query, user);
   }
 
+  if (isProcurementAdminUser(user)) return query;
+
   if (canApproveRequisitions(user)) {
-    query.$or = [
-      { requestedBy: user._id },
-      { assignedApprover: user._id },
-      { "approvals.approver": user._id },
-    ];
-    return query;
+    return scopeApproverPrQuery(query, user);
   }
 
   if (canCreatePurchaseOrders(user)) {
@@ -369,7 +375,7 @@ module.exports = {
   resolveApprovalChainForSubmit,
   corporateStagesForOptions,
   isProcurementAdminUser,
-  isCorporatePipelineApproverUser,
+  isCorporateStageApproverUser,
   hasPrFullAccess,
   canSoftDeleteProcurement,
   canApproveRequisitions,

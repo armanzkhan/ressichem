@@ -238,7 +238,7 @@ export function RequisitionsView({ section }: Props) {
     return Boolean(ownerId && String(ownerId) === String(currentUserId));
   };
 
-  /** True when this user has a pending/held approval row (e.g. department-mapped R&D/QC approver). */
+  /** True when this user is the pending/held approver on the current open PR (their turn only). */
   const isPendingApproverOnPr = (row: PurchaseDocument) => {
     if (!currentUserId) return false;
     const open = ["submitted", "held", "partially_approved"].includes(String(row.status || ""));
@@ -258,9 +258,13 @@ export function RequisitionsView({ section }: Props) {
     });
   };
 
-  /** Role-based approvers OR assigned department approvers (even if role is only "requester"). */
+  /**
+   * Approve/Hold/Reject only when it is this user's turn (pending/held on the PR).
+   * Admin / Approver role alone must NOT unlock actions on other assignees
+   * (e.g. finance@ must not Approve Tahira's or Moiz's queue).
+   */
   const canActAsApproverOnPr = (row: PurchaseDocument) =>
-    prFullAccess || canApprove || isPendingApproverOnPr(row);
+    prFullAccess || isPendingApproverOnPr(row);
 
   const canConvertAnyApprovedPo = accessLevel === "buyer" || accessLevel === "admin" || prFullAccess;
   /**
