@@ -509,6 +509,7 @@ export function StatusBadge({ status, label: labelOverride }: { status: string; 
     partially_approved: "bg-teal-50 text-teal-800 dark:bg-teal-950 dark:text-teal-200",
     approved: "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-200",
     rejected: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-200",
+    cancelled: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
     held: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
     cancelled: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
     issued: "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200",
@@ -530,6 +531,7 @@ export function StatusBadge({ status, label: labelOverride }: { status: string; 
   };
   const labels: Record<string, string> = {
     held: "on hold",
+    cancelled: "not reached",
     awaiting_po: "awaiting PO",
     po_draft: "PO draft",
     issued: "awaiting receipt",

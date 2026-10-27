@@ -11,7 +11,6 @@ const {
   requesterApprovalChain,
   isLahorePr,
   lahoreFinalApproverEmail,
-  isCorporateStageApproverUser,
 } = require("./procurementPrRouting");
 
 async function resolveUserIdByEmail(company_id, email) {
@@ -30,60 +29,94 @@ async function resolveUserIdByEmail(company_id, email) {
 function approvalOptionsFromPr(pr, requesterEmail) {
   const chainKey = String(pr?.approvalChain || "").toLowerCase();
   const chain = requesterApprovalChain(requesterEmail);
-  const lahore = isLahorePr(pr);
-  const lahoreBoss = lahore ? { bossApproverEmail: lahoreFinalApproverEmail() } : {};
+  // Sticky flag from submit wins; also re-detect from location/title/dept.
+  const lahore = Boolean(pr?.lahoreFinalApproval) || isLahorePr(pr);
+  const tahira = lahoreFinalApproverEmail();
+  const lahoreOpts = lahore
+    ? {
+        lahoreFinalApproval: true,
+        financeApproverEmail: tahira,
+        // skip-finance Lahore still uses boss stage with Tahira
+        bossApproverEmail: tahira,
+      }
+    : {};
 
   if (chainKey === "lab_then_finance" || pr?.labThenFinanceApproval) {
     return {
       labThenFinance: true,
       skipFinance: false,
-      ...(lahore ? { lahoreFinalBoss: true, ...lahoreBoss } : {}),
+      ...(lahore ? lahoreOpts : {}),
     };
   }
   if (chainKey === "skip_finance" || pr?.skipFinanceApproval || chain?.skipFinance) {
     return {
       skipFinance: true,
-      bossApproverEmail: lahoreBoss.bossApproverEmail || chain?.bossApproverEmail || undefined,
+      bossApproverEmail: lahoreOpts.bossApproverEmail || chain?.bossApproverEmail || undefined,
+      ...(lahore ? { lahoreFinalApproval: true, financeApproverEmail: tahira } : {}),
     };
   }
-  return { ...lahoreBoss };
+  return { ...lahoreOpts };
 }
 
 /**
- * If a Lahore PR already has a pending Boss row on the wrong user (e.g. default Boss
- * zulfiqar@), reassign it to tahira@ so in-flight PRs pick up the Lahore final rule.
+ * Lahore: pending finance must be tahira@. Cancel obsolete pending boss rows
+ * (old "Lahore final" step — Tahira is finance now, not a second final).
  */
 async function ensureLahoreBossApprover(company_id, approvals = [], options = {}) {
-  const targetEmail = normalizeEmail(options.bossApproverEmail);
-  if (!targetEmail || targetEmail !== lahoreFinalApproverEmail()) {
+  const forceLahore =
+    options.lahoreFinalApproval ||
+    options.lahoreFinalBoss ||
+    normalizeEmail(options.financeApproverEmail) === lahoreFinalApproverEmail() ||
+    normalizeEmail(options.bossApproverEmail) === lahoreFinalApproverEmail();
+  const targetEmail = forceLahore ? lahoreFinalApproverEmail() : "";
+  if (!targetEmail) {
     return { approvals, reassigned: false };
   }
 
   const next = approvals.map((a) =>
     typeof a?.toObject === "function" ? a.toObject() : { ...a }
   );
-  const bossRow = next.find(
-    (a) =>
-      approvalStage(a) === "boss" &&
-      (a.status === "pending" || a.status === "held")
-  );
-  if (!bossRow) return { approvals: next, reassigned: false };
-
+  let reassigned = false;
+  const now = new Date();
   const userId = await resolveUserIdByEmail(company_id, targetEmail);
   if (!userId) return { approvals: next, reassigned: false };
 
-  const currentId = approvalApproverId(bossRow);
-  if (currentId === String(userId)) {
-    if (bossRow.department !== "Lahore Final Approver") {
-      bossRow.department = "Lahore Final Approver";
-      return { approvals: next, reassigned: true };
+  for (const row of next) {
+    if (row.status !== "pending" && row.status !== "held") continue;
+
+    // Obsolete second "final" after finance — cancel on Lahore (unless skip_finance).
+    if (approvalStage(row) === "boss" && !options.skipFinance) {
+      row.status = "cancelled";
+      row.actedAt = now;
+      row.reason = "Lahore finance is Tahira — no separate final step";
+      reassigned = true;
+      continue;
     }
-    return { approvals: next, reassigned: false };
+
+    if (approvalStage(row) === "finance") {
+      if (approvalApproverId(row) !== String(userId)) {
+        row.approver = userId;
+        reassigned = true;
+      }
+      if (row.department !== "Finance Manager (Lahore)") {
+        row.department = "Finance Manager (Lahore)";
+        reassigned = true;
+      }
+    }
+
+    if (approvalStage(row) === "boss" && options.skipFinance) {
+      if (approvalApproverId(row) !== String(userId)) {
+        row.approver = userId;
+        reassigned = true;
+      }
+      if (row.department !== "Lahore Final Approver") {
+        row.department = "Lahore Final Approver";
+        reassigned = true;
+      }
+    }
   }
 
-  bossRow.approver = userId;
-  bossRow.department = "Lahore Final Approver";
-  return { approvals: next, reassigned: true };
+  return { approvals: next, reassigned };
 }
 
 async function resolveRequesterEmail(pr) {
@@ -134,7 +167,11 @@ function departmentsTitleLabel(departments = []) {
 }
 
 async function resolveApproverUserId(company_id, department) {
-  const email = await resolveApproverEmail(company_id, department);
+  let email = await resolveApproverEmail(company_id, department);
+  // Tahira is Lahore final only — never department-stage manager (PR-77 style mis-mapping).
+  if (email && normalizeEmail(email) === lahoreFinalApproverEmail()) {
+    email = null;
+  }
   if (!email) return { department, email: null, userId: null };
   const user = await User.findOne({
     company_id,
@@ -159,6 +196,10 @@ async function ensureDepartmentMappedToUser(company_id, department, user) {
   const email = String(user?.email || "").trim().toLowerCase();
   if (!name || !email || !email.includes("@")) {
     return { created: false, department: name, reason: "missing_department_or_email" };
+  }
+  // Do not auto-map Lahore final (tahira@) as a department manager.
+  if (normalizeEmail(email) === lahoreFinalApproverEmail()) {
+    return { created: false, department: name, reason: "lahore_final_not_department" };
   }
 
   const departmentKey = normalizeDepartment(name);
@@ -266,27 +307,49 @@ function approvalApproverId(entry) {
 }
 
 async function resolveCorporateApproverUserId(company_id, stageDef, options = {}) {
-  const overrideEmail =
-    stageDef.stage === "boss" ? normalizeEmail(options.bossApproverEmail) : "";
+  const lahoreFinal = lahoreFinalApproverEmail();
+  const lahore =
+    options.lahoreFinalApproval ||
+    options.lahoreFinalBoss ||
+    normalizeEmail(options.financeApproverEmail) === lahoreFinal;
+
+  // Lahore finance is always tahira@ (not Hub finance@).
+  const forceLahoreFinance = stageDef.stage === "finance" && lahore;
+  // Skip-finance Lahore final / fixed finals — never DB Boss mapping.
+  const forceLahoreBoss =
+    stageDef.stage === "boss" &&
+    (lahore ||
+      normalizeEmail(options.bossApproverEmail) === lahoreFinal ||
+      normalizeEmail(stageDef.fixedEmail) === lahoreFinal);
+
+  const overrideEmail = forceLahoreFinance
+    ? lahoreFinal
+    : forceLahoreBoss
+      ? lahoreFinal
+      : stageDef.stage === "boss"
+        ? normalizeEmail(options.bossApproverEmail)
+        : normalizeEmail(options.financeApproverEmail);
   const envEmail = String(process.env[stageDef.envKey] || "")
     .trim()
     .toLowerCase();
   const fixedEmail = normalizeEmail(stageDef.fixedEmail);
-  const email =
-    overrideEmail ||
-    fixedEmail ||
-    envEmail ||
-    (await resolveApproverEmail(company_id, stageDef.department)) ||
-    null;
+  let email = overrideEmail || fixedEmail || envEmail || null;
+
+  // Hub finance/lab may use PR Approvers mapping; boss/Lahore finance must not.
+  if (!email && stageDef.stage !== "boss" && !forceLahoreFinance) {
+    email = (await resolveApproverEmail(company_id, stageDef.department)) || null;
+  }
+
   if (!email) {
     return { ...stageDef, email: null, userId: null };
   }
   const userId = await resolveUserIdByEmail(company_id, email);
-  const lahoreFinal = lahoreFinalApproverEmail();
-  const department =
-    stageDef.stage === "boss" && email === lahoreFinal
-      ? "Lahore Final Approver"
-      : stageDef.department;
+  let department = stageDef.department;
+  if (stageDef.stage === "finance" && email === lahoreFinal) {
+    department = "Finance Manager (Lahore)";
+  } else if (stageDef.stage === "boss" && email === lahoreFinal) {
+    department = "Lahore Final Approver";
+  }
   return {
     ...stageDef,
     department,
@@ -393,11 +456,8 @@ function actionableApprovalRows(approvals = [], user, options = {}) {
   const { allowAdmin = true, ...stageOptions } = options;
   const stage = getActionableApprovalStage(approvals, stageOptions);
   if (stage === "done") return [];
-  // finance@/lab@/boss must only act on their own pending row — even if company admin
   const isAdmin =
-    allowAdmin &&
-    !isCorporateStageApproverUser(user) &&
-    (isProcurementAdminUser(user) || hasPrFullAccess(user));
+    allowAdmin && (isProcurementAdminUser(user) || hasPrFullAccess(user));
   const actorId = String(user?._id || "");
   return approvals.filter((a) => {
     if (approvalStage(a) !== stage) return false;
@@ -409,8 +469,7 @@ function actionableApprovalRows(approvals = [], user, options = {}) {
 
 function userHasApprovalRoleOnPr(user, pr) {
   if (!user?._id) return false;
-  if (hasPrFullAccess(user)) return true;
-  if (isProcurementAdminUser(user) && !isCorporateStageApproverUser(user)) return true;
+  if (isProcurementAdminUser(user) || hasPrFullAccess(user)) return true;
   const actorId = String(user._id);
   const approvals = pr.approvals || [];
   if (approvals.length) {
@@ -447,15 +506,46 @@ function deriveStatusAfterApprovals(approvals = [], options = {}) {
     return "submitted";
   }
   const stages = corporateStagesForOptions(options);
-  const corporateDone = stages.every((stageDef) => {
-    const row = approvals.find((a) => approvalStage(a) === stageDef.stage);
-    return row && row.status === "approved";
-  });
-  if (corporateDone && approvals.every((a) => a.status === "approved")) {
-    return "approved";
-  }
+  const corporateDone =
+    stages.length === 0 ||
+    stages.every((stageDef) => {
+      const row = approvals.find((a) => approvalStage(a) === stageDef.stage);
+      return row && row.status === "approved";
+    });
+  // Required chain complete → approved (ignore obsolete pending Boss rows on Hub PRs).
+  if (corporateDone) return "approved";
   if (approvals.some((a) => a.status === "approved")) return "partially_approved";
   return "submitted";
+}
+
+/**
+ * Cancel leftover pending Boss rows except skip-finance finals (Siraj → Khuzema / Lahore).
+ * Hub and normal Lahore end at Finance (Lahore finance = tahira@).
+ */
+function stripObsoleteBossApprovals(pr, approvals = [], options = {}) {
+  if (options.skipFinance) return { approvals, changed: false };
+
+  const now = new Date();
+  let changed = false;
+  const next = approvals.map((a) => {
+    const row = typeof a?.toObject === "function" ? a.toObject() : { ...a };
+    if (
+      approvalStage(row) === "boss" &&
+      (row.status === "pending" || row.status === "held")
+    ) {
+      changed = true;
+      return {
+        ...row,
+        status: "cancelled",
+        actedAt: now,
+        reason: isLahorePr(pr) || options.lahoreFinalApproval
+          ? "Lahore ends at Finance (Tahira) — no separate Boss step"
+          : "Boss stage removed — Hub ends at Finance",
+      };
+    }
+    return row;
+  });
+  return { approvals: next, changed };
 }
 
 function firstPendingApproverId(approvals = [], options = {}) {
@@ -502,6 +592,7 @@ module.exports = {
   approvalOptionsFromPr,
   approvalOptionsForPrDoc,
   ensureLahoreBossApprover,
+  stripObsoleteBossApprovals,
   resolveRequesterEmail,
   CORPORATE_APPROVAL_STAGES,
 };

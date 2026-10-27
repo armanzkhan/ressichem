@@ -13,6 +13,12 @@ const {
   resolveApprovalChainForSubmit,
   hasPrFullAccess,
   normalizeEmail,
+  isCorporatePipelineApproverUser,
+  corporateApproverStageForUser,
+  isLahorePr,
+  isLahorePlantScopedUser,
+  ensureUserDepartment,
+  lahoreFinalApproverEmail,
 } = require("../utils/procurementPrRouting");
 const {
   collectDepartmentsFromPr,
@@ -33,6 +39,8 @@ const {
   applyRequesterDepartmentApproverOverride,
   approvalOptionsForPrDoc,
   ensureLahoreBossApprover,
+  stripObsoleteBossApprovals,
+  approvalOptionsFromPr,
 } = require("../utils/procurementPrApprovals");
 const procurementPrNotificationService = require("../services/procurementPrNotificationService");
 const PurchaseOrder = require("../models/PurchaseOrder");
@@ -95,6 +103,7 @@ function syncTitleFromItems(items, fallbackTitle) {
 
 exports.list = async (req, res) => {
   try {
+    await ensureUserDepartment(req.user);
     const company_id = getCompanyId(req);
     const { status, purchaseType, location, followUpStatus, fulfillmentStatus } = req.query;
     const query = { company_id, isActive: { $ne: false } };
@@ -109,28 +118,89 @@ exports.list = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    // Repair in-flight Lahore PRs that still have default Boss (e.g. zulfiqar@) pending.
+    // Finance / Lab / Lahore final: also include open PRs whose current stage is theirs.
+    const corporateStage =
+      !hasPrFullAccess(req.user) && isCorporatePipelineApproverUser(req.user)
+        ? corporateApproverStageForUser(req.user)
+        : null;
+    if (corporateStage) {
+      const openQuery = {
+        company_id,
+        isActive: { $ne: false },
+        status: { $in: ["submitted", "held", "partially_approved"] },
+      };
+      if (purchaseType) openQuery.purchaseType = purchaseType;
+      const openRows = await populateRequisitionAudit(PurchaseRequisition.find(openQuery)).lean();
+      const seen = new Set(data.map((r) => String(r._id)));
+      for (const row of openRows) {
+        if (seen.has(String(row._id))) continue;
+        const opts = approvalOptionsFromPr(row);
+        if (getActionableApprovalStage(row.approvals || [], opts) !== corporateStage) continue;
+        // tahira@: Lahore finance queue only (not Hub finance@ PRs)
+        if (
+          corporateStage === "finance" &&
+          normalizeEmail(req.user?.email) === lahoreFinalApproverEmail()
+        ) {
+          const lahore =
+            Boolean(opts.lahoreFinalApproval || opts.lahoreFinalBoss) || isLahorePr(row);
+          if (!lahore) continue;
+        }
+        data.push(row);
+        seen.add(String(row._id));
+      }
+      data.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    }
+
+    // Repair: Lahore → tahira@; Hub → cancel obsolete Boss (zulfiqar@) rows.
     let repairedAny = false;
     for (const row of data) {
       const open = ["submitted", "held", "partially_approved"].includes(String(row.status || ""));
       if (!open || !(row.approvals || []).length) continue;
       try {
+        const hadSticky = Boolean(row.lahoreFinalApproval);
+        const isLahore = hadSticky || isLahorePr(row);
+        if (isLahore) row.lahoreFinalApproval = true;
         const stageOpts = await approvalOptionsForPrDoc(row);
-        if (!stageOpts.bossApproverEmail) continue;
-        const repaired = await ensureLahoreBossApprover(company_id, row.approvals, stageOpts);
-        if (!repaired.reassigned) continue;
+        let approvals = row.approvals;
+        let changed = false;
+
+        if (isLahore) {
+          const repaired = await ensureLahoreBossApprover(company_id, approvals, stageOpts);
+          approvals = repaired.approvals;
+          changed = changed || repaired.reassigned;
+        } else {
+          const stripped = stripObsoleteBossApprovals(row, approvals, stageOpts);
+          approvals = stripped.approvals;
+          changed = changed || stripped.changed;
+        }
+
+        const needsSticky = isLahore && !hadSticky;
+        if (!changed && !needsSticky) continue;
+
+        const nextStatus = deriveStatusAfterApprovals(approvals, stageOpts);
         const nextAssigned =
-          firstPendingApproverId(repaired.approvals, stageOpts) || row.assignedApprover;
-        await PurchaseRequisition.updateOne(
-          { _id: row._id, company_id },
-          {
-            approvals: repaired.approvals,
-            assignedApprover: nextAssigned,
-          }
-        );
+          firstPendingApproverId(approvals, stageOpts) ||
+          (nextStatus === "approved" ? undefined : row.assignedApprover);
+        const patch = {
+          ...(changed
+            ? {
+                approvals,
+                assignedApprover: nextAssigned,
+              }
+            : {}),
+          ...(needsSticky || isLahore ? { lahoreFinalApproval: true } : {}),
+        };
+        if (changed && nextStatus === "approved" && row.status !== "approved") {
+          patch.status = "approved";
+          patch.approvedAt = new Date();
+        } else if (changed && nextStatus !== row.status && nextStatus !== "approved") {
+          patch.status = nextStatus;
+        }
+
+        await PurchaseRequisition.updateOne({ _id: row._id, company_id }, patch);
         repairedAny = true;
       } catch (repairErr) {
-        console.error("Lahore boss repair failed:", repairErr.message);
+        console.error("Boss/Lahore approval repair failed:", repairErr.message);
       }
     }
     if (repairedAny) {
@@ -169,7 +239,19 @@ exports.list = async (req, res) => {
 function userCanViewPr(req, pr) {
   if (isProcurementAdminUser(req.user) || hasPrFullAccess(req.user)) return true;
   if (isPrRequester(req.user, pr)) return true;
-  if (canApproveRequisitions(req.user)) return userHasApprovalRoleOnPr(req.user, pr);
+  if (canApproveRequisitions(req.user) || isCorporatePipelineApproverUser(req.user)) {
+    if (userHasApprovalRoleOnPr(req.user, pr)) return true;
+    const stage = corporateApproverStageForUser(req.user);
+    if (stage) {
+      const open = ["submitted", "held", "partially_approved"].includes(
+        String(pr.status || "").toLowerCase()
+      );
+      if (open) {
+        const opts = approvalOptionsFromPr(pr);
+        if (getActionableApprovalStage(pr.approvals || [], opts) === stage) return true;
+      }
+    }
+  }
   if (canCreatePurchaseOrders(req.user) && String(pr.status || "").toLowerCase() === "approved") {
     return true;
   }
@@ -214,12 +296,16 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
+    await ensureUserDepartment(req.user);
     const company_id = getCompanyId(req);
     const body = req.body || {};
     const requisitionNumber = await nextDocumentNumber(PurchaseRequisition, company_id, "PR");
     const { items, subtotal } = computeLineTotals(body.items, body.exchangeRate || 1);
     const taxAmount = Number(body.taxAmount) || 0;
     const title = syncTitleFromItems(items, body.title);
+    const lahoreBuyer = isLahorePlantScopedUser(req.user) && !isProcurementAdminUser(req.user);
+    let location = String(body.location || "").trim();
+    if (lahoreBuyer && !location) location = "Lahore";
     const data = await PurchaseRequisition.create({
       company_id,
       requisitionNumber,
@@ -234,7 +320,9 @@ exports.create = async (req, res) => {
       exchangeRate: body.exchangeRate || 1,
       notes: body.notes || "",
       supplier: body.supplier || undefined,
-      location: String(body.location || "").trim(),
+      location,
+      // Sticky Lahore for plant-scoped buyers (even before submit)
+      ...(lahoreBuyer ? { lahoreFinalApproval: true } : {}),
       requestedBy: req.user?._id,
       approvals: [],
     });
@@ -442,19 +530,19 @@ exports.submit = async (req, res) => {
 
     const corporateMissing = await assertCorporateApproversConfigured(company_id, stageOpts);
     if (corporateMissing.length) {
-      const lahoreFinal = Boolean(stageOpts?.lahoreFinalBoss || stageOpts?.bossApproverEmail);
+      const lahoreFinal = Boolean(stageOpts?.lahoreFinalApproval || stageOpts?.financeApproverEmail);
       const hint =
         resolvedChain.key === "lab_then_finance"
           ? lahoreFinal
-            ? "Lab (lab@ressichem.com), Finance Manager, and Lahore final approver (tahira@ressichem.com)"
+            ? "Lab (lab@ressichem.com) and Lahore Finance (tahira@ressichem.com)"
             : "Lab (lab@ressichem.com) and Finance Manager"
           : resolvedChain.key === "skip_finance"
             ? lahoreFinal
-              ? "Lahore final approver (tahira@ressichem.com)"
-              : "Boss"
+              ? "Lahore final (tahira@ressichem.com)"
+              : "Final Approver (configured email)"
             : lahoreFinal
-              ? "Finance Manager and Lahore final approver (tahira@ressichem.com)"
-              : "Finance Manager and Boss";
+              ? "Lahore Finance (tahira@ressichem.com)"
+              : "Finance Manager";
       return res.status(400).json({
         success: false,
         message: `Corporate approvers not configured: ${corporateMissing
@@ -503,6 +591,12 @@ exports.submit = async (req, res) => {
           approvals,
           approvalChain: resolvedChain.key,
           skipFinanceApproval: resolvedChain.key === "skip_finance",
+          // Sticky: Lahore final stays tahira@ even if title/location is edited later
+          lahoreFinalApproval: Boolean(
+            isLahorePr(existing, departments) ||
+              stageOpts?.lahoreFinalApproval ||
+              normalizeEmail(stageOpts?.financeApproverEmail) === lahoreFinalApproverEmail()
+          ),
           slaDueAt: computeSlaDueAt(new Date()),
           slaReminderSentAt: null,
           slaClosedByDeadline: false,
@@ -515,7 +609,7 @@ exports.submit = async (req, res) => {
           heldBy: undefined,
           heldAt: undefined,
         },
-        { new: true }
+      { new: true }
       )
     );
     if (!data) {
@@ -590,11 +684,18 @@ exports.approve = async (req, res) => {
 
     const stageOpts = await approvalOptionsForPrDoc(existing);
 
-    // Lahore PRs tagged via title/dept (e.g. "Administration (Lahore)") must end with tahira@,
-    // even if a pending Boss row was already created for the default Boss mapping.
+    // Lahore → tahira@; Hub → drop obsolete Boss (zulfiqar@) rows.
     {
-      const repaired = await ensureLahoreBossApprover(company_id, approvals, stageOpts);
-      approvals = repaired.approvals;
+      const isLahore =
+        Boolean(stageOpts.lahoreFinalBoss || stageOpts.lahoreFinalApproval) ||
+        isLahorePr(existing);
+      if (isLahore) {
+        const repaired = await ensureLahoreBossApprover(company_id, approvals, stageOpts);
+        approvals = repaired.approvals;
+      } else {
+        const stripped = stripObsoleteBossApprovals(existing, approvals, stageOpts);
+        approvals = stripped.approvals;
+      }
     }
 
     // Only the current stage can be approved (departments → [finance] → boss).
@@ -607,10 +708,11 @@ exports.approve = async (req, res) => {
       });
     }
 
+    const remarks = String(req.body?.remarks || req.body?.reason || "").trim();
     for (const row of actionable) {
       row.status = "approved";
       row.actedAt = new Date();
-      row.reason = "";
+      row.reason = remarks;
     }
 
     let newlyAdded = [];
@@ -692,15 +794,52 @@ exports.reject = async (req, res) => {
       return res.status(403).json({ success: false, message: "This PR is assigned to another approver" });
     }
 
-    // One reject rejects the whole PR.
-    const approvals = (existing.approvals || []).map((a) => {
-      const row = typeof a.toObject === "function" ? a.toObject() : { ...a };
-      if (row.status === "pending" || row.status === "held") {
-        row.status = "rejected";
-        row.actedAt = new Date();
-        row.reason = reason;
+    // Only the acting approver's current-stage rows are "rejected".
+    // Other pending/held stages are cancelled — otherwise History shows
+    // e.g. Madam Tahira as rejector when finance@ actually rejected.
+    const stageOpts = await approvalOptionsForPrDoc(existing);
+    let approvals = (existing.approvals || []).map((a) =>
+      typeof a.toObject === "function" ? a.toObject() : { ...a }
+    );
+    const actionable = actionableApprovalRows(approvals, req.user, stageOpts);
+
+    if (!actionable.length && !fullAccess) {
+      return res.status(403).json({
+        success: false,
+        message: "You have no pending approval on the current stage of this PR.",
+      });
+    }
+
+    const now = new Date();
+    const rowKey = (row) =>
+      `${approvalStage(row)}:${approvalApproverId(row)}:${String(row.departmentKey || row.department || "")}`;
+    const actionableKeys = new Set(actionable.map(rowKey));
+    const currentStage = getActionableApprovalStage(approvals, stageOpts);
+
+    approvals = approvals.map((row) => {
+      if (row.status !== "pending" && row.status !== "held") return row;
+
+      const isActorsRow = actionableKeys.has(rowKey(row));
+      const isAdminRejectingCurrentStage =
+        fullAccess && !actionable.length && approvalStage(row) === currentStage;
+
+      if (isActorsRow || isAdminRejectingCurrentStage) {
+        return {
+          ...row,
+          status: "rejected",
+          actedAt: now,
+          reason,
+          // Ensure History attributes the reject step to the logged-in user
+          approver: req.user?._id || row.approver,
+        };
       }
-      return row;
+
+      return {
+        ...row,
+        status: "cancelled",
+        actedAt: now,
+        reason: "Not reached — PR rejected",
+      };
     });
 
     const data = await populateRequisitionAudit(
@@ -716,8 +855,9 @@ exports.reject = async (req, res) => {
           status: "rejected",
           approvals,
           rejectedBy: req.user?._id,
-          rejectedAt: new Date(),
+          rejectedAt: now,
           rejectionReason: reason,
+          assignedApprover: req.user?._id,
           holdReason: "",
           heldBy: undefined,
           heldAt: undefined,
@@ -840,7 +980,7 @@ exports.releaseHold = async (req, res) => {
           assignedApprover:
             firstPendingApproverId(approvals, stageOpts) || existing.assignedApprover,
         },
-        { new: true }
+      { new: true }
       )
     );
     if (!data) return res.status(400).json({ success: false, message: "Requisition not found or not on hold" });
@@ -869,13 +1009,20 @@ exports.convertToPO = async (req, res) => {
       });
     }
 
-    // Buyers (po.create) may convert any approved PR they can see; requesters only their own
+    // Buyers (po.create) / admins only — requesters cannot convert PRs to PO
     const permKeys = (req.user?.permissions || []).map((p) => (typeof p === "string" ? p : p?.key || ""));
     const canBuyerConvert = permKeys.includes("procurement.po.create") || isProcurementAdminUser(req.user);
-    if (!canBuyerConvert && !isPrRequester(req.user, pr)) {
+    if (!canBuyerConvert) {
       return res.status(403).json({
         success: false,
-        message: "You can only create a PO from your own approved purchase requisitions",
+        message: "Only buyers can create a purchase order from an approved requisition",
+      });
+    }
+
+    if (isLahorePlantScopedUser(req.user) && !isLahorePr(pr) && !pr.lahoreFinalApproval) {
+      return res.status(403).json({
+        success: false,
+        message: "This buyer can only create purchase orders for Lahore requisitions",
       });
     }
 
@@ -928,16 +1075,22 @@ exports.convertToPO = async (req, res) => {
       .lean();
     const nameById = new Map(supplierDocs.map((s) => [String(s._id), s.name || ""]));
 
-    const items = rawItems.map(({ plain, lineSupplier }) => {
+    const lineUnitPrices = Array.isArray(req.body?.lineUnitPrices) ? req.body.lineUnitPrices : [];
+    const items = rawItems.map(({ plain, lineSupplier }, index) => {
       const sid = String(lineSupplier);
+      const fromBody = Number(lineUnitPrices[index]);
+      const unitPrice =
+        Number.isFinite(fromBody) && fromBody > 0
+          ? fromBody
+          : Number(plain.unitPrice) || 0;
+      const qty = Number(plain.quantity) || 0;
       return {
         ...plain,
         supplier: sid,
         supplierName: plain.supplierName || nameById.get(sid) || "",
         receivedQuantity: 0,
-        unitPrice: Number(plain.unitPrice) || 0,
-        lineTotal:
-          Number(plain.lineTotal) || (Number(plain.quantity) || 0) * (Number(plain.unitPrice) || 0),
+        unitPrice,
+        lineTotal: Math.round(qty * unitPrice * 100) / 100,
       };
     });
 
@@ -956,6 +1109,10 @@ exports.convertToPO = async (req, res) => {
     });
 
     const poNumber = await nextDocumentNumber(PurchaseOrder, company_id, "PO");
+    const lahorePo =
+      Boolean(pr.lahoreFinalApproval) ||
+      isLahorePr(pr) ||
+      isLahorePlantScopedUser(req.user);
     const po = await PurchaseOrder.create({
       ...commercial,
       company_id,
@@ -966,6 +1123,7 @@ exports.convertToPO = async (req, res) => {
       status: "draft",
       documentDate: new Date(),
       createdBy: req.user?._id,
+      ...(lahorePo ? { plantScope: "lahore" } : {}),
     });
 
     await persistSupplierBanking(normalizeSupplierIds(commercial), commercial.supplierBanking, req.user?._id);

@@ -84,7 +84,7 @@ function approvalStageLabel(stage?: string) {
   const s = String(stage || "department").toLowerCase();
   if (s === "lab") return "Lab";
   if (s === "finance") return "Finance";
-  if (s === "boss") return "Boss";
+  if (s === "boss") return "Final";
   return "Dept";
 }
 
@@ -123,16 +123,51 @@ function approvalChainKey(row: PurchaseDocument) {
   return "standard";
 }
 
-/** Lahore may be on location, title, or department (e.g. "Administration (Lahore)"). */
+/** Lahore may be sticky flag, location, title, or department (e.g. "Administration (Lahore)"). */
 function isLahorePr(row?: {
   location?: string;
   title?: string;
+  lahoreFinalApproval?: boolean;
   items?: { department?: string }[];
 }) {
-  const hasLahore = (value?: string) => /\blahore\b/i.test(String(value || "").trim());
+  const hasLahore = (value?: string) => {
+    const s = String(value || "").trim();
+    return /\blahore\b/i.test(s) || /\blhr\b/i.test(s);
+  };
   if (!row) return false;
+  if (row.lahoreFinalApproval) return true;
   if (hasLahore(row.location) || hasLahore(row.title)) return true;
   return (row.items || []).some((line) => hasLahore(line.department));
+}
+
+/** Corporate steps that unlock after departments (shown even before rows exist). */
+function plannedCorporateStages(row: PurchaseDocument): Array<{
+  stage: string;
+  department: string;
+  email: string;
+}> {
+  const chain = approvalChainKey(row);
+  const lahore = isLahorePr(row);
+  const finance = lahore
+    ? {
+        stage: "finance",
+        department: "Finance Manager (Lahore)",
+        email: "tahira@ressichem.com",
+      }
+    : {
+        stage: "finance",
+        department: "Finance Manager",
+        email: "finance@ressichem.com",
+      };
+  if (chain === "lab_then_finance") {
+    return [{ stage: "lab", department: "Lab", email: "lab@ressichem.com" }, finance];
+  }
+  if (chain === "skip_finance") {
+    return lahore
+      ? [{ stage: "boss", department: "Lahore Final Approver", email: "tahira@ressichem.com" }]
+      : [{ stage: "boss", department: "Final Approver", email: "khuzema@ressichem.com" }];
+  }
+  return [finance];
 }
 
 function approvalProgressLabel(row: PurchaseDocument) {
@@ -143,25 +178,12 @@ function approvalProgressLabel(row: PurchaseDocument) {
     return "—";
   }
   const done = approvals.filter((a) => a.status === "approved").length;
-  const chain = approvalChainKey(row);
-  const lahore = isLahorePr(row);
-  const hasLab = approvals.some((a) => String(a.stage || "").toLowerCase() === "lab");
-  const hasFinance = approvals.some((a) => String(a.stage || "").toLowerCase() === "finance");
-  const hasBoss = approvals.some((a) => String(a.stage || "").toLowerCase() === "boss");
-  let expected = approvals.length;
-  if (chain === "lab_then_finance") {
-    // Non-Lahore: lab + finance. Lahore: lab + finance + final (Tahira as Boss).
-    const remaining = [!hasLab, !hasFinance, lahore && !hasBoss].filter(Boolean).length;
-    expected = approvals.length + remaining;
-  } else if (chain === "skip_finance") {
-    if (!hasBoss) expected = approvals.length + 1;
-  } else if (hasFinance && hasBoss) {
-    expected = approvals.length;
-  } else if (hasFinance) {
-    expected = approvals.length + 1;
-  } else {
-    expected = approvals.length + 2;
-  }
+  const planned = plannedCorporateStages(row);
+  const present = new Set(
+    approvals.map((a) => String(a.stage || "department").toLowerCase())
+  );
+  const missing = planned.filter((p) => !present.has(p.stage)).length;
+  const expected = approvals.length + missing;
   return `${done}/${expected}`;
 }
 
@@ -197,7 +219,13 @@ export function RequisitionsView({ section }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingMeta, setEditingMeta] = useState<{
+    requisitionNumber: string;
+    createdBy: string;
+  } | null>(null);
   const [convertPr, setConvertPr] = useState<PurchaseDocument | null>(null);
+  /** Per PR-line unit price at Create PO time (keyed by line index). */
+  const [convertLinePrices, setConvertLinePrices] = useState<Record<number, string>>({});
   /** Per PR-line vendor chosen at Create PO time (keyed by line index). */
   const [convertLineVendors, setConvertLineVendors] = useState<Record<number, string>>({});
   const [converting, setConverting] = useState(false);
@@ -214,11 +242,6 @@ export function RequisitionsView({ section }: Props) {
   }, []);
 
   const prFullAccess = typeof window !== "undefined" ? hasPrFullAccess() : false;
-  const canApprove =
-    prFullAccess ||
-    accessLevel === "approver" ||
-    accessLevel === "creator_approver" ||
-    accessLevel === "admin";
   const canBulkImport =
     accessLevel !== "user" &&
     accessLevel !== "viewer" &&
@@ -238,17 +261,19 @@ export function RequisitionsView({ section }: Props) {
     return Boolean(ownerId && String(ownerId) === String(currentUserId));
   };
 
-  /** True when this user is the pending/held approver on the current open PR (their turn only). */
+  /**
+   * True when this user is the current assignee (Assigned column), or — if Assigned
+   * is empty — has a pending/held approval row. Prevents Approve showing on Moiz's
+   * turn just because an older pending row exists for this user.
+   */
   const isPendingApproverOnPr = (row: PurchaseDocument) => {
     if (!currentUserId) return false;
     const open = ["submitted", "held", "partially_approved"].includes(String(row.status || ""));
     if (!open) return false;
+    const assigned =
+      typeof row.assignedApprover === "string" ? row.assignedApprover : row.assignedApprover?._id;
+    if (assigned) return String(assigned) === String(currentUserId);
     const approvals = row.approvals || [];
-    if (!approvals.length) {
-      const assigned =
-        typeof row.assignedApprover === "string" ? row.assignedApprover : row.assignedApprover?._id;
-      return Boolean(assigned && String(assigned) === String(currentUserId));
-    }
     return approvals.some((a) => {
       const id = typeof a.approver === "string" ? a.approver : a.approver?._id;
       return (
@@ -259,32 +284,32 @@ export function RequisitionsView({ section }: Props) {
   };
 
   /**
-   * Approve/Hold/Reject only when it is this user's turn (pending/held on the PR).
-   * Admin / Approver role alone must NOT unlock actions on other assignees
-   * (e.g. finance@ must not Approve Tahira's or Moiz's queue).
+   * Approve / Hold / Reject only when THIS user is the pending approver
+   * (or PR full-access). Do not unlock every open PR for Company Admin /
+   * Approver roles (that flooded tahira@ / finance@ with Moiz/others' PRs).
    */
   const canActAsApproverOnPr = (row: PurchaseDocument) =>
     prFullAccess || isPendingApproverOnPr(row);
 
-  const canConvertAnyApprovedPo = accessLevel === "buyer" || accessLevel === "admin" || prFullAccess;
+  /** Buyers/admins only — requesters do not create or open Purchase Orders. */
+  const canConvertAnyApprovedPo = accessLevel === "buyer" || prFullAccess;
   /**
-   * Buyers/admins: any approved PR. Requesters: only their own approved PRs.
+   * Buyers/admins: any approved PR they can see.
    * Hide once a PO already exists (drafting / purchased / delivered). Allow again if the only PO was cancelled.
    */
   const canConvertToPo = (row: PurchaseDocument) => {
     if (row.status !== "approved") return false;
-    if (!(canConvertAnyApprovedPo || (canCreate && isOwnPr(row)))) return false;
+    if (!canConvertAnyApprovedPo) return false;
     const fulfillment = String(row.fulfillmentStatus || row.stockStatus || "awaiting_po").toLowerCase();
     const alreadyHasPo = ["po_draft", "issued", "partial", "received", "closed"].includes(fulfillment);
     return !alreadyHasPo;
   };
 
-  /** Only the requester (or admin / PR full-access) may edit / submit / resubmit draft or rejected PRs */
+  /** Only the requester (or PR full-access) may edit / submit / resubmit draft or rejected PRs */
   const canEditOrSubmitPr = (row: PurchaseDocument) => {
     if (prFullAccess) return true;
     if (!canCreate) return false;
     if (row.status !== "draft" && row.status !== "rejected") return false;
-    if (accessLevel === "admin") return true;
     return isOwnPr(row);
   };
 
@@ -313,7 +338,7 @@ export function RequisitionsView({ section }: Props) {
   const [viewingRow, setViewingRow] = useState<PurchaseDocument | null>(null);
   const [reviewAction, setReviewAction] = useState<{
     id: string;
-    type: "reject" | "hold";
+    type: "reject" | "hold" | "approve";
     label: string;
   } | null>(null);
   const [reviewReason, setReviewReason] = useState("");
@@ -438,6 +463,7 @@ export function RequisitionsView({ section }: Props) {
 
   const openCreate = () => {
     setEditingId(null);
+    setEditingMeta(null);
     setForm(emptyForm());
     setShowForm(true);
   };
@@ -482,21 +508,31 @@ export function RequisitionsView({ section }: Props) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
+  /** Row click always opens the detail view (approval history). Edit is via the Edit button only. */
   const openRequisition = async (row: PurchaseDocument) => {
     setError("");
-    const editable = canOpenEditForm(row);
-    if (!editable) {
-      try {
-        const res = await procurementApi.getRequisition(row._id);
-        setViewingRow(res.data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load requisition");
-      }
-      return;
-    }
     try {
       const res = await procurementApi.getRequisition(row._id);
+      setViewingRow(res.data);
+      setShowForm(false);
+      setEditingId(null);
+      setEditingMeta(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load requisition");
+    }
+  };
+
+  const openEditForm = async (row: PurchaseDocument) => {
+    if (!canOpenEditForm(row)) return;
+    setError("");
+    try {
+      const res = await procurementApi.getRequisition(row._id);
+      setViewingRow(null);
       setEditingId(row._id);
+      setEditingMeta({
+        requisitionNumber: res.data.requisitionNumber || row.requisitionNumber || "",
+        createdBy: procurementUserLabel(res.data.requestedBy || row.requestedBy),
+      });
       setForm(requisitionToForm(res.data));
       setShowForm(true);
     } catch (err) {
@@ -506,27 +542,27 @@ export function RequisitionsView({ section }: Props) {
 
   const openApproverEditFromView = async () => {
     if (!viewingRow) return;
-    setError("");
-    try {
-      const res = await procurementApi.getRequisition(viewingRow._id);
-      setEditingId(viewingRow._id);
-      setForm(requisitionToForm(res.data));
-      setViewingRow(null);
-      setShowForm(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load requisition");
-    }
+    await openEditForm(viewingRow);
   };
 
   const openConvertToPo = async (row: PurchaseDocument) => {
     setError("");
     setConvertLineVendors({});
+    const seedPrices = (items?: PurchaseDocument["items"]) => {
+      const next: Record<number, string> = {};
+      (items || []).forEach((item, i) => {
+        if (Number(item.unitPrice) > 0) next[i] = String(item.unitPrice);
+      });
+      setConvertLinePrices(next);
+    };
+    seedPrices(row.items);
     setConvertPr(row);
     try {
       const [res] = await Promise.all([
         procurementApi.getRequisition(row._id),
         ensureSuppliersLoaded(),
       ]);
+      seedPrices(res.data?.items);
       setConvertPr(res.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load requisition details");
@@ -536,7 +572,7 @@ export function RequisitionsView({ section }: Props) {
   const runReviewAction = async () => {
     if (!reviewAction) return;
     const reason = reviewReason.trim();
-    if (!reason) {
+    if (reviewAction.type !== "approve" && !reason) {
       setError(`${reviewAction.type === "reject" ? "Rejection" : "Hold"} reason is required`);
       return;
     }
@@ -545,8 +581,10 @@ export function RequisitionsView({ section }: Props) {
     try {
       if (reviewAction.type === "reject") {
         await procurementApi.rejectRequisition(reviewAction.id, reason);
-      } else {
+      } else if (reviewAction.type === "hold") {
         await procurementApi.holdRequisition(reviewAction.id, reason);
+      } else {
+        await procurementApi.approveRequisition(reviewAction.id, reason);
       }
       setReviewAction(null);
       setReviewReason("");
@@ -557,6 +595,16 @@ export function RequisitionsView({ section }: Props) {
     } finally {
       setReviewSaving(false);
     }
+  };
+
+  const openApproveModal = (row: PurchaseDocument) => {
+    setError("");
+    setReviewReason("");
+    setReviewAction({
+      id: row._id,
+      type: "approve",
+      label: row.requisitionNumber || row._id,
+    });
   };
 
   const save = async (e: React.FormEvent) => {
@@ -592,6 +640,7 @@ export function RequisitionsView({ section }: Props) {
       else await procurementApi.createRequisition(body);
       setShowForm(false);
       setEditingId(null);
+      setEditingMeta(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
@@ -603,32 +652,57 @@ export function RequisitionsView({ section }: Props) {
   const lineCount = (row: PurchaseDocument) => row.items?.length ?? 0;
 
   const auditRows = (row: PurchaseDocument) => {
-    const rows: Array<{ label: string; by?: string; at?: string }> = [
+    const rows: Array<{ label: string; by?: string; at?: string; note?: string }> = [
       { label: "Created by", by: procurementUserLabel(row.requestedBy), at: row.createdAt },
     ];
     if (row.submittedAt || row.submittedBy) {
       rows.push({ label: "Submitted", by: procurementUserLabel(row.submittedBy), at: row.submittedAt });
     }
-    if (row.assignedApprover) {
-      rows.push({ label: "Assigned to", by: procurementUserLabel(row.assignedApprover) });
+    if (row.status === "rejected" || row.rejectedAt || row.rejectedBy) {
+      rows.push({
+        label: "Rejected by",
+        by: row.slaClosedByDeadline
+          ? "System (same-day SLA)"
+          : procurementUserLabel(row.rejectedBy),
+        at: row.rejectedAt,
+        note: row.rejectionReason || undefined,
+      });
+    }
+    if (row.status === "approved") {
+      rows.push({
+        label: "Fully approved by",
+        by: procurementUserLabel(row.approvedBy),
+        at: row.approvedAt,
+      });
+    }
+    if (row.status === "held" || row.heldAt || row.heldBy) {
+      rows.push({
+        label: "Held by",
+        by: procurementUserLabel(row.heldBy),
+        at: row.heldAt,
+        note: row.holdReason || undefined,
+      });
     }
     if (row.approvals?.length) {
       for (const a of row.approvals) {
+        const st = String(a.status || "").toLowerCase();
+        const stage = approvalStageLabel(a.stage);
+        let label = `${stage} · ${a.department}`;
+        if (st === "approved") label = `Approved — ${label}`;
+        else if (st === "rejected") label = `Rejected — ${label}`;
+        else if (st === "cancelled") label = `Not reached — ${label}`;
+        else if (st === "held") label = `Held — ${label}`;
+        else label = `Pending — ${label}`;
         rows.push({
-          label: `${a.department} (${a.status})`,
-          by: procurementUserLabel(a.approver),
+          label,
+          by: st === "cancelled" ? undefined : procurementUserLabel(a.approver),
           at: a.actedAt,
+          note: a.reason || undefined,
         });
       }
     }
-    if (row.status === "approved" || row.approvedAt || row.approvedBy) {
-      rows.push({ label: "Fully approved", by: procurementUserLabel(row.approvedBy), at: row.approvedAt });
-    }
-    if (row.status === "rejected" || row.rejectedAt || row.rejectedBy) {
-      rows.push({ label: "Rejected", by: procurementUserLabel(row.rejectedBy), at: row.rejectedAt });
-    }
-    if (row.status === "held" || row.heldAt || row.heldBy) {
-      rows.push({ label: "Held", by: procurementUserLabel(row.heldBy), at: row.heldAt });
+    if (row.status !== "rejected" && row.assignedApprover) {
+      rows.push({ label: "Assigned to", by: procurementUserLabel(row.assignedApprover) });
     }
     if (row.updatedAt && row.updatedAt !== row.createdAt) {
       rows.push({ label: "Last updated", at: row.updatedAt });
@@ -763,13 +837,13 @@ export function RequisitionsView({ section }: Props) {
                     Create PO
                   </button>
                 ) : null}
-                {canApproverAmendPr(r) ? (
+                {canOpenEditForm(r) ? (
                   <button
                     type="button"
                     className="text-blue-600 text-xs dark:text-blue-300"
                     onClick={(e) => {
                       e.stopPropagation();
-                      void openRequisition(r);
+                      void openEditForm(r);
                     }}
                   >
                     Edit
@@ -781,10 +855,9 @@ export function RequisitionsView({ section }: Props) {
                     <button
                       type="button"
                       className="text-green-700 text-xs dark:text-green-300"
-                      onClick={async (e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
-                        await procurementApi.approveRequisition(r._id);
-                        await load();
+                        openApproveModal(r);
                       }}
                     >
                       Approve
@@ -820,10 +893,9 @@ export function RequisitionsView({ section }: Props) {
                     <button
                       type="button"
                       className="text-green-700 text-xs dark:text-green-300"
-                      onClick={async (e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
-                        await procurementApi.approveRequisition(r._id);
-                        await load();
+                        openApproveModal(r);
                       }}
                     >
                       Approve
@@ -982,17 +1054,29 @@ export function RequisitionsView({ section }: Props) {
         <Modal
           title={
             editingId
-              ? (() => {
-                  const row = rows.find((r) => r._id === editingId);
-                  return row && canApproverAmendPr(row)
-                    ? "Edit requisition (before decision)"
-                    : "Edit requisition";
-                })()
+              ? editingMeta?.requisitionNumber
+                ? `Edit ${editingMeta.requisitionNumber}`
+                : "Edit requisition"
               : "New requisition"
           }
-          onClose={() => setShowForm(false)}
+          onClose={() => {
+            setShowForm(false);
+            setEditingMeta(null);
+          }}
         >
           <form onSubmit={save} className="space-y-4">
+            {editingId && editingMeta ? (
+              <div className="rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2 text-sm text-blue-900 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100">
+                <p>
+                  <span className="font-medium">PR #:</span>{" "}
+                  {editingMeta.requisitionNumber || "—"}
+                </p>
+                <p className="mt-0.5">
+                  <span className="font-medium">Created by:</span>{" "}
+                  {editingMeta.createdBy || "—"}
+                </p>
+              </div>
+            ) : null}
             <Field
               label="Location / site (optional)"
               value={form.location}
@@ -1042,7 +1126,10 @@ export function RequisitionsView({ section }: Props) {
               <button
                 type="button"
                 className={procurementSecondaryButtonClass}
-                onClick={() => setShowForm(false)}
+                onClick={() => {
+                  setShowForm(false);
+                  setEditingMeta(null);
+                }}
               >
                 Cancel
               </button>
@@ -1120,15 +1207,15 @@ export function RequisitionsView({ section }: Props) {
                 <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">
                   {approvalChainKey(viewingRow) === "lab_then_finance"
                     ? isLahorePr(viewingRow)
-                      ? "Approval chain (department → lab → finance → Lahore final)"
+                      ? "Approval chain (department → lab → Lahore finance / Tahira)"
                       : "Approval chain (department → lab → finance)"
                     : approvalChainKey(viewingRow) === "skip_finance"
                       ? isLahorePr(viewingRow)
-                        ? "Approval chain (department → Lahore final)"
-                        : "Approval chain (department → boss)"
+                        ? "Approval chain (department → Lahore final / Tahira)"
+                        : "Approval chain (department → final approver)"
                       : isLahorePr(viewingRow)
-                        ? "Approval chain (departments → finance → Lahore final)"
-                        : "Approval chain (departments → finance → boss)"}
+                        ? "Approval chain (departments → Lahore finance / Tahira)"
+                        : "Approval chain (departments → finance)"}
                 </p>
                 <ul className="space-y-1 text-gray-700 dark:text-gray-300">
                   {viewingRow.approvals.map((a, i) => (
@@ -1138,31 +1225,53 @@ export function RequisitionsView({ section }: Props) {
                       </span>
                       <span className="font-medium">{a.department}</span>
                       <StatusBadge status={a.status} />
-                      <span>{procurementUserLabel(a.approver)}</span>
+                      {String(a.status || "").toLowerCase() !== "cancelled" ? (
+                        <span>{procurementUserLabel(a.approver)}</span>
+                      ) : null}
                       {a.actedAt ? <span className="text-xs">{procurementDateTime(a.actedAt)}</span> : null}
-                      {a.reason ? <span className="text-xs">({a.reason})</span> : null}
+                      {a.reason ? (
+                        <span className="text-xs text-slate-600 dark:text-slate-400">
+                          · Remarks: {a.reason}
+                        </span>
+                      ) : null}
                     </li>
                   ))}
+                  {plannedCorporateStages(viewingRow)
+                    .filter(
+                      (p) =>
+                        !(viewingRow.approvals || []).some(
+                          (a) => String(a.stage || "").toLowerCase() === p.stage
+                        )
+                    )
+                    .map((p) => (
+                      <li
+                        key={`planned-${p.stage}`}
+                        className="flex flex-wrap items-center gap-2 text-slate-500 dark:text-slate-400"
+                      >
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          {approvalStageLabel(p.stage)}
+                        </span>
+                        <span className="font-medium">{p.department}</span>
+                        <StatusBadge status="pending" label="waiting" />
+                        <span className="text-xs">{p.email}</span>
+                        <span className="text-[10px] uppercase tracking-wide">not reached yet</span>
+                      </li>
+                    ))}
                 </ul>
                 {approvalChainKey(viewingRow) === "lab_then_finance" ? (
                   !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "lab") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                      After department manager approves → Lab, then Finance
+                      After department manager approves → Lab, then{" "}
                       {isLahorePr(viewingRow)
-                        ? ", then Lahore final (tahira@ressichem.com)."
-                        : "."}
+                        ? "Lahore Finance (tahira@ressichem.com)."
+                        : "Finance Manager."}
                     </p>
                   ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                      After Lab approves → Finance Manager
+                      After Lab approves →{" "}
                       {isLahorePr(viewingRow)
-                        ? ", then Lahore final (tahira@ressichem.com)."
-                        : " for final approval."}
-                    </p>
-                  ) : isLahorePr(viewingRow) &&
-                    !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "boss") ? (
-                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                      After Finance Manager approves → Lahore final (tahira@ressichem.com).
+                        ? "Lahore Finance (tahira@ressichem.com) for final approval."
+                        : "Finance Manager for final approval."}
                     </p>
                   ) : null
                 ) : approvalChainKey(viewingRow) === "skip_finance" ? (
@@ -1170,20 +1279,14 @@ export function RequisitionsView({ section }: Props) {
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                       {isLahorePr(viewingRow)
                         ? "After department approve → Lahore final (tahira@ressichem.com)."
-                        : "After department approve → Boss (Finance skipped for this requester)."}
+                        : "After department approve → final approver (Finance skipped for this requester)."}
                     </p>
                   ) : null
                 ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
                   <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                     {isLahorePr(viewingRow)
-                      ? "After all departments approve → Finance Manager, then Lahore final (tahira@ressichem.com)."
-                      : "After all departments approve → Finance Manager, then Boss."}
-                  </p>
-                ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "boss") ? (
-                  <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                    {isLahorePr(viewingRow)
-                      ? "After Finance Manager approves → Lahore final (tahira@ressichem.com)."
-                      : "After Finance Manager approves → Boss for final approval."}
+                      ? "After all departments approve → Lahore Finance (tahira@ressichem.com)."
+                      : "After all departments approve → Finance Manager (final)."}
                   </p>
                 ) : null}
               </div>
@@ -1203,12 +1306,17 @@ export function RequisitionsView({ section }: Props) {
             <div>
               <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">History</p>
               <ul className="space-y-1 text-gray-700 dark:text-gray-300">
-                {auditRows(viewingRow).map((entry) => (
-                  <li key={entry.label}>
+                {auditRows(viewingRow).map((entry, idx) => (
+                  <li key={`${entry.label}-${idx}`}>
                     <span className="font-medium text-blue-900 dark:text-blue-200">{entry.label}:</span>{" "}
                     {entry.by ? `${entry.by}` : ""}
                     {entry.by && entry.at ? " · " : ""}
-                    {entry.at ? procurementDateTime(entry.at) : !entry.by ? "—" : ""}
+                    {entry.at ? procurementDateTime(entry.at) : !entry.by && !entry.note ? "—" : ""}
+                    {entry.note ? (
+                      <span className="mt-0.5 block text-xs text-slate-600 dark:text-slate-400">
+                        Remarks: {entry.note}
+                      </span>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -1248,13 +1356,13 @@ export function RequisitionsView({ section }: Props) {
               </ul>
             </div>
             <footer className="flex justify-end gap-2 pt-2">
-              {canApproverAmendPr(viewingRow) ? (
+              {canOpenEditForm(viewingRow) ? (
                 <button
                   type="button"
                   className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm"
                   onClick={() => void openApproverEditFromView()}
                 >
-                  Edit before decision
+                  {canApproverAmendPr(viewingRow) ? "Edit before decision" : "Edit"}
                 </button>
               ) : null}
               {canActAsApproverOnPr(viewingRow) &&
@@ -1263,11 +1371,7 @@ export function RequisitionsView({ section }: Props) {
                   <button
                     type="button"
                     className="px-3 py-1.5 rounded-lg bg-green-600 text-white text-sm"
-                    onClick={async () => {
-                      await procurementApi.approveRequisition(viewingRow._id);
-                      setViewingRow(null);
-                      await load();
-                    }}
+                    onClick={() => openApproveModal(viewingRow)}
                   >
                     Approve
                   </button>
@@ -1324,11 +1428,7 @@ export function RequisitionsView({ section }: Props) {
                   <button
                     type="button"
                     className="px-3 py-1.5 rounded-lg bg-green-600 text-white text-sm"
-                    onClick={async () => {
-                      await procurementApi.approveRequisition(viewingRow._id);
-                      setViewingRow(null);
-                      await load();
-                    }}
+                    onClick={() => openApproveModal(viewingRow)}
                   >
                     Approve
                   </button>
@@ -1372,7 +1472,13 @@ export function RequisitionsView({ section }: Props) {
       ) : null}
       {reviewAction ? (
         <Modal
-          title={reviewAction.type === "reject" ? "Reject requisition" : "Hold requisition"}
+          title={
+            reviewAction.type === "reject"
+              ? "Reject requisition"
+              : reviewAction.type === "hold"
+                ? "Hold requisition"
+                : "Approve requisition"
+          }
           onClose={() => {
             setReviewAction(null);
             setReviewReason("");
@@ -1382,14 +1488,22 @@ export function RequisitionsView({ section }: Props) {
             <p className="text-sm text-blue-800 dark:text-blue-100">
               {reviewAction.type === "reject"
                 ? `Provide a reason for rejecting ${reviewAction.label}. The requester can edit and resubmit.`
-                : `Provide a reason for holding ${reviewAction.label}. You can release, approve, or reject later.`}
+                : reviewAction.type === "hold"
+                  ? `Provide a reason for holding ${reviewAction.label}. You can release, approve, or reject later.`
+                  : `Confirm approval of ${reviewAction.label}. Remarks are optional and will appear in the PR history.`}
             </p>
             <Field
-              label="Reason"
+              label={reviewAction.type === "approve" ? "Remarks (optional)" : "Reason"}
               value={reviewReason}
               onChange={setReviewReason}
-              required
-              placeholder={reviewAction.type === "reject" ? "e.g. Budget not approved" : "e.g. Need vendor quote"}
+              required={reviewAction.type !== "approve"}
+              placeholder={
+                reviewAction.type === "reject"
+                  ? "e.g. Budget not approved"
+                  : reviewAction.type === "hold"
+                    ? "e.g. Need vendor quote"
+                    : "e.g. Prices checked, OK to proceed"
+              }
             />
             <footer className="flex justify-end gap-2 pt-2">
               <button
@@ -1406,11 +1520,21 @@ export function RequisitionsView({ section }: Props) {
                 type="button"
                 disabled={reviewSaving}
                 className={`px-4 py-2 rounded-lg text-white ${
-                  reviewAction.type === "reject" ? "bg-red-600" : "bg-amber-600"
+                  reviewAction.type === "reject"
+                    ? "bg-red-600"
+                    : reviewAction.type === "hold"
+                      ? "bg-amber-600"
+                      : "bg-green-600"
                 }`}
                 onClick={runReviewAction}
               >
-                {reviewSaving ? "Saving..." : reviewAction.type === "reject" ? "Reject" : "Hold"}
+                {reviewSaving
+                  ? "Saving..."
+                  : reviewAction.type === "reject"
+                    ? "Reject"
+                    : reviewAction.type === "hold"
+                      ? "Hold"
+                      : "Approve"}
               </button>
             </footer>
           </div>
@@ -1422,6 +1546,7 @@ export function RequisitionsView({ section }: Props) {
           onClose={() => {
             setConvertPr(null);
             setConvertLineVendors({});
+            setConvertLinePrices({});
           }}
           wide
         >
@@ -1430,6 +1555,13 @@ export function RequisitionsView({ section }: Props) {
             const scopedSuppliers = filterSuppliersBySection(suppliers, section);
             const allLinesHaveVendor =
               prLines.length > 0 && prLines.every((_, i) => Boolean(convertLineVendors[i]));
+            const allLinesHavePrice =
+              prLines.length > 0 &&
+              prLines.every((_, i) => {
+                const raw = convertLinePrices[i];
+                const n = Number(raw);
+                return Boolean(raw?.trim()) && Number.isFinite(n) && n > 0;
+              });
             const uniqueVendors = [
               ...new Set(Object.values(convertLineVendors).filter(Boolean)),
             ];
@@ -1505,8 +1637,8 @@ export function RequisitionsView({ section }: Props) {
                 </section>
 
                 <p className="text-sm text-gray-600 dark:text-gray-300">
-                  Assign a vendor on each line below, then create <strong>one draft PO</strong>. Different
-                  vendors stay on the same PO.
+                  Assign a vendor and unit price on each line below, then create{" "}
+                  <strong>one draft PO</strong>. Different vendors stay on the same PO.
                 </p>
 
                 {prLines.length > 1 ? (
@@ -1560,27 +1692,58 @@ export function RequisitionsView({ section }: Props) {
                             {item.description}
                           </p>
                         ) : null}
-                        <FormLabel>
-                          Vendor <span className="text-red-600">*</span>
-                          <div className="mt-1">
-                            <SupplierSelect
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <FormLabel>
+                            Vendor <span className="text-red-600">*</span>
+                            <div className="mt-1">
+                              <SupplierSelect
+                                required
+                                section={section}
+                                suppliers={scopedSuppliers}
+                                value={convertLineVendors[i] || ""}
+                                onChange={(supplierId) =>
+                                  setConvertLineVendors((prev) => ({ ...prev, [i]: supplierId }))
+                                }
+                                onSupplierCreated={(supplier) => {
+                                  setSuppliers((prev) =>
+                                    prev.some((s) => s._id === supplier._id) ? prev : [...prev, supplier]
+                                  );
+                                  setConvertLineVendors((prev) => ({ ...prev, [i]: supplier._id }));
+                                }}
+                                placeholder="Select vendor for this line…"
+                              />
+                            </div>
+                          </FormLabel>
+                          <FormLabel>
+                            Unit price ({convertPr.currency || "PKR"}){" "}
+                            <span className="text-red-600">*</span>
+                            <input
+                              type="text"
+                              inputMode="decimal"
                               required
-                              section={section}
-                              suppliers={scopedSuppliers}
-                              value={convertLineVendors[i] || ""}
-                              onChange={(supplierId) =>
-                                setConvertLineVendors((prev) => ({ ...prev, [i]: supplierId }))
+                              className={`${procurementFieldClass} mt-1`}
+                              value={
+                                convertLinePrices[i] ??
+                                (Number(item.unitPrice) > 0 ? String(item.unitPrice) : "")
                               }
-                              onSupplierCreated={(supplier) => {
-                                setSuppliers((prev) =>
-                                  prev.some((s) => s._id === supplier._id) ? prev : [...prev, supplier]
-                                );
-                                setConvertLineVendors((prev) => ({ ...prev, [i]: supplier._id }));
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (raw !== "" && !/^\d*\.?\d*$/.test(raw)) return;
+                                setConvertLinePrices((prev) => ({ ...prev, [i]: raw }));
                               }}
-                              placeholder="Select vendor for this line…"
+                              placeholder="Enter unit price"
                             />
-                          </div>
-                        </FormLabel>
+                            {Number(item.quantity) > 0 && Number(convertLinePrices[i]) > 0 ? (
+                              <p className="mt-1 text-xs text-blue-700 dark:text-blue-300">
+                                Line total:{" "}
+                                {(Number(item.quantity) * Number(convertLinePrices[i])).toLocaleString(
+                                  undefined,
+                                  { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                                )}
+                              </p>
+                            ) : null}
+                          </FormLabel>
+                        </div>
                       </article>
                     ))
                   )}
@@ -1599,25 +1762,32 @@ export function RequisitionsView({ section }: Props) {
                     onClick={() => {
                       setConvertPr(null);
                       setConvertLineVendors({});
+                      setConvertLinePrices({});
                     }}
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
-                    disabled={converting || !allLinesHaveVendor}
+                    disabled={converting || !allLinesHaveVendor || !allLinesHavePrice}
                     className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50"
                     onClick={async () => {
                       setConverting(true);
                       setError("");
                       try {
                         const lineSuppliers = prLines.map((_, i) => convertLineVendors[i]);
+                        const lineUnitPrices = prLines.map((_, i) => {
+                          const n = Number(convertLinePrices[i]);
+                          return Number.isFinite(n) ? n : 0;
+                        });
                         await procurementApi.convertRequisitionToPO(convertPr._id, {
                           supplier: lineSuppliers[0],
                           lineSuppliers,
+                          lineUnitPrices,
                         });
                         setConvertPr(null);
                         setConvertLineVendors({});
+                        setConvertLinePrices({});
                         await load();
                       } catch (e) {
                         setError(e instanceof Error ? e.message : "Convert failed");

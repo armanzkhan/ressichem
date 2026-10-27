@@ -84,11 +84,11 @@ export default function ProcurementLayout({ children }: { children: React.ReactN
           ...group,
           items: group.items.filter((item) => {
             const moduleKey = item.href.split("/").pop() || "";
-            return canAccessModule(accessLevel, moduleKey);
+            return canAccessModule(accessLevel, moduleKey, procurementDepartment);
           }),
         }))
         .filter((group) => group.items.length > 0),
-    [allowedSections, accessLevel]
+    [allowedSections, accessLevel, procurementDepartment]
   );
 
   useEffect(() => {
@@ -100,7 +100,7 @@ export default function ProcurementLayout({ children }: { children: React.ReactN
       router.replace(defaultProcurementLandingPath(userRole, procurementDepartment));
       return;
     }
-    if (moduleKey && !canAccessModule(accessLevel, moduleKey)) {
+    if (moduleKey && !canAccessModule(accessLevel, moduleKey, procurementDepartment)) {
       router.replace(defaultProcurementLandingPath(userRole, procurementDepartment));
     }
   }, [authOk, pathname, allowedSections, accessLevel, userRole, procurementDepartment, router]);

@@ -173,6 +173,8 @@ export const PR_DEPARTMENTS = [
   "QC Lab",
   "Store",
   "Maintenance",
+  "Technical",
+  "Technical (Lahore)",
   "Local Purchase",
   "R&D",
   "Engineering",
@@ -187,8 +189,8 @@ export const PR_DEPARTMENTS = [
   "Staff",
 ] as const;
 
-/** Required corporate stages after all line departments approve (map under PR Approvers). */
-export const PR_CORPORATE_APPROVAL_ROLES = ["Finance Manager", "Boss"] as const;
+/** Required corporate stages after all line departments approve (map under PR Approvers). Boss mapping removed system-wide. */
+export const PR_CORPORATE_APPROVAL_ROLES = ["Finance Manager"] as const;
 
 export type ProcurementTradeScope = "local" | "import" | "export";
 

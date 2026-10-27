@@ -230,6 +230,8 @@ export type PurchaseDocument = {
   approvalChain?: "standard" | "skip_finance" | "lab_then_finance" | string;
   /** When true, PR skips Finance Manager and goes department → Boss only */
   skipFinanceApproval?: boolean;
+  /** Sticky: Lahore PRs use tahira@ as Finance Manager */
+  lahoreFinalApproval?: boolean;
   slaDueAt?: string | Date | null;
   slaStatus?: string;
   slaLabel?: string;
@@ -712,8 +714,11 @@ export const procurementApi = {
       method: "POST",
       body: JSON.stringify({ ids }),
     }),
-  approveRequisition: (id: string) =>
-    request(`/api/procurement/requisitions/${id}/approve`, { method: "POST" }),
+  approveRequisition: (id: string, remarks?: string) =>
+    request(`/api/procurement/requisitions/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ remarks: String(remarks || "").trim() }),
+    }),
   rejectRequisition: (id: string, reason: string) =>
     request(`/api/procurement/requisitions/${id}/reject`, {
       method: "POST",
@@ -966,7 +971,7 @@ export const procurementApi = {
    */
   convertRequisitionToPO: (
     id: string,
-    body?: { supplier?: string; lineSuppliers?: string[] }
+    body?: { supplier?: string; lineSuppliers?: string[]; lineUnitPrices?: number[] }
   ) =>
     request<{ success: boolean; message?: string; data?: PurchaseDocument }>(
       `/api/procurement/requisitions/${id}/convert-to-po`,

@@ -1,6 +1,6 @@
 import type { TradeSection } from "./procurementScope";
 
-export type ProcurementArea = "local" | "import" | "export" | "local_import";
+export type ProcurementArea = "local" | "local_lahore" | "import" | "export" | "local_import";
 export type ProcurementAccessLevel =
   | "viewer"
   | "user"
@@ -18,6 +18,11 @@ export const PROCUREMENT_AREAS: Array<{
     value: "local",
     label: "Local",
     description: "Domestic purchasing — Pakistan suppliers, local PO & PR",
+  },
+  {
+    value: "local_lahore",
+    label: "Local — Lahore",
+    description: "Lahore plant only — create PR & PO (no suppliers/items menu)",
   },
   {
     value: "import",
@@ -51,7 +56,7 @@ export const PROCUREMENT_ACCESS_LEVELS: Array<{
   {
     value: "user",
     label: "Requester",
-    description: "Create PRs, convert own approved PRs to PO, and view own POs",
+    description: "Create and track own purchase requisitions — no Purchase Orders",
     roleName: "Procurement User",
   },
   {
@@ -83,19 +88,37 @@ export const PROCUREMENT_ACCESS_LEVELS: Array<{
 /** Modules visible for each access level (within their allowed area). */
 export const MODULES_BY_ACCESS_LEVEL: Record<ProcurementAccessLevel, string[] | "all"> = {
   viewer: "all",
-  user: ["pr", "po", "reports"],
+  user: ["pr", "reports"],
   buyer: "all",
   approver: ["pr", "reports"],
   creator_approver: ["pr", "reports"],
   admin: "all",
 };
 
-export function modulesForAccessLevel(accessLevel: ProcurementAccessLevel): string[] | "all" {
+/** Local — Lahore plant users: create/track PR + PO only (no suppliers/items/GRN/…). */
+export const LAHORE_PLANT_MODULES = ["pr", "po"] as const;
+
+export function isLahorePlantDepartment(department?: string | null): boolean {
+  return areaFromDepartment(department) === "local_lahore";
+}
+
+export function modulesForAccessLevel(
+  accessLevel: ProcurementAccessLevel,
+  department?: string | null
+): string[] | "all" {
+  // Plant-scoped Lahore accounts are requester-style: PR + PO only
+  if (isLahorePlantDepartment(department) && accessLevel !== "admin") {
+    return [...LAHORE_PLANT_MODULES];
+  }
   return MODULES_BY_ACCESS_LEVEL[accessLevel] || "all";
 }
 
-export function canAccessModule(accessLevel: ProcurementAccessLevel, module: string): boolean {
-  const allowed = modulesForAccessLevel(accessLevel);
+export function canAccessModule(
+  accessLevel: ProcurementAccessLevel,
+  module: string,
+  department?: string | null
+): boolean {
+  const allowed = modulesForAccessLevel(accessLevel, department);
   if (allowed === "all") return true;
   return allowed.includes(module);
 }
@@ -104,15 +127,16 @@ export function canAccessModule(accessLevel: ProcurementAccessLevel, module: str
 export function areasForAccessLevel(accessLevel: ProcurementAccessLevel): ProcurementArea[] {
   if (accessLevel === "admin") return ["local", "import", "export"];
   if (accessLevel === "user" || accessLevel === "approver" || accessLevel === "creator_approver") {
-    return ["local", "import", "local_import"];
+    return ["local", "local_lahore", "import", "local_import"];
   }
-  return ["local", "import", "local_import", "export"];
+  return ["local", "local_lahore", "import", "local_import", "export"];
 }
 
 export const PROCUREMENT_ASSIGNABLE_ROLES = PROCUREMENT_ACCESS_LEVELS.map((l) => l.roleName);
 
 export function departmentFromArea(area: ProcurementArea): string {
   if (area === "local_import") return "Procurement — Local & Import";
+  if (area === "local_lahore") return "Procurement — Local (Lahore)";
   if (area === "import") return "Procurement — Import";
   if (area === "export") return "Procurement — Export";
   return "Procurement — Local";
@@ -127,6 +151,7 @@ export function areaFromDepartment(department?: string | null): ProcurementArea 
   ) {
     return "local_import";
   }
+  if (d.includes("lahore") || d.includes("(lhr)")) return "local_lahore";
   if (d.includes("import")) return "import";
   if (d.includes("export")) return "export";
   if (d.includes("local")) return "local";
@@ -201,6 +226,7 @@ export function areaLabel(area: ProcurementArea | "all"): string {
 
 export function procurementSectionsForArea(area: ProcurementArea | "all"): TradeSection[] {
   if (area === "local_import") return ["local", "import"];
+  if (area === "local_lahore") return ["local"];
   if (area === "all") return ["local", "import", "export"];
   return [area];
 }
@@ -224,7 +250,12 @@ export function procurementSectionsForRole(role?: string | null): TradeSection[]
 export function defaultProcurementLandingPath(role?: string | null, department?: string | null): string {
   const sections = procurementSectionsForUser(role, department);
   const level = accessLevelFromRole(role);
-  if (level === "user" || level === "approver" || level === "creator_approver") {
+  if (
+    level === "user" ||
+    level === "approver" ||
+    level === "creator_approver" ||
+    isLahorePlantDepartment(department)
+  ) {
     const section = sections.includes("local")
       ? "local"
       : sections.includes("import")

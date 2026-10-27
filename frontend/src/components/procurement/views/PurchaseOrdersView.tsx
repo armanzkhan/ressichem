@@ -47,6 +47,7 @@ import { recordTotalLabel } from "@/lib/procurementRecordSummary";
 import { RESSICHEM_BUYER_DEFAULT } from "@/lib/procurementDocumentTypes";
 import { canProcurementSoftDelete } from "@/lib/procurementAccess";
 import { formatProcurementAmount } from "@/lib/procurementMoney";
+import { getProcurementSessionArea } from "@/lib/procurementRoles";
 
 function supplierLabel(s: ProcurementSupplier | string | undefined, suppliers: ProcurementSupplier[]) {
   if (!s) return "-";
@@ -124,13 +125,14 @@ export function PurchaseOrdersView({ section }: Props) {
     setEditingId(null);
     setCreatingPo(true);
     const isLocal = lockedPurchaseType === "local";
+    const lahoreBuyer = /\blahore\b/i.test(getProcurementSessionArea() || "");
     setForm({
       ...emptyCommercialForm(),
       status: "draft",
       purchaseType: lockedPurchaseType,
       currency: isLocal ? "PKR" : "USD",
       exchangeRate: "1",
-      placeOfDelivery: isLocal ? "Karachi, Pakistan" : "",
+      placeOfDelivery: lahoreBuyer ? "Lahore, Pakistan" : isLocal ? "Karachi, Pakistan" : "",
       billTo: isLocal ? { ...RESSICHEM_BUYER_DEFAULT } : emptyCommercialForm().billTo,
       shipTo: isLocal ? { ...RESSICHEM_BUYER_DEFAULT } : emptyCommercialForm().shipTo,
     });
@@ -265,6 +267,10 @@ export function PurchaseOrdersView({ section }: Props) {
       setError("Add at least one line item");
       return false;
     }
+    if (form.lines.some((l) => !(Number(l.unitPrice) > 0))) {
+      setError("Enter a unit price greater than 0 on every line item");
+      return false;
+    }
     if (lockedPurchaseType === "foreign" && form.lines.some((l) => !l.hsCode?.trim())) {
       setError("Import PO: enter HS code on every line (or set HS code on items in catalog)");
       return false;
@@ -359,6 +365,9 @@ export function PurchaseOrdersView({ section }: Props) {
       onAdd={openCreate}
     >
       {error ? <Alert message={error} /> : null}
+      {!loading && rows.some((r) => !(Number(r.total) > 0)) ? (
+        <Alert message="Some POs show 0.00 total — open Edit and enter Unit price on each line, then Save." />
+      ) : null}
       {canDelete && selectedIds.length > 0 ? (
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-sm text-blue-700 dark:text-blue-300">{selectedIds.length} selected</p>

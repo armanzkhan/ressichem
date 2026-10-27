@@ -94,10 +94,11 @@ async function autoCloseOverduePrs(now = new Date()) {
     }
     if (!isPastSlaDeadline(pr, now)) continue;
 
+    // Cancel open stages — do not mark every pending person as the rejector.
     const approvals = (pr.approvals || []).map((a) => {
       const row = typeof a.toObject === "function" ? a.toObject() : { ...a };
       if (row.status === "pending" || row.status === "held") {
-        row.status = "rejected";
+        row.status = "cancelled";
         row.actedAt = now;
         row.reason = reason;
       }
@@ -108,10 +109,13 @@ async function autoCloseOverduePrs(now = new Date()) {
     pr.approvals = approvals;
     pr.rejectionReason = reason;
     pr.rejectedAt = now;
+    pr.rejectedBy = undefined;
     pr.slaClosedByDeadline = true;
     pr.holdReason = "";
     pr.heldBy = undefined;
     pr.heldAt = undefined;
+    pr.approvedBy = undefined;
+    pr.approvedAt = undefined;
     await pr.save();
 
     void procurementPrNotificationService.notifyPrClosedBySameDaySla(pr);

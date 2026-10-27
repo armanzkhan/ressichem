@@ -142,8 +142,10 @@ export function DepartmentApproversView() {
       ) : null}
       <p className="mb-4 text-sm text-blue-700 dark:text-blue-300">
         Map each PR line department to its manager, and also map <strong>Finance Manager</strong> and{" "}
-        <strong>Boss</strong> for the corporate stages after departments approve. Approver accounts must
-        exist and be active in Procurement. Flow: departments → Finance Manager → Boss → fully approved.
+        <strong>Finance Manager</strong> for the corporate stage after departments approve. Approver
+        accounts must exist and be active in Procurement. Flow: departments → Finance Manager → fully
+        approved. Lahore uses <strong>tahira@ressichem.com</strong> as Finance (not Hub finance@); there
+        is no Boss mapping.
       </p>
 
       {loading ? (

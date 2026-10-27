@@ -1,4 +1,4 @@
-const VALID_AREAS = new Set(["local", "import", "export", "local_import"]);
+const VALID_AREAS = new Set(["local", "local_lahore", "import", "export", "local_import"]);
 const VALID_ACCESS_LEVELS = new Set([
   "viewer",
   "user",
@@ -49,6 +49,8 @@ function departmentFromArea(area) {
   switch (String(area || "local").toLowerCase()) {
     case "local_import":
       return "Procurement — Local & Import";
+    case "local_lahore":
+      return "Procurement — Local (Lahore)";
     case "import":
       return "Procurement — Import";
     case "export":
@@ -123,6 +125,7 @@ function areaFromDepartment(department) {
   ) {
     return "local_import";
   }
+  if (d.includes("lahore") || d.includes("(lhr)")) return "local_lahore";
   if (d.includes("import")) return "import";
   if (d.includes("export")) return "export";
   if (d.includes("local")) return "local";
@@ -147,6 +150,7 @@ function effectiveProcurementDepartment(role, department) {
 
 function procurementSectionsForArea(area) {
   if (area === "local_import") return ["local", "import"];
+  if (area === "local_lahore") return ["local"];
   if (area === "all") return ["local", "import", "export"];
   return [area];
 }

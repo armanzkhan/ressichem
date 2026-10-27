@@ -4,7 +4,11 @@ const PurchaseRequisition = require("../models/PurchaseRequisition");
 const PurchaseOrder = require("../models/PurchaseOrder");
 const ProformaInvoice = require("../models/ProformaInvoice");
 const ProcurementExportRecord = require("../models/ProcurementExportRecord");
-const { applyPurchaseRequisitionVisibility } = require("./procurementPrRouting");
+const {
+  applyPurchaseRequisitionVisibility,
+  applyPurchaseOrderVisibility,
+  ensureUserDepartment,
+} = require("./procurementPrRouting");
 
 const OPEN_PFI_STATUSES = ["draft", "sent", "accepted"];
 
@@ -55,9 +59,14 @@ async function purchaseStats(company_id, purchaseType, user) {
   ]);
   const pending = submitted + held + partiallyApproved;
   const poFilter = { company_id, purchaseType, isActive: { $ne: false } };
+  await applyPurchaseOrderVisibility(poFilter, user);
   const [poDraft, poIssued, poTotal] = await Promise.all([
     PurchaseOrder.countDocuments({ ...poFilter, status: "draft" }),
-    PurchaseOrder.countDocuments({ ...poFilter, status: "issued" }),
+    // "issued" card = issued + partial + received (in progress / done) — still plant-scoped
+    PurchaseOrder.countDocuments({
+      ...poFilter,
+      status: { $in: ["issued", "partial", "received", "closed"] },
+    }),
     PurchaseOrder.countDocuments(poFilter),
   ]);
   return {
@@ -76,6 +85,7 @@ async function purchaseStats(company_id, purchaseType, user) {
 }
 
 async function countLocalImportStats(company_id, user) {
+  if (user) await ensureUserDepartment(user);
   const base = { company_id, isActive: true };
   const [localSuppliers, importSuppliers, localItems, importItems] = await Promise.all([
     ProcurementSupplier.countDocuments({ ...base, ...localSupplierFilter() }),

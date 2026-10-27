@@ -55,10 +55,10 @@ router.post(
   permissionMiddleware.any(["procurement.requisitions.approve", "procurement.access"]),
   ctrl.releaseHold
 );
-// Buyers: po.create. Requesters: convert their own approved PRs via requisitions.create
+// Buyers/admins only — requesters cannot create POs
 router.post(
   "/:id/convert-to-po",
-  permissionMiddleware.any(["procurement.po.create", "procurement.requisitions.create"]),
+  permissionMiddleware(["procurement.po.create"]),
   ctrl.convertToPO
 );
 router.delete("/:id", permissionMiddleware(["procurement.access"]), ctrl.softDelete);

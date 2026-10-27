@@ -86,16 +86,16 @@ export default function ProcurementDashboardPage() {
           ...group,
           items: group.items.filter((item) => {
             const moduleKey = item.href.split("/").pop() || "";
-            return canAccessModule(accessLevel, moduleKey);
+            return canAccessModule(accessLevel, moduleKey, department);
           }),
         }))
         .filter((group) => group.items.length > 0),
-    [allowedSections, accessLevel]
+    [allowedSections, accessLevel, department]
   );
 
   const cards = useMemo(
-    () => buildDashboardCards(allowedSections, data?.statsBySection || {}, accessLevel),
-    [allowedSections, data?.statsBySection, accessLevel]
+    () => buildDashboardCards(allowedSections, data?.statsBySection || {}, accessLevel, department),
+    [allowedSections, data?.statsBySection, accessLevel, department]
   );
 
   if (loading) return <p className="text-blue-700 dark:text-blue-200">Loading dashboard...</p>;

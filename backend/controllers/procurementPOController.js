@@ -7,7 +7,16 @@ const {
   persistSupplierBanking,
   normalizeSupplierIds,
 } = require("../services/procurementDocumentService");
-const { canSoftDeleteProcurement } = require("../utils/procurementPrRouting");
+const {
+  canSoftDeleteProcurement,
+  canCreatePurchaseOrders,
+  canCreateRequisitions,
+  isProcurementAdminUser,
+  isLahorePlantScopedUser,
+  isLahorePr,
+  ensureUserDepartment,
+  applyPurchaseOrderVisibility,
+} = require("../utils/procurementPrRouting");
 const PurchaseRequisition = require("../models/PurchaseRequisition");
 const procurementPrNotificationService = require("../services/procurementPrNotificationService");
 
@@ -27,27 +36,25 @@ async function loadLinkedPr(po) {
     .lean();
 }
 
+async function assertLahoreBuyerCanAccessPo(user, po, company_id) {
+  if (!isLahorePlantScopedUser(user) || isProcurementAdminUser(user)) return true;
+  if (String(po?.plantScope || "").toLowerCase() === "lahore") return true;
+  const prId = po?.requisition?._id || po?.requisition;
+  if (!prId) return false;
+  const pr = await PurchaseRequisition.findOne({ _id: prId, company_id }).lean();
+  return Boolean(pr && (pr.lahoreFinalApproval || isLahorePr(pr)));
+}
+
 exports.list = async (req, res) => {
   try {
+    await ensureUserDepartment(req.user);
     const company_id = getCompanyId(req);
     const { status, purchaseType } = req.query;
     const query = { company_id, isActive: { $ne: false } };
     if (status) query.status = status;
     if (purchaseType) query.purchaseType = purchaseType;
 
-    // Requesters (po.read without po.create): only POs they created
-    const {
-      canCreatePurchaseOrders,
-      canCreateRequisitions,
-      isProcurementAdminUser,
-    } = require("../utils/procurementPrRouting");
-    if (
-      !isProcurementAdminUser(req.user) &&
-      canCreateRequisitions(req.user) &&
-      !canCreatePurchaseOrders(req.user)
-    ) {
-      query.createdBy = req.user._id;
-    }
+    await applyPurchaseOrderVisibility(query, req.user);
 
     const data = await PurchaseOrder.find(query)
       .populate("supplier", supplierPopulate)
@@ -63,6 +70,7 @@ exports.list = async (req, res) => {
 
 exports.getById = async (req, res) => {
   try {
+    await ensureUserDepartment(req.user);
     const company_id = getCompanyId(req);
     const data = await PurchaseOrder.findOne({ _id: req.params.id, company_id, isActive: { $ne: false } })
       .populate("supplier", supplierPopulate)
@@ -71,6 +79,9 @@ exports.getById = async (req, res) => {
       .populate("pfi", "pfiNumber")
       .lean();
     if (!data) return res.status(404).json({ success: false, message: "Purchase order not found" });
+    if (!(await assertLahoreBuyerCanAccessPo(req.user, data, company_id))) {
+      return res.status(403).json({ success: false, message: "This purchase order is outside your Lahore plant scope" });
+    }
     return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -94,9 +105,33 @@ exports.print = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
+    await ensureUserDepartment(req.user);
     const company_id = getCompanyId(req);
     const body = await prepareCommercialPayload(req.body || {});
     await persistSupplierBanking(normalizeSupplierIds(body), body.supplierBanking, req.user?._id);
+
+    // Lahore buyers may only create Lahore plant POs
+    let plantScope = String(body.plantScope || "").trim().toLowerCase();
+    if (isLahorePlantScopedUser(req.user) && !isProcurementAdminUser(req.user)) {
+      plantScope = "lahore";
+      if (body.requisition) {
+        const pr = await PurchaseRequisition.findOne({ _id: body.requisition, company_id }).lean();
+        if (!pr || (!pr.lahoreFinalApproval && !isLahorePr(pr))) {
+          return res.status(403).json({
+            success: false,
+            message: "Lahore buyers can only create purchase orders for Lahore requisitions",
+          });
+        }
+      }
+    }
+
+    if (Array.isArray(body.items) && body.items.some((line) => !(Number(line.unitPrice) > 0))) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter a unit price greater than 0 on every line item",
+      });
+    }
+
     const poNumber = await nextDocumentNumber(PurchaseOrder, company_id, "PO");
     const data = await PurchaseOrder.create({
       ...body,
@@ -104,6 +139,7 @@ exports.create = async (req, res) => {
       poNumber,
       status: body.status || "draft",
       createdBy: req.user?._id,
+      ...(plantScope ? { plantScope } : {}),
     });
     const populated = await PurchaseOrder.findById(data._id)
       .populate("supplier", supplierPopulate)
@@ -117,9 +153,34 @@ exports.create = async (req, res) => {
 
 exports.update = async (req, res) => {
   try {
+    await ensureUserDepartment(req.user);
     const company_id = getCompanyId(req);
+    const existing = await PurchaseOrder.findOne({ _id: req.params.id, company_id, isActive: { $ne: false } }).lean();
+    if (!existing) return res.status(404).json({ success: false, message: "Purchase order not found" });
+    if (!(await assertLahoreBuyerCanAccessPo(req.user, existing, company_id))) {
+      return res.status(403).json({ success: false, message: "This purchase order is outside your Lahore plant scope" });
+    }
     const body = await prepareCommercialPayload(req.body || {});
     await persistSupplierBanking(normalizeSupplierIds(body), body.supplierBanking, req.user?._id);
+    if (isLahorePlantScopedUser(req.user) && !isProcurementAdminUser(req.user)) {
+      body.plantScope = "lahore";
+    }
+    // Never overwrite identity / audit fields from client payload
+    delete body._id;
+    delete body.poNumber;
+    delete body.company_id;
+    delete body.createdBy;
+    delete body.createdAt;
+    delete body.updatedAt;
+    delete body.__v;
+
+    if (Array.isArray(body.items) && body.items.some((line) => !(Number(line.unitPrice) > 0))) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter a unit price greater than 0 on every line item",
+      });
+    }
+
     const data = await PurchaseOrder.findOneAndUpdate({ _id: req.params.id, company_id }, body, { new: true })
       .populate("supplier", supplierPopulate)
       .populate("suppliers", supplierPopulate)
@@ -134,6 +195,19 @@ exports.update = async (req, res) => {
 exports.issue = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
+    const existing = await PurchaseOrder.findOne({
+      _id: req.params.id,
+      company_id,
+      status: "draft",
+      isActive: { $ne: false },
+    }).lean();
+    if (!existing) return res.status(400).json({ success: false, message: "PO not found or not in draft" });
+    if ((existing.items || []).some((line) => !(Number(line.unitPrice) > 0)) || !(Number(existing.total) > 0)) {
+      return res.status(400).json({
+        success: false,
+        message: "Add unit prices on every line and save before issuing this PO",
+      });
+    }
     const data = await PurchaseOrder.findOneAndUpdate(
       { _id: req.params.id, company_id, status: "draft" },
       { status: "issued", approvedBy: req.user?._id, approvedAt: new Date() },

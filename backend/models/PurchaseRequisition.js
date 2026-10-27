@@ -17,7 +17,8 @@ const prApprovalSchema = new mongoose.Schema(
     approver: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected", "held"],
+      // cancelled = later stage not reached because someone earlier rejected / SLA closed
+      enum: ["pending", "approved", "rejected", "held", "cancelled"],
       default: "pending",
     },
     actedAt: { type: Date },
@@ -63,6 +64,11 @@ const purchaseRequisitionSchema = new mongoose.Schema(
     },
     /** @deprecated use approvalChain === "skip_finance" */
     skipFinanceApproval: { type: Boolean, default: false },
+    /**
+     * Sticky at submit: Lahore PRs use tahira@ as Finance Manager (not finance@ / Boss),
+     * even if location/title is edited later.
+     */
+    lahoreFinalApproval: { type: Boolean, default: false },
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     approvedAt: { type: Date },
     rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },

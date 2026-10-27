@@ -77,6 +77,8 @@ async function generateToken(user, expiresIn = "1h", isRefresh = false) {
     firstName: user.firstName,
     lastName: user.lastName,
     role: user.role || (Array.isArray(roles) && roles[0]) || "",
+    // Needed for plant-scoped buyers (e.g. Local — Lahore)
+    department: user.department || "",
     perms: encrypted,
     isSuperAdmin,
     // Include user type flags for role-based filtering

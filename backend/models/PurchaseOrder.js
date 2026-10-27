@@ -24,6 +24,8 @@ const purchaseOrderSchema = new mongoose.Schema(
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     approvedAt: { type: Date },
+    /** Plant lock for scoped buyers — e.g. "lahore" for Local (Lahore) buyers */
+    plantScope: { type: String, default: "", index: true },
     /** Soft-delete flag — inactive rows are hidden from lists */
     isActive: { type: Boolean, default: true, index: true },
     deletedAt: { type: Date },

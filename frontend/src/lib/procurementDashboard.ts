@@ -1,5 +1,6 @@
 import type { TradeSection } from "./procurementScope";
 import type { ProcurementAccessLevel } from "./procurementRoles";
+import { isLahorePlantDepartment } from "./procurementRoles";
 
 export type SectionStats = {
   suppliers?: number;
@@ -106,7 +107,11 @@ function prCardsForSection(
   ];
 }
 
-function localCards(stats: SectionStats, accessLevel: ProcurementAccessLevel): DashboardCard[] {
+function localCards(
+  stats: SectionStats,
+  accessLevel: ProcurementAccessLevel,
+  department?: string | null
+): DashboardCard[] {
   if (accessLevel === "user") {
     return prCardsForSection("local", stats, "requester");
   }
@@ -117,6 +122,29 @@ function localCards(stats: SectionStats, accessLevel: ProcurementAccessLevel): D
   }
   if (accessLevel === "approver") {
     return prCardsForSection("local", stats, "approver");
+  }
+
+  // Lahore plant: PR + PO cards only (no suppliers/items catalog)
+  if (isLahorePlantDepartment(department)) {
+    const cards: DashboardCard[] = [
+      ...prCardsForSection("local", stats, "requester"),
+      {
+        id: "local-po-issued",
+        section: "local",
+        title: "Local POs issued",
+        value: stats.purchaseOrders?.issued ?? 0,
+        href: "/procurement/local/po",
+      },
+      {
+        id: "local-po-draft",
+        section: "local",
+        title: "Local PO drafts",
+        value: stats.purchaseOrders?.draft ?? 0,
+        href: "/procurement/local/po",
+        emphasis: "draft",
+      },
+    ];
+    return cards;
   }
 
   const cards: DashboardCard[] = [
@@ -297,14 +325,15 @@ function exportCards(stats: SectionStats): DashboardCard[] {
 export function buildDashboardCards(
   allowedSections: TradeSection[],
   statsBySection: DashboardStatsBySection,
-  accessLevel: ProcurementAccessLevel
+  accessLevel: ProcurementAccessLevel,
+  department?: string | null
 ): DashboardCard[] {
   const cards: DashboardCard[] = [];
 
   if (allowedSections.includes("local")) {
-    cards.push(...localCards(statsBySection.local ?? {}, accessLevel));
+    cards.push(...localCards(statsBySection.local ?? {}, accessLevel, department));
   }
-  if (allowedSections.includes("import")) {
+  if (allowedSections.includes("import") && !isLahorePlantDepartment(department)) {
     cards.push(...importCards(statsBySection.import ?? {}, accessLevel));
   }
   if (allowedSections.includes("export")) {
