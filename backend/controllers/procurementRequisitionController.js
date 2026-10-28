@@ -19,6 +19,7 @@ const {
   isLahorePlantScopedUser,
   ensureUserDepartment,
   lahoreFinalApproverEmail,
+  labApproverEmail,
 } = require("../utils/procurementPrRouting");
 const {
   collectDepartmentsFromPr,
@@ -37,6 +38,7 @@ const {
   uniqueApproverIds,
   approvalApproverId,
   applyRequesterDepartmentApproverOverride,
+  assignDepartmentApprovalsToRequester,
   approvalOptionsForPrDoc,
   ensureLahoreBossApprover,
   stripObsoleteBossApprovals,
@@ -574,6 +576,12 @@ exports.submit = async (req, res) => {
         });
       }
       approvals = overridden.approvals;
+    }
+
+    // Lab creates the PR and approves it. Other departments' mapped approvers
+    // still apply when someone else is the requester.
+    if (requesterEmail === labApproverEmail() && req.user?._id) {
+      approvals = assignDepartmentApprovalsToRequester(approvals, req.user._id);
     }
 
     const assignedApprover = firstPendingApproverId(approvals, stageOpts);

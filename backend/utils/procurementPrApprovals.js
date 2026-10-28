@@ -285,6 +285,18 @@ function approvalStage(entry) {
 }
 
 /**
+ * Lab may approve a requisition they created. Department mappings (for example
+ * Maintenance HUB → Adnaan) do not take that PR away from them.
+ */
+function assignDepartmentApprovalsToRequester(approvals, requesterId) {
+  if (!requesterId) return approvals;
+  const id = requesterId;
+  return (approvals || []).map((row) =>
+    approvalStage(row) === "department" ? { ...row, approver: id } : row
+  );
+}
+
+/**
  * For requester-specific chains (e.g. Siraj), force every department row onto the configured approver.
  */
 async function applyRequesterDepartmentApproverOverride(company_id, approvals, chain) {
@@ -436,30 +448,33 @@ async function advanceCorporateApprovalStages(company_id, approvals = [], option
     }
 
     const depts = departmentApprovals(next);
-    const financeUserId = String(resolved.userId);
-    // Lahore departments mapped to Tahira should not ask her to approve twice
-    // (once as department manager, again as Lahore finance).
-    const alreadyCoveredByFinanceApprover =
-      stageDef.stage === "finance" &&
-      stages[0]?.stage === "finance" &&
+    const resolvedUserId = String(resolved.userId);
+    const deptsApprovedBySameUser =
       depts.length > 0 &&
       depts.every(
-        (deptRow) => deptRow.status === "approved" && approvalApproverId(deptRow) === financeUserId
+        (deptRow) => deptRow.status === "approved" && approvalApproverId(deptRow) === resolvedUserId
       );
+    // Do not ask the same person twice: Tahira as department + Lahore finance,
+    // or Lab approving a PR they created and then hitting the Lab stage.
+    const alreadyCoveredBySameApprover =
+      deptsApprovedBySameUser &&
+      ((stageDef.stage === "finance" && stages[0]?.stage === "finance") || stageDef.stage === "lab");
 
     const row = {
       department: stageDef.department,
       departmentKey: normalizeDepartment(stageDef.department),
       stage: stageDef.stage,
       approver: resolved.userId,
-      status: alreadyCoveredByFinanceApprover ? "approved" : "pending",
-      reason: alreadyCoveredByFinanceApprover
-        ? "Department approver is Lahore Finance — no second approval"
+      status: alreadyCoveredBySameApprover ? "approved" : "pending",
+      reason: alreadyCoveredBySameApprover
+        ? stageDef.stage === "lab"
+          ? "Requester is the Lab approver — no second Lab approval"
+          : "Department approver is Lahore Finance — no second approval"
         : "",
-      ...(alreadyCoveredByFinanceApprover ? { actedAt: new Date() } : {}),
+      ...(alreadyCoveredBySameApprover ? { actedAt: new Date() } : {}),
     };
     next.push(row);
-    if (alreadyCoveredByFinanceApprover) continue;
+    if (alreadyCoveredBySameApprover) continue;
     newlyAdded.push(row);
     break; // unlock one corporate stage at a time
   }
@@ -593,6 +608,7 @@ module.exports = {
   ensureDepartmentsMappedToUser,
   buildApprovalsForDepartments,
   applyRequesterDepartmentApproverOverride,
+  assignDepartmentApprovalsToRequester,
   advanceCorporateApprovalStages,
   getActionableApprovalStage,
   actionableApprovalRows,

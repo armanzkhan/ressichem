@@ -138,6 +138,10 @@ function lahoreFinalApproverEmail() {
   );
 }
 
+function labApproverEmail() {
+  return normalizeEmail(process.env.PROCUREMENT_LAB_APPROVER_EMAIL) || "lab@ressichem.com";
+}
+
 function requesterApprovalChain(email) {
   const key = normalizeEmail(email);
   if (!key) return null;
@@ -578,6 +582,7 @@ module.exports = {
   isLahoreLocation,
   isLahorePr,
   lahoreFinalApproverEmail,
+  labApproverEmail,
   approverEmailForDepartment,
   resolveApproverEmail,
   requesterApprovalChain,

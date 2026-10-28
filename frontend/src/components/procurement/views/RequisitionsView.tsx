@@ -261,26 +261,60 @@ export function RequisitionsView({ section }: Props) {
     return Boolean(ownerId && String(ownerId) === String(currentUserId));
   };
 
+  const approvalActorId = (approver: PurchaseDocument["assignedApprover"]) =>
+    typeof approver === "string" ? approver : approver?._id;
+
   /**
-   * True when this user is the current assignee (Assigned column), or — if Assigned
-   * is empty — has a pending/held approval row. Prevents Approve showing on Moiz's
-   * turn just because an older pending row exists for this user.
+   * Approve / Hold / Reject when this user has a pending row on the same stage as
+   * the current assignee. Several departments can be pending together; Assigned
+   * only stores the first person, so the others must still be able to act.
+   * A later stage (finance / lab / final) stays locked until that stage is current.
    */
   const isPendingApproverOnPr = (row: PurchaseDocument) => {
     if (!currentUserId) return false;
     const open = ["submitted", "held", "partially_approved"].includes(String(row.status || ""));
     if (!open) return false;
-    const assigned =
-      typeof row.assignedApprover === "string" ? row.assignedApprover : row.assignedApprover?._id;
-    if (assigned) return String(assigned) === String(currentUserId);
     const approvals = row.approvals || [];
-    return approvals.some((a) => {
-      const id = typeof a.approver === "string" ? a.approver : a.approver?._id;
-      return (
-        Boolean(id && String(id) === String(currentUserId)) &&
-        (a.status === "pending" || a.status === "held")
-      );
+    const isOpenStatus = (status?: string) => status === "pending" || status === "held";
+    const mine = approvals.filter((a) => {
+      const id = approvalActorId(a.approver);
+      return Boolean(id && String(id) === String(currentUserId) && isOpenStatus(a.status));
     });
+    const assigned = approvalActorId(row.assignedApprover);
+    if (assigned && String(assigned) === String(currentUserId)) return true;
+    if (!mine.length) return false;
+    if (!assigned) return true;
+    const assignedOpen = approvals.find((a) => {
+      const id = approvalActorId(a.approver);
+      return Boolean(id && String(id) === String(assigned) && isOpenStatus(a.status));
+    });
+    const stage = String(assignedOpen?.stage || "department").toLowerCase();
+    return mine.some((a) => String(a.stage || "department").toLowerCase() === stage);
+  };
+
+  const currentStageAssigneeLabel = (row: PurchaseDocument) => {
+    const approvals = row.approvals || [];
+    const isOpenStatus = (status?: string) => status === "pending" || status === "held";
+    const openRows = approvals.filter((a) => isOpenStatus(a.status));
+    if (!openRows.length) return row.assignedApprover ? procurementUserLabel(row.assignedApprover) : "—";
+    const assigned = approvalActorId(row.assignedApprover);
+    const assignedOpen = openRows.find((a) => {
+      const id = approvalActorId(a.approver);
+      return Boolean(assigned && id && String(id) === String(assigned));
+    });
+    const stage = String(assignedOpen?.stage || openRows[0]?.stage || "department").toLowerCase();
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (const rowApproval of openRows) {
+      if (String(rowApproval.stage || "department").toLowerCase() !== stage) continue;
+      const label = procurementUserLabel(rowApproval.approver);
+      const key = label.toLowerCase();
+      if (!label || label === "—" || seen.has(key)) continue;
+      seen.add(key);
+      names.push(label);
+    }
+    if (names.length) return names.join(", ");
+    return row.assignedApprover ? procurementUserLabel(row.assignedApprover) : "—";
   };
 
   /**
@@ -1025,10 +1059,10 @@ export function RequisitionsView({ section }: Props) {
               ),
               <span
                 key={`asg-${r._id}`}
-                className="block max-w-[7rem] truncate"
-                title={r.assignedApprover ? procurementUserLabel(r.assignedApprover) : ""}
+                className="block max-w-[10rem] text-xs font-semibold text-slate-900 dark:text-white"
+                title={currentStageAssigneeLabel(r)}
               >
-                {r.assignedApprover ? procurementUserLabel(r.assignedApprover) : "—"}
+                {currentStageAssigneeLabel(r)}
               </span>,
               actionCell,
             ];
@@ -1161,6 +1195,55 @@ export function RequisitionsView({ section }: Props) {
               <span className="font-medium text-blue-900 dark:text-blue-200">Location:</span>{" "}
               {viewingRow.location || "—"}
             </p>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 dark:border-slate-600 dark:bg-slate-800">
+              <p className="mb-2 text-sm font-bold uppercase tracking-wide text-blue-950 dark:text-white">
+                Line items ({lineCount(viewingRow)})
+              </p>
+              <ul className="space-y-2">
+                {(viewingRow.items || []).map((item, i) => {
+                  const lineStatus = item.lineFulfillmentStatus || "n_a";
+                  return (
+                    <li key={i} className="rounded-lg bg-white px-3 py-2 dark:bg-slate-900">
+                      <p className="text-base font-bold leading-snug text-slate-950 dark:text-white">
+                        {item.itemName || item.itemCode || "Item"}
+                      </p>
+                      <p className="mt-0.5 text-sm font-bold text-blue-900 dark:text-blue-100">
+                        {item.quantity} {item.unit}
+                        {item.department ? (
+                          <span className="ml-2 font-semibold text-slate-700 dark:text-slate-200">
+                            · {item.department}
+                          </span>
+                        ) : null}
+                      </p>
+                      {item.description ? (
+                        <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                          {item.description}
+                        </p>
+                      ) : null}
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        {viewingRow.status === "approved" ? (
+                          <StatusBadge
+                            status={lineStatus}
+                            label={item.lineFulfillmentLabel || undefined}
+                          />
+                        ) : null}
+                        {item.processed && (item.qtyReceived || 0) > 0 ? (
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                            recv {item.qtyReceived}/{item.qtyOrdered || item.quantity}
+                          </span>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              {viewingRow.status === "approved" && (viewingRow.linesTotal || 0) > 0 ? (
+                <p className="mt-2 text-xs font-medium text-blue-800 dark:text-blue-200">
+                  Processed lines: {viewingRow.linesProcessed || 0}/{viewingRow.linesTotal}
+                  {viewingRow.poNumber ? ` · PO ${viewingRow.poNumber}` : ""}
+                </p>
+              ) : null}
+            </div>
             <p className="flex flex-wrap items-center gap-2">
               <span className="font-medium text-blue-900 dark:text-blue-200">Status:</span>{" "}
               <StatusBadge status={viewingRow.status} />
@@ -1319,40 +1402,6 @@ export function RequisitionsView({ section }: Props) {
                     ) : null}
                   </li>
                 ))}
-              </ul>
-            </div>
-            <div>
-              <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">Line items ({lineCount(viewingRow)})</p>
-              <ul className="space-y-1 text-gray-700 dark:text-gray-300">
-                {(viewingRow.items || []).map((item, i) => {
-                  const lineStatus = item.lineFulfillmentStatus || "n_a";
-                  return (
-                    <li key={i} className="flex flex-wrap items-center gap-2">
-                      <span>
-                        {item.department ? `[${item.department}] ` : ""}
-                        {item.itemName || item.itemCode || "Item"} — {item.quantity} {item.unit}
-                        {item.description ? ` (${item.description})` : ""}
-                      </span>
-                      {viewingRow.status === "approved" ? (
-                        <StatusBadge
-                          status={lineStatus}
-                          label={item.lineFulfillmentLabel || undefined}
-                        />
-                      ) : null}
-                      {item.processed && (item.qtyReceived || 0) > 0 ? (
-                        <span className="text-[11px] text-slate-500 dark:text-slate-300">
-                          recv {item.qtyReceived}/{item.qtyOrdered || item.quantity}
-                        </span>
-                      ) : null}
-                    </li>
-                  );
-                })}
-                {viewingRow.status === "approved" && (viewingRow.linesTotal || 0) > 0 ? (
-                  <p className="text-xs text-blue-600 dark:text-blue-300">
-                    Processed lines: {viewingRow.linesProcessed || 0}/{viewingRow.linesTotal}
-                    {viewingRow.poNumber ? ` · PO ${viewingRow.poNumber}` : ""}
-                  </p>
-                ) : null}
               </ul>
             </div>
             <footer className="flex justify-end gap-2 pt-2">
