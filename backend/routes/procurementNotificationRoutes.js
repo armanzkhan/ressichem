@@ -12,8 +12,11 @@ router.get("/", async (req, res) => {
   try {
     const limit = Number(req.query.limit) || 20;
     const unreadOnly = String(req.query.unreadOnly || "") === "true";
-    const data = await procurementNotificationService.listForUser(req, { limit, unreadOnly });
-    return res.json({ success: true, data });
+    const { notifications, unreadCount } = await procurementNotificationService.listForUser(req, {
+      limit,
+      unreadOnly,
+    });
+    return res.json({ success: true, data: notifications, unreadCount });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }

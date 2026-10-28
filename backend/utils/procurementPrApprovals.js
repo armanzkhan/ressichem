@@ -167,11 +167,10 @@ function departmentsTitleLabel(departments = []) {
 }
 
 async function resolveApproverUserId(company_id, department) {
-  let email = await resolveApproverEmail(company_id, department);
-  // Tahira is Lahore final only — never department-stage manager (PR-77 style mis-mapping).
-  if (email && normalizeEmail(email) === lahoreFinalApproverEmail()) {
-    email = null;
-  }
+  // A department explicitly mapped to the Lahore finance approver (tahira@) is valid.
+  // advanceCorporateApprovalStages skips a second finance click when she already
+  // approved every department row.
+  const email = await resolveApproverEmail(company_id, department);
   if (!email) return { department, email: null, userId: null };
   const user = await User.findOne({
     company_id,
@@ -436,15 +435,31 @@ async function advanceCorporateApprovalStages(company_id, approvals = [], option
       throw err;
     }
 
+    const depts = departmentApprovals(next);
+    const financeUserId = String(resolved.userId);
+    // Lahore departments mapped to Tahira should not ask her to approve twice
+    // (once as department manager, again as Lahore finance).
+    const alreadyCoveredByFinanceApprover =
+      stageDef.stage === "finance" &&
+      stages[0]?.stage === "finance" &&
+      depts.length > 0 &&
+      depts.every(
+        (deptRow) => deptRow.status === "approved" && approvalApproverId(deptRow) === financeUserId
+      );
+
     const row = {
       department: stageDef.department,
       departmentKey: normalizeDepartment(stageDef.department),
       stage: stageDef.stage,
       approver: resolved.userId,
-      status: "pending",
-      reason: "",
+      status: alreadyCoveredByFinanceApprover ? "approved" : "pending",
+      reason: alreadyCoveredByFinanceApprover
+        ? "Department approver is Lahore Finance — no second approval"
+        : "",
+      ...(alreadyCoveredByFinanceApprover ? { actedAt: new Date() } : {}),
     };
     next.push(row);
+    if (alreadyCoveredByFinanceApprover) continue;
     newlyAdded.push(row);
     break; // unlock one corporate stage at a time
   }

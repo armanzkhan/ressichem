@@ -89,7 +89,7 @@ async function deactivateForRequisition(company_id, pr) {
 async function listForUser(req, { limit = 20, unreadOnly = false } = {}) {
   const company_id = getCompanyId(req);
   const userId = await resolveAuthUserId(req);
-  if (!userId) return [];
+  if (!userId) return { notifications: [], unreadCount: 0 };
 
   const capped = Math.min(Math.max(Number(limit) || 20, 1), 50);
   // Over-fetch then drop deleted-PR rows so the panel still fills up.
@@ -109,11 +109,15 @@ async function listForUser(req, { limit = 20, unreadOnly = false } = {}) {
 
   notifications = await filterOutDeletedPrNotifications(company_id, notifications);
 
+  const unreadCount = notifications.filter(
+    (n) => !(n.read_by || []).some((r) => r.user_id === userId)
+  ).length;
+
   if (unreadOnly) {
     notifications = notifications.filter((n) => !(n.read_by || []).some((r) => r.user_id === userId));
   }
 
-  return notifications.slice(0, capped);
+  return { notifications: notifications.slice(0, capped), unreadCount };
 }
 
 async function markReadForUser(req, notificationId) {

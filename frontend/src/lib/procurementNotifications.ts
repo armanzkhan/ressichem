@@ -58,7 +58,9 @@ export function isNotificationUnread(n: ProcurementNotification, userId: string 
   return !(n.read_by || []).some((r) => r.user_id === userId);
 }
 
-export async function fetchProcurementNotifications(limit = 50): Promise<ProcurementNotification[]> {
+export async function fetchProcurementNotifications(
+  limit = 50
+): Promise<{ items: ProcurementNotification[]; unreadCount: number }> {
   const apiBase = getBackendUrl();
   const response = await fetch(`${apiBase}/api/procurement/notifications?limit=${limit}`, {
     headers: getHeaders(),
@@ -67,10 +69,18 @@ export async function fetchProcurementNotifications(limit = 50): Promise<Procure
   if (!response.ok) {
     throw new Error(`Failed to load notifications (${response.status})`);
   }
-  const json = (await response.json()) as { success?: boolean; data?: ProcurementNotification[] };
-  const list = json.data || [];
+  const json = (await response.json()) as {
+    success?: boolean;
+    data?: ProcurementNotification[];
+    unreadCount?: number;
+  };
   const userId = getNotificationUserId();
-  return list.filter((n) => isNotificationForCurrentUser(n, userId));
+  const items = (json.data || []).filter((n) => isNotificationForCurrentUser(n, userId));
+  const unreadCount =
+    typeof json.unreadCount === "number"
+      ? json.unreadCount
+      : items.filter((n) => isNotificationUnread(n, userId)).length;
+  return { items, unreadCount };
 }
 
 /** Build a PR deep-link from notification payload (supports older rows without data.url). */
