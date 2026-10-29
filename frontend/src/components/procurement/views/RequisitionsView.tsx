@@ -699,7 +699,16 @@ export function RequisitionsView({ section }: Props) {
     if (row.submittedAt || row.submittedBy) {
       rows.push({ label: "Submitted", by: procurementUserLabel(row.submittedBy), at: row.submittedAt });
     }
-    if (row.status === "rejected" || row.rejectedAt || row.rejectedBy) {
+    if (row.decisionLog?.length) {
+      for (const entry of row.decisionLog) {
+        rows.push({
+          label: entry.kind === "held" ? "Held by" : "Rejected by",
+          by: entry.actorName || "—",
+          at: entry.at ? String(entry.at) : undefined,
+          note: entry.reason || undefined,
+        });
+      }
+    } else if (row.status === "rejected" || row.rejectedAt || row.rejectedBy) {
       rows.push({
         label: "Rejected by",
         by: row.slaClosedByDeadline
@@ -716,7 +725,7 @@ export function RequisitionsView({ section }: Props) {
         at: row.approvedAt,
       });
     }
-    if (row.status === "held" || row.heldAt || row.heldBy) {
+    if (!row.decisionLog?.length && (row.status === "held" || row.heldAt || row.heldBy)) {
       rows.push({
         label: "Held by",
         by: procurementUserLabel(row.heldBy),
@@ -1184,6 +1193,30 @@ export function RequisitionsView({ section }: Props) {
       {viewingRow ? (
         <Modal title={`Requisition ${viewingRow.requisitionNumber || ""}`} onClose={() => setViewingRow(null)}>
           <div className="space-y-3 text-sm text-blue-800 dark:text-blue-100">
+            {viewingRow.status === "rejected" && viewingRow.rejectionReason ? (
+              <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-red-950 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100">
+                <p className="text-xs font-bold uppercase tracking-wide">Rejection remarks</p>
+                <p className="mt-1 text-base font-semibold leading-snug">{viewingRow.rejectionReason}</p>
+                <p className="mt-1 text-xs">
+                  {(viewingRow.decisionLog || []).filter((entry) => entry.kind === "rejected").slice(-1)[0]
+                    ?.actorName ||
+                    (viewingRow.slaClosedByDeadline
+                      ? "System (72-hour SLA)"
+                      : procurementUserLabel(viewingRow.rejectedBy))}
+                  {viewingRow.rejectedAt ? ` · ${procurementDateTime(viewingRow.rejectedAt)}` : ""}
+                </p>
+              </div>
+            ) : null}
+            {viewingRow.status === "held" && viewingRow.holdReason ? (
+              <div className="rounded-xl border border-violet-300 bg-violet-50 px-4 py-3 text-violet-950 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100">
+                <p className="text-xs font-bold uppercase tracking-wide">Hold remarks</p>
+                <p className="mt-1 text-base font-semibold leading-snug">{viewingRow.holdReason}</p>
+                <p className="mt-1 text-xs">
+                  {procurementUserLabel(viewingRow.heldBy)}
+                  {viewingRow.heldAt ? ` · ${procurementDateTime(viewingRow.heldAt)}` : ""}
+                </p>
+              </div>
+            ) : null}
             <p>
               <span className="font-medium text-blue-900 dark:text-blue-200">Created by:</span>{" "}
               {procurementUserLabel(viewingRow.requestedBy)}
@@ -1389,18 +1422,6 @@ export function RequisitionsView({ section }: Props) {
                 ) : null}
               </div>
             ) : null}
-            {viewingRow.rejectionReason ? (
-              <p>
-                <span className="font-medium text-blue-900 dark:text-blue-200">Rejection reason:</span>{" "}
-                {viewingRow.rejectionReason}
-              </p>
-            ) : null}
-            {viewingRow.holdReason ? (
-              <p>
-                <span className="font-medium text-blue-900 dark:text-blue-200">Hold reason:</span>{" "}
-                {viewingRow.holdReason}
-              </p>
-            ) : null}
             <div>
               <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">History</p>
               <ul className="space-y-1 text-gray-700 dark:text-gray-300">
@@ -1411,7 +1432,7 @@ export function RequisitionsView({ section }: Props) {
                     {entry.by && entry.at ? " · " : ""}
                     {entry.at ? procurementDateTime(entry.at) : !entry.by && !entry.note ? "—" : ""}
                     {entry.note ? (
-                      <span className="mt-0.5 block text-xs text-slate-600 dark:text-slate-400">
+                      <span className="mt-0.5 block text-sm font-medium text-slate-800 dark:text-slate-100">
                         Remarks: {entry.note}
                       </span>
                     ) : null}

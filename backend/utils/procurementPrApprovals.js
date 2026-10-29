@@ -586,6 +586,43 @@ function firstPendingApproverId(approvals = [], options = {}) {
   return pending ? pending.approver : null;
 }
 
+/** Stable fingerprint of location + lines so an SLA resubmit can tell if the PR changed. */
+function prContentKey(pr) {
+  const lines = (pr?.items || []).map((line) => ({
+    item: String(line?.item?._id || line?.item || ""),
+    code: String(line?.itemCode || "").trim().toLowerCase(),
+    name: String(line?.itemName || "").trim().toLowerCase(),
+    description: String(line?.description || "").trim().toLowerCase(),
+    qty: Number(line?.quantity) || 0,
+    unit: String(line?.unit || "").trim().toLowerCase(),
+    department: String(line?.department || "").trim().toLowerCase(),
+  }));
+  return JSON.stringify({
+    location: String(pr?.location || "").trim().toLowerCase(),
+    lines,
+  });
+}
+
+/**
+ * SLA auto-close cancels open steps. On an unchanged resubmit, keep approved rows
+ * and put the unfinished steps back to pending.
+ */
+function reopenApprovalsAfterSla(approvals = []) {
+  return (approvals || []).map((entry) => {
+    const row = typeof entry?.toObject === "function" ? entry.toObject() : { ...entry };
+    const status = String(row.status || "").toLowerCase();
+    if (status === "approved") return row;
+    const reason = String(row.reason || "");
+    if (status === "cancelled" && !/closed automatically/i.test(reason)) return row;
+    return {
+      ...row,
+      status: "pending",
+      actedAt: undefined,
+      reason: "",
+    };
+  });
+}
+
 function uniqueApproverIds(approvals = []) {
   const ids = [];
   const seen = new Set();
@@ -617,6 +654,8 @@ module.exports = {
   countApprovalProgress,
   deriveStatusAfterApprovals,
   firstPendingApproverId,
+  prContentKey,
+  reopenApprovalsAfterSla,
   uniqueApproverIds,
   approvalApproverId,
   approvalStage,

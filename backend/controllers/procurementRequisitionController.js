@@ -35,6 +35,8 @@ const {
   pendingApprovalsForUser,
   deriveStatusAfterApprovals,
   firstPendingApproverId,
+  prContentKey,
+  reopenApprovalsAfterSla,
   uniqueApproverIds,
   approvalApproverId,
   applyRequesterDepartmentApproverOverride,
@@ -57,6 +59,11 @@ const {
 } = require("../utils/procurementPrSameDaySla");
 
 const USER_AUDIT_FIELDS = "firstName lastName email role";
+
+function actorDisplayName(user) {
+  const name = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
+  return name || user?.email || "Approver";
+}
 
 function populateRequisitionAudit(query, { includeLineSuppliers = false } = {}) {
   let q = query
@@ -555,37 +562,55 @@ exports.submit = async (req, res) => {
       });
     }
 
-    let { approvals, missing } = await buildApprovalsForDepartments(company_id, departments);
-    if (missing.length) {
-      return res.status(400).json({
-        success: false,
-        message: `No active approver user for department(s): ${missing
-          .map((d) => `"${d}"`)
-          .join(", ")}. Ensure your account email is active, or ask a Procurement Admin to map them under PR Approvers.`,
-      });
-    }
+    const unchangedSlaResubmit =
+      Boolean(existing.slaClosedByDeadline) &&
+      !existing.rejectedBy &&
+      Boolean(existing.slaContentKey) &&
+      existing.slaContentKey === prContentKey(existing) &&
+      (existing.approvals || []).some((row) => String(row.status || "").toLowerCase() === "approved");
 
-    if (requesterChain?.departmentApproverEmail) {
-      const overridden = await applyRequesterDepartmentApproverOverride(
-        company_id,
-        approvals,
-        requesterChain
-      );
-      if (overridden.missingEmail) {
+    let approvals;
+    let resumedAfterSla = false;
+    if (unchangedSlaResubmit) {
+      approvals = reopenApprovalsAfterSla(existing.approvals);
+      resumedAfterSla = true;
+    } else {
+      const built = await buildApprovalsForDepartments(company_id, departments);
+      if (built.missing.length) {
         return res.status(400).json({
           success: false,
-          message: `No active user for required department approver ${overridden.missingEmail}`,
+          message: `No active approver user for department(s): ${built.missing
+            .map((d) => `"${d}"`)
+            .join(", ")}. Ensure your account email is active, or ask a Procurement Admin to map them under PR Approvers.`,
         });
       }
-      approvals = overridden.approvals;
+      approvals = built.approvals;
+
+      if (requesterChain?.departmentApproverEmail) {
+        const overridden = await applyRequesterDepartmentApproverOverride(
+          company_id,
+          approvals,
+          requesterChain
+        );
+        if (overridden.missingEmail) {
+          return res.status(400).json({
+            success: false,
+            message: `No active user for required department approver ${overridden.missingEmail}`,
+          });
+        }
+        approvals = overridden.approvals;
+      }
+
+      // Lab creates the PR and approves it. Other departments' mapped approvers
+      // still apply when someone else is the requester.
+      if (requesterEmail === labApproverEmail() && req.user?._id) {
+        approvals = assignDepartmentApprovalsToRequester(approvals, req.user._id);
+      }
     }
 
-    // Lab creates the PR and approves it. Other departments' mapped approvers
-    // still apply when someone else is the requester.
-    if (requesterEmail === labApproverEmail() && req.user?._id) {
-      approvals = assignDepartmentApprovalsToRequester(approvals, req.user._id);
-    }
-
+    const nextStatus = resumedAfterSla ? deriveStatusAfterApprovals(approvals, stageOpts) : "submitted";
+    const status =
+      nextStatus === "approved" || nextStatus === "partially_approved" ? nextStatus : "submitted";
     const assignedApprover = firstPendingApproverId(approvals, stageOpts);
     const title = departmentsTitleLabel(departments);
 
@@ -593,7 +618,7 @@ exports.submit = async (req, res) => {
       PurchaseRequisition.findOneAndUpdate(
         { _id: existing._id, company_id, status: { $in: ["draft", "rejected"] } },
         {
-          status: "submitted",
+          status,
           title,
           submittedBy: req.user?._id,
           submittedAt: new Date(),
@@ -611,6 +636,7 @@ exports.submit = async (req, res) => {
           slaReminderSentAt: null,
           slaRemindersSent: [],
           slaClosedByDeadline: false,
+          slaContentKey: "",
           approvedBy: undefined,
           approvedAt: undefined,
           rejectionReason: "",
@@ -627,11 +653,10 @@ exports.submit = async (req, res) => {
       return res.status(400).json({ success: false, message: "Requisition not found or cannot be submitted" });
     }
 
-    void procurementPrNotificationService.notifyPrSubmittedToApprovers(
-      data,
-      req.user,
-      uniqueApproverIds(approvals)
-    );
+    const notifyIds = resumedAfterSla
+      ? [assignedApprover].filter(Boolean)
+      : uniqueApproverIds(approvals);
+    void procurementPrNotificationService.notifyPrSubmittedToApprovers(data, req.user, notifyIds);
     return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -863,19 +888,31 @@ exports.reject = async (req, res) => {
             : { $in: ["submitted", "held", "partially_approved"] },
         },
         {
-          status: "rejected",
-          approvals,
-          rejectedBy: req.user?._id,
-          rejectedAt: now,
-          rejectionReason: reason,
-          assignedApprover: req.user?._id,
-          holdReason: "",
-          heldBy: undefined,
-          heldAt: undefined,
-          holdExpiresAt: undefined,
-          holdRemindersSent: [],
-          approvedBy: undefined,
-          approvedAt: undefined,
+          $set: {
+            status: "rejected",
+            approvals,
+            rejectedBy: req.user?._id,
+            rejectedAt: now,
+            rejectionReason: reason,
+            assignedApprover: req.user?._id,
+            holdReason: "",
+            heldBy: undefined,
+            heldAt: undefined,
+            holdExpiresAt: undefined,
+            holdRemindersSent: [],
+            slaClosedByDeadline: false,
+            slaContentKey: "",
+            approvedBy: undefined,
+            approvedAt: undefined,
+          },
+          $push: {
+            decisionLog: {
+              kind: "rejected",
+              at: now,
+              actorName: actorDisplayName(req.user),
+              reason,
+            },
+          },
         },
         { new: true }
       )
@@ -933,13 +970,23 @@ exports.hold = async (req, res) => {
       PurchaseRequisition.findOneAndUpdate(
         { _id: existing._id, company_id, status: { $in: ["submitted", "partially_approved"] } },
         {
-          status: "held",
-          approvals,
-          heldBy: req.user?._id,
-          heldAt,
-          holdExpiresAt: computeHoldExpiresAt(heldAt),
-          holdRemindersSent: [],
-          holdReason: reason,
+          $set: {
+            status: "held",
+            approvals,
+            heldBy: req.user?._id,
+            heldAt,
+            holdExpiresAt: computeHoldExpiresAt(heldAt),
+            holdRemindersSent: [],
+            holdReason: reason,
+          },
+          $push: {
+            decisionLog: {
+              kind: "held",
+              at: heldAt,
+              actorName: actorDisplayName(req.user),
+              reason,
+            },
+          },
         },
         { new: true }
       )

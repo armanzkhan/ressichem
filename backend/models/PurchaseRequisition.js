@@ -91,6 +91,17 @@ const purchaseRequisitionSchema = new mongoose.Schema(
     /** Reminder keys already sent, e.g. "48h", "24h". */
     slaRemindersSent: { type: [String], default: [] },
     slaClosedByDeadline: { type: Boolean, default: false },
+    /** Line fingerprint at SLA close. Resubmit resumes only when this still matches. */
+    slaContentKey: { type: String, default: "" },
+    /** Rejection and hold remarks kept after resubmit or release. */
+    decisionLog: [
+      {
+        kind: { type: String, enum: ["rejected", "held"], required: true },
+        at: { type: Date, default: Date.now },
+        actorName: { type: String, default: "" },
+        reason: { type: String, default: "" },
+      },
+    ],
     /**
      * Optional site / plant location for location-wise reports.
      * Empty on existing records — does not affect approval workflow.

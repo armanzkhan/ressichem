@@ -17,6 +17,7 @@ const {
   approvalOptionsFromPr,
 } = require("../utils/procurementPrApprovals");
 const procurementPrNotificationService = require("./procurementPrNotificationService");
+const { prContentKey } = require("../utils/procurementPrApprovals");
 
 const TICK_MS = 60 * 1000;
 let timer = null;
@@ -132,6 +133,14 @@ async function rejectForDeadline(pr, now, reason) {
   pr.rejectedAt = now;
   pr.rejectedBy = undefined;
   pr.slaClosedByDeadline = true;
+  pr.slaContentKey = prContentKey(pr);
+  pr.decisionLog = pr.decisionLog || [];
+  pr.decisionLog.push({
+    kind: "rejected",
+    at: now,
+    actorName: /30 days/i.test(reason) ? "System (30-day hold)" : "System (72-hour SLA)",
+    reason,
+  });
   pr.holdReason = "";
   pr.heldBy = undefined;
   pr.heldAt = undefined;

@@ -236,6 +236,12 @@ export type PurchaseDocument = {
   slaStatus?: string;
   slaLabel?: string;
   slaClosedByDeadline?: boolean;
+  decisionLog?: Array<{
+    kind?: "rejected" | "held" | string;
+    at?: string | Date;
+    actorName?: string;
+    reason?: string;
+  }>;
   approvedBy?: ProcurementUser | string;
   approvedAt?: string;
   rejectedBy?: ProcurementUser | string;
