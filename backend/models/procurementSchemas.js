@@ -46,6 +46,8 @@ const lineItemSchema = new mongoose.Schema(
     lineTotal: { type: Number, default: 0 },
     /** Department owning this line (drives multi-approver PR routing). */
     department: { type: String, default: "" },
+    /** Index of this line on the source PR when the PO was created from selected lines. */
+    prLineIndex: { type: Number },
     supplier: { type: mongoose.Schema.Types.ObjectId, ref: "ProcurementSupplier" },
     supplierName: { type: String, default: "" },
   },

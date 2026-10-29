@@ -17,6 +17,7 @@ const PO_STATUS_RANK = {
 const FULFILLMENT_LABELS = {
   n_a: "",
   awaiting_po: "approved (awaiting purchase)",
+  partial_lines: "some lines on a PO — remaining awaiting PO",
   po_draft: "purchase drafting",
   issued: "purchased",
   partial: "partially delivered",
@@ -119,42 +120,88 @@ function deriveLineFulfillment(prStatus, po, poLine) {
   };
 }
 
-function enrichPrItemsWithLineFulfillment(pr, po) {
+function activePurchaseOrders(pos) {
+  const list = Array.isArray(pos) ? pos : pos ? [pos] : [];
+  return list.filter((po) => String(po?.status || "").toLowerCase() !== "cancelled");
+}
+
+/** PR line indexes already copied onto a live PO. */
+function takenPrLineIndexes(pr, pos) {
+  const taken = new Set();
+  const active = activePurchaseOrders(pos);
+  const legacy = [];
+  for (const po of active) {
+    const poItems = po.items || [];
+    const indexed = poItems.filter((line) => Number.isInteger(line?.prLineIndex));
+    if (indexed.length) {
+      indexed.forEach((line) => taken.add(line.prLineIndex));
+    } else if (poItems.length) {
+      legacy.push(po);
+    }
+  }
+  // Older POs copied every PR line in order and did not store prLineIndex.
+  if (legacy.length === 1 && (pr.items || []).length === (legacy[0].items || []).length) {
+    (pr.items || []).forEach((_, index) => taken.add(index));
+  }
+  return taken;
+}
+
+function enrichPrItemsWithLineFulfillment(pr, pos) {
   const prItems = Array.isArray(pr.items) ? pr.items : [];
   if (!prItems.length) {
     return { items: prItems, linesProcessed: 0, linesTotal: 0 };
   }
 
-  const poItems = Array.isArray(po?.items) ? po.items : [];
-  const usedPoIdx = new Set();
+  const active = activePurchaseOrders(pos);
+  const byIndex = new Map();
+  for (const po of active) {
+    for (const poLine of po.items || []) {
+      if (!Number.isInteger(poLine?.prLineIndex) || byIndex.has(poLine.prLineIndex)) continue;
+      byIndex.set(poLine.prLineIndex, { po, poLine });
+    }
+  }
+  const legacyPo =
+    active.length === 1 &&
+    (active[0].items || []).length === prItems.length &&
+    (active[0].items || []).every((line) => !Number.isInteger(line?.prLineIndex))
+      ? active[0]
+      : null;
+
   let linesProcessed = 0;
-
   const items = prItems.map((prLine, i) => {
-    const key = lineMatchKey(prLine);
-    let poLine = null;
-    if (key) {
-      const idx = poItems.findIndex((pl, j) => !usedPoIdx.has(j) && lineMatchKey(pl) === key);
-      if (idx >= 0) {
-        poLine = poItems[idx];
-        usedPoIdx.add(idx);
-      }
+    const linked = byIndex.get(i) || (legacyPo ? { po: legacyPo, poLine: legacyPo.items[i] } : null);
+    const lineMeta = deriveLineFulfillment(pr.status, linked?.po, linked?.poLine);
+    if (["po_draft", "issued", "partial", "received", "closed"].includes(lineMeta.lineFulfillmentStatus)) {
+      linesProcessed += 1;
+    } else if (lineMeta.lineFulfillmentStatus === "awaiting_po" && active.length) {
+      lineMeta.lineFulfillmentLabel = "remaining — awaiting PO";
     }
-    // Convert copies lines 1:1 — fall back to same index when keys do not match
-    if (!poLine && poItems[i] && !usedPoIdx.has(i)) {
-      poLine = poItems[i];
-      usedPoIdx.add(i);
-    }
-
-    const lineMeta = deriveLineFulfillment(pr.status, po, poLine);
-    if (lineMeta.processed) linesProcessed += 1;
-
-    return {
-      ...prLine,
-      ...lineMeta,
-    };
+    return { ...prLine, ...lineMeta };
   });
 
   return { items, linesProcessed, linesTotal: items.length };
+}
+
+function headerFulfillmentFromLines(pr, items, pos) {
+  const active = activePurchaseOrders(pos);
+  const open = items.filter((line) => line.lineFulfillmentStatus === "awaiting_po").length;
+  const covered = items.length - open;
+  if (!items.length || !active.length || covered <= 0) {
+    return deriveStockFulfillment(pr, null);
+  }
+  if (open > 0) {
+    return {
+      stockStatus: "partial_lines",
+      fulfillmentStatus: "partial_lines",
+      fulfillmentLabel: `${covered} of ${items.length} lines on a PO — remaining awaiting PO`,
+      poId: active[0]._id,
+      poNumber: active.map((po) => po.poNumber).filter(Boolean).join(", "),
+      poStatus: "partial_lines",
+      qtyOrdered: 0,
+      qtyReceived: 0,
+    };
+  }
+  return deriveStockFulfillment(pr, pickLinkedPo(active));
 }
 
 function deriveStockFulfillment(pr, po) {
@@ -235,9 +282,9 @@ async function enrichPrsWithFulfillment(PurchaseOrder, company_id, rows = []) {
   }
 
   return rows.map((pr) => {
-    const linked = pickLinkedPo(byPr.get(String(pr._id)) || []);
-    const header = deriveStockFulfillment(pr, linked);
+    const linked = byPr.get(String(pr._id)) || [];
     const { items, linesProcessed, linesTotal } = enrichPrItemsWithLineFulfillment(pr, linked);
+    const header = headerFulfillmentFromLines(pr, items, linked);
     return {
       ...pr,
       ...header,
@@ -258,4 +305,6 @@ module.exports = {
   deriveLineFulfillment,
   enrichPrItemsWithLineFulfillment,
   enrichPrsWithFulfillment,
+  takenPrLineIndexes,
+  activePurchaseOrders,
 };

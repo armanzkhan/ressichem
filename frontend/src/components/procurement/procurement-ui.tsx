@@ -522,6 +522,7 @@ export function StatusBadge({ status, label: labelOverride }: { status: string; 
     paid: "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-200",
     partially_paid: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
     awaiting_po: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+    partial_lines: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
     po_draft: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
     open: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
     in_progress: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-200",

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const authMiddleware = require("../middleware/authMiddleware");
 const permissionMiddleware = require("../middleware/permissionMiddleware");
+const { hasPrFullAccess, isProcurementAdminUser } = require("../utils/procurementPrRouting");
 const ctrl = require("../controllers/procurementRequisitionController");
 const reportCtrl = require("../controllers/procurementPrReportController");
 
@@ -55,12 +56,11 @@ router.post(
   permissionMiddleware.any(["procurement.requisitions.approve", "procurement.access"]),
   ctrl.releaseHold
 );
-// Buyers/admins only — requesters cannot create POs
-router.post(
-  "/:id/convert-to-po",
-  permissionMiddleware(["procurement.po.create"]),
-  ctrl.convertToPO
-);
+// Buyers, procurement admins, and PR full-access — requesters cannot create POs
+router.post("/:id/convert-to-po", (req, res, next) => {
+  if (isProcurementAdminUser(req.user) || hasPrFullAccess(req.user)) return next();
+  return permissionMiddleware(["procurement.po.create"])(req, res, next);
+}, ctrl.convertToPO);
 router.delete("/:id", permissionMiddleware(["procurement.access"]), ctrl.softDelete);
 
 module.exports = router;

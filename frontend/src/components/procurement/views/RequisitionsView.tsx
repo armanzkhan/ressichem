@@ -231,6 +231,10 @@ export function RequisitionsView({ section }: Props) {
     createdBy: string;
   } | null>(null);
   const [convertPr, setConvertPr] = useState<PurchaseDocument | null>(null);
+  /** PR line indexes included on the draft PO being created. */
+  const [convertSelected, setConvertSelected] = useState<Record<number, boolean>>({});
+  /** Line ticks on the approved-PR detail before Create PO opens. */
+  const [detailPoSelected, setDetailPoSelected] = useState<Record<number, boolean>>({});
   /** Per PR-line unit price at Create PO time (keyed by line index). */
   const [convertLinePrices, setConvertLinePrices] = useState<Record<number, string>>({});
   /** Per PR-line vendor chosen at Create PO time (keyed by line index). */
@@ -332,18 +336,23 @@ export function RequisitionsView({ section }: Props) {
   const canActAsApproverOnPr = (row: PurchaseDocument) =>
     prFullAccess || isPendingApproverOnPr(row);
 
-  /** Buyers/admins only — requesters do not create or open Purchase Orders. */
-  const canConvertAnyApprovedPo = accessLevel === "buyer" || prFullAccess;
+  /** Buyers and admins — requesters do not create Purchase Orders. */
+  const canConvertAnyApprovedPo =
+    accessLevel === "buyer" || accessLevel === "admin" || prFullAccess;
+  const lineOpenForPo = (item?: { lineFulfillmentStatus?: string }) => {
+    const status = String(item?.lineFulfillmentStatus || "awaiting_po").toLowerCase();
+    return status === "awaiting_po" || status === "cancelled" || status === "n_a";
+  };
   /**
-   * Buyers/admins: any approved PR they can see.
-   * Hide once a PO already exists (drafting / purchased / delivered). Allow again if the only PO was cancelled.
+   * Buyers/admins may create a PO for any approved lines that are not already on a live PO.
    */
   const canConvertToPo = (row: PurchaseDocument) => {
     if (row.status !== "approved") return false;
     if (!canConvertAnyApprovedPo) return false;
+    const items = row.items || [];
+    if (items.length) return items.some((item) => lineOpenForPo(item));
     const fulfillment = String(row.fulfillmentStatus || row.stockStatus || "awaiting_po").toLowerCase();
-    const alreadyHasPo = ["po_draft", "issued", "partial", "received", "closed"].includes(fulfillment);
-    return !alreadyHasPo;
+    return fulfillment === "awaiting_po" || fulfillment === "partial_lines" || fulfillment === "cancelled";
   };
 
   /** Only the requester (or PR full-access) may edit / submit / resubmit draft or rejected PRs */
@@ -555,6 +564,11 @@ export function RequisitionsView({ section }: Props) {
     try {
       const res = await procurementApi.getRequisition(row._id);
       setViewingRow(res.data);
+      const next: Record<number, boolean> = {};
+      (res.data.items || []).forEach((item, i) => {
+        next[i] = lineOpenForPo(item);
+      });
+      setDetailPoSelected(next);
       setShowForm(false);
       setEditingId(null);
       setEditingMeta(null);
@@ -586,24 +600,28 @@ export function RequisitionsView({ section }: Props) {
     await openEditForm(viewingRow);
   };
 
-  const openConvertToPo = async (row: PurchaseDocument) => {
+  const openConvertToPo = async (row: PurchaseDocument, presetIndexes?: number[]) => {
     setError("");
     setConvertLineVendors({});
-    const seedPrices = (items?: PurchaseDocument["items"]) => {
-      const next: Record<number, string> = {};
+    const seedLines = (items?: PurchaseDocument["items"]) => {
+      const prices: Record<number, string> = {};
+      const selected: Record<number, boolean> = {};
       (items || []).forEach((item, i) => {
-        if (Number(item.unitPrice) > 0) next[i] = String(item.unitPrice);
+        if (Number(item.unitPrice) > 0) prices[i] = String(item.unitPrice);
+        const open = lineOpenForPo(item);
+        selected[i] = open && (presetIndexes ? presetIndexes.includes(i) : true);
       });
-      setConvertLinePrices(next);
+      setConvertLinePrices(prices);
+      setConvertSelected(selected);
     };
-    seedPrices(row.items);
+    seedLines(row.items);
     setConvertPr(row);
     try {
       const [res] = await Promise.all([
         procurementApi.getRequisition(row._id),
         ensureSuppliersLoaded(),
       ]);
-      seedPrices(res.data?.items);
+      seedLines(res.data?.items);
       setConvertPr(res.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load requisition details");
@@ -1239,11 +1257,62 @@ export function RequisitionsView({ section }: Props) {
               <p className="mb-2 text-sm font-bold uppercase tracking-wide text-blue-950 dark:text-white">
                 Line items ({lineCount(viewingRow)})
               </p>
+              {canConvertToPo(viewingRow) ? (
+                <div className="mb-2 space-y-2">
+                  <p className="text-xs font-medium text-blue-800 dark:text-blue-200">
+                    Tick the lines for this purchase order. Unticked lines stay on this PR as remaining
+                    and can be purchased later. Every remaining line starts checked.
+                  </p>
+                  {(() => {
+                    const openIndexes = (viewingRow.items || [])
+                      .map((item, i) => (lineOpenForPo(item) ? i : -1))
+                      .filter((i) => i >= 0);
+                    if (openIndexes.length < 2) return null;
+                    const allChecked = openIndexes.every((i) => detailPoSelected[i]);
+                    return (
+                      <label className="flex items-center gap-2 text-sm font-semibold text-blue-950 dark:text-blue-50">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={allChecked}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            setDetailPoSelected((prev) => {
+                              const next = { ...prev };
+                              openIndexes.forEach((i) => {
+                                next[i] = on;
+                              });
+                              return next;
+                            });
+                          }}
+                        />
+                        Check all remaining lines
+                      </label>
+                    );
+                  })()}
+                </div>
+              ) : null}
               <ul className="space-y-2">
                 {(viewingRow.items || []).map((item, i) => {
                   const lineStatus = item.lineFulfillmentStatus || "n_a";
+                  const openForPo = lineOpenForPo(item);
+                  const showPick = canConvertToPo(viewingRow);
                   return (
                     <li key={i} className="rounded-lg bg-white px-3 py-2 dark:bg-slate-900">
+                      <div className="flex items-start gap-2">
+                        {showPick ? (
+                          <input
+                            type="checkbox"
+                            className="mt-1 h-4 w-4 shrink-0"
+                            checked={Boolean(openForPo && detailPoSelected[i])}
+                            disabled={!openForPo}
+                            onChange={(e) =>
+                              setDetailPoSelected((prev) => ({ ...prev, [i]: e.target.checked }))
+                            }
+                            aria-label={`Include line ${i + 1} on the purchase order`}
+                          />
+                        ) : null}
+                        <div className="min-w-0 flex-1">
                       <p className="text-base font-bold leading-snug text-slate-950 dark:text-white">
                         {item.itemName || item.itemCode || "Item"}
                       </p>
@@ -1272,6 +1341,13 @@ export function RequisitionsView({ section }: Props) {
                             recv {item.qtyReceived}/{item.qtyOrdered || item.quantity}
                           </span>
                         ) : null}
+                        {showPick && openForPo && !detailPoSelected[i] ? (
+                          <span className="text-[11px] font-medium text-amber-800 dark:text-amber-200">
+                            Remaining — waiting for a later PO
+                          </span>
+                        ) : null}
+                      </div>
+                        </div>
                       </div>
                     </li>
                   );
@@ -1279,7 +1355,7 @@ export function RequisitionsView({ section }: Props) {
               </ul>
               {viewingRow.status === "approved" && (viewingRow.linesTotal || 0) > 0 ? (
                 <p className="mt-2 text-xs font-medium text-blue-800 dark:text-blue-200">
-                  Processed lines: {viewingRow.linesProcessed || 0}/{viewingRow.linesTotal}
+                  Lines on a PO: {viewingRow.linesProcessed || 0}/{viewingRow.linesTotal}
                   {viewingRow.poNumber ? ` · PO ${viewingRow.poNumber}` : ""}
                 </p>
               ) : null}
@@ -1440,7 +1516,26 @@ export function RequisitionsView({ section }: Props) {
                 ))}
               </ul>
             </div>
-            <footer className="flex justify-end gap-2 pt-2">
+            <footer className="flex flex-wrap justify-end gap-2 pt-2">
+              {canConvertToPo(viewingRow) ? (
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm"
+                  onClick={() => {
+                    const indexes = (viewingRow.items || [])
+                      .map((item, i) => (lineOpenForPo(item) && detailPoSelected[i] ? i : -1))
+                      .filter((i) => i >= 0);
+                    if (!indexes.length) {
+                      setError("Select at least one line that is still awaiting a PO");
+                      return;
+                    }
+                    setError("");
+                    void openConvertToPo(viewingRow, indexes);
+                  }}
+                >
+                  Create PO for selected lines
+                </button>
+              ) : null}
               {canOpenEditForm(viewingRow) ? (
                 <button
                   type="button"
@@ -1638,24 +1733,30 @@ export function RequisitionsView({ section }: Props) {
           {(() => {
             const prLines = convertPr.items || [];
             const scopedSuppliers = filterSuppliersBySection(suppliers, section);
+            const selectedIndexes = prLines
+              .map((item, i) => (lineOpenForPo(item) && convertSelected[i] ? i : -1))
+              .filter((i) => i >= 0);
             const allLinesHaveVendor =
-              prLines.length > 0 && prLines.every((_, i) => Boolean(convertLineVendors[i]));
+              selectedIndexes.length > 0 &&
+              selectedIndexes.every((i) => Boolean(convertLineVendors[i]));
             const allLinesHavePrice =
-              prLines.length > 0 &&
-              prLines.every((_, i) => {
+              selectedIndexes.length > 0 &&
+              selectedIndexes.every((i) => {
                 const raw = convertLinePrices[i];
                 const n = Number(raw);
                 return Boolean(raw?.trim()) && Number.isFinite(n) && n > 0;
               });
             const uniqueVendors = [
-              ...new Set(Object.values(convertLineVendors).filter(Boolean)),
+              ...new Set(selectedIndexes.map((i) => convertLineVendors[i]).filter(Boolean)),
             ];
             const applyVendorToAll = (supplierId: string) => {
-              const next: Record<number, string> = {};
-              prLines.forEach((_, i) => {
-                next[i] = supplierId;
+              setConvertLineVendors((prev) => {
+                const next = { ...prev };
+                selectedIndexes.forEach((i) => {
+                  next[i] = supplierId;
+                });
+                return next;
               });
-              setConvertLineVendors(next);
             };
             return (
               <div className="space-y-4">
@@ -1722,13 +1823,41 @@ export function RequisitionsView({ section }: Props) {
                 </section>
 
                 <p className="text-sm text-gray-600 dark:text-gray-300">
-                  Assign a vendor and unit price on each line below, then create{" "}
-                  <strong>one draft PO</strong>. Different vendors stay on the same PO.
+                  Tick the lines for this purchase order, then set a vendor and unit price on each
+                  ticked line. Unticked lines stay on the PR as remaining and can be purchased later.
+                  Every remaining line starts checked.
                 </p>
+                {(() => {
+                  const openIndexes = prLines
+                    .map((item, i) => (lineOpenForPo(item) ? i : -1))
+                    .filter((i) => i >= 0);
+                  if (openIndexes.length < 2) return null;
+                  const allChecked = openIndexes.every((i) => convertSelected[i]);
+                  return (
+                    <label className="flex items-center gap-2 text-sm font-semibold text-blue-950 dark:text-blue-50">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={allChecked}
+                        onChange={(e) => {
+                          const on = e.target.checked;
+                          setConvertSelected((prev) => {
+                            const next = { ...prev };
+                            openIndexes.forEach((i) => {
+                              next[i] = on;
+                            });
+                            return next;
+                          });
+                        }}
+                      />
+                      Check all remaining lines
+                    </label>
+                  );
+                })()}
 
-                {prLines.length > 1 ? (
+                {selectedIndexes.length > 1 ? (
                   <div>
-                    <FormLabel>Apply one vendor to all lines</FormLabel>
+                    <FormLabel>Apply one vendor to selected lines</FormLabel>
                     <SupplierSelect
                       section={section}
                       suppliers={scopedSuppliers}
@@ -1751,13 +1880,27 @@ export function RequisitionsView({ section }: Props) {
                       This PR has no line items — cannot create a PO.
                     </p>
                   ) : (
-                    prLines.map((item, i) => (
+                    prLines.map((item, i) => {
+                      const openForPo = lineOpenForPo(item);
+                      const picked = Boolean(openForPo && convertSelected[i]);
+                      return (
                       <article
                         key={item._id || i}
                         className="rounded-xl border border-blue-100 bg-white p-3 dark:border-slate-700 dark:bg-slate-950"
                       >
                         <header className="mb-2 flex flex-wrap items-start justify-between gap-2">
-                          <div className="min-w-0">
+                          <div className="flex min-w-0 items-start gap-2">
+                            <input
+                              type="checkbox"
+                              className="mt-1 h-4 w-4 shrink-0"
+                              checked={picked}
+                              disabled={!openForPo}
+                              onChange={(e) =>
+                                setConvertSelected((prev) => ({ ...prev, [i]: e.target.checked }))
+                              }
+                              aria-label={`Include line ${i + 1} on this purchase order`}
+                            />
+                            <div className="min-w-0">
                             <p className="text-sm font-semibold text-blue-950 dark:text-blue-50">
                               Line {i + 1}: {item.itemName || item.itemCode || "Item"}
                             </p>
@@ -1770,13 +1913,25 @@ export function RequisitionsView({ section }: Props) {
                                 .filter(Boolean)
                                 .join(" · ")}
                             </p>
+                            </div>
                           </div>
+                          {!openForPo ? (
+                            <StatusBadge
+                              status={item.lineFulfillmentStatus || "po_draft"}
+                              label={item.lineFulfillmentLabel || "already on a PO"}
+                            />
+                          ) : !picked ? (
+                            <span className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                              Remaining — waiting for a later PO
+                            </span>
+                          ) : null}
                         </header>
-                        {item.description ? (
+                        {!picked ? null : item.description ? (
                           <p className="mb-2 text-xs text-slate-600 dark:text-slate-300">
                             {item.description}
                           </p>
                         ) : null}
+                        {picked ? (
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           <FormLabel>
                             Vendor <span className="text-red-600">*</span>
@@ -1829,8 +1984,10 @@ export function RequisitionsView({ section }: Props) {
                             ) : null}
                           </FormLabel>
                         </div>
+                        ) : null}
                       </article>
-                    ))
+                      );
+                    })
                   )}
                 </section>
 
@@ -1860,20 +2017,32 @@ export function RequisitionsView({ section }: Props) {
                       setConverting(true);
                       setError("");
                       try {
-                        const lineSuppliers = prLines.map((_, i) => convertLineVendors[i]);
+                        const lineSuppliers = prLines.map((_, i) => convertLineVendors[i] || "");
                         const lineUnitPrices = prLines.map((_, i) => {
                           const n = Number(convertLinePrices[i]);
                           return Number.isFinite(n) ? n : 0;
                         });
-                        await procurementApi.convertRequisitionToPO(convertPr._id, {
-                          supplier: lineSuppliers[0],
+                        const prId = convertPr._id;
+                        await procurementApi.convertRequisitionToPO(prId, {
+                          supplier: lineSuppliers[selectedIndexes[0]],
                           lineSuppliers,
                           lineUnitPrices,
+                          lineIndexes: selectedIndexes,
                         });
                         setConvertPr(null);
                         setConvertLineVendors({});
                         setConvertLinePrices({});
+                        setConvertSelected({});
                         await load();
+                        if (viewingRow?._id === prId) {
+                          const fresh = await procurementApi.getRequisition(prId);
+                          setViewingRow(fresh.data);
+                          const next: Record<number, boolean> = {};
+                          (fresh.data.items || []).forEach((item, i) => {
+                            next[i] = lineOpenForPo(item);
+                          });
+                          setDetailPoSelected(next);
+                        }
                       } catch (e) {
                         setError(e instanceof Error ? e.message : "Convert failed");
                       } finally {
@@ -1881,7 +2050,9 @@ export function RequisitionsView({ section }: Props) {
                       }
                     }}
                   >
-                    {converting ? "Creating…" : "Create draft PO"}
+                    {converting
+                      ? "Creating…"
+                      : `Create draft PO (${selectedIndexes.length} line${selectedIndexes.length === 1 ? "" : "s"})`}
                   </button>
                 </footer>
               </div>

@@ -174,6 +174,20 @@ exports.update = async (req, res) => {
     delete body.updatedAt;
     delete body.__v;
 
+    if (Array.isArray(body.items) && Array.isArray(existing.items)) {
+      const previousById = new Map(
+        existing.items.filter((line) => line && line._id).map((line) => [String(line._id), line])
+      );
+      body.items = body.items.map((line) => {
+        if (Number.isInteger(line?.prLineIndex)) return line;
+        const previous = line?._id ? previousById.get(String(line._id)) : null;
+        if (previous && Number.isInteger(previous.prLineIndex)) {
+          return { ...line, prLineIndex: previous.prLineIndex };
+        }
+        return line;
+      });
+    }
+
     if (Array.isArray(body.items) && body.items.some((line) => !(Number(line.unitPrice) > 0))) {
       return res.status(400).json({
         success: false,

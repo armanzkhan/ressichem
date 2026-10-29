@@ -1081,7 +1081,10 @@ exports.convertToPO = async (req, res) => {
 
     // Buyers (po.create) / admins only — requesters cannot convert PRs to PO
     const permKeys = (req.user?.permissions || []).map((p) => (typeof p === "string" ? p : p?.key || ""));
-    const canBuyerConvert = permKeys.includes("procurement.po.create") || isProcurementAdminUser(req.user);
+    const canBuyerConvert =
+      permKeys.includes("procurement.po.create") ||
+      isProcurementAdminUser(req.user) ||
+      hasPrFullAccess(req.user);
     if (!canBuyerConvert) {
       return res.status(403).json({
         success: false,
@@ -1096,33 +1099,52 @@ exports.convertToPO = async (req, res) => {
       });
     }
 
-    // Allow re-convert after a cancelled PO; block only active (non-cancelled) POs
-    const existingPo = await PurchaseOrder.findOne({
+    const { takenPrLineIndexes } = require("../utils/procurementPrFulfillment");
+    const livePos = await PurchaseOrder.find({
       company_id,
       requisition: pr._id,
       isActive: { $ne: false },
       status: { $ne: "cancelled" },
-    }).lean();
-    if (existingPo) {
+    })
+      .select("poNumber status items")
+      .lean();
+    const taken = takenPrLineIndexes(pr, livePos);
+    const requestedIndexes = Array.isArray(req.body?.lineIndexes)
+      ? req.body.lineIndexes.map((n) => Number(n)).filter((n) => Number.isInteger(n))
+      : (pr.items || []).map((_, index) => index).filter((index) => !taken.has(index));
+    const selectedIndexes = [...new Set(requestedIndexes)];
+    if (selectedIndexes.some((index) => index < 0 || index >= (pr.items || []).length)) {
+      return res.status(400).json({ success: false, message: "One or more selected lines are not on this requisition" });
+    }
+    if (!selectedIndexes.length) {
       return res.status(400).json({
         success: false,
-        message: `A purchase order already exists for this PR (${existingPo.poNumber})`,
-        data: existingPo,
+        message: "Select at least one line that is not already on a purchase order",
+      });
+    }
+    const alreadyTaken = selectedIndexes.filter((index) => taken.has(index));
+    if (alreadyTaken.length) {
+      return res.status(400).json({
+        success: false,
+        message: `Line ${alreadyTaken.map((n) => n + 1).join(", ")} already has a purchase order`,
       });
     }
 
     // Vendors are chosen at Create PO time (not on the PR form).
-    // Prefer body.lineSuppliers[i] per PR line; fall back to body.supplier for every line.
+    // lineSuppliers[i] / lineUnitPrices[i] follow the PR line index.
     const defaultSupplierId = req.body?.supplier || pr.supplier || null;
     const lineSuppliersBody = Array.isArray(req.body?.lineSuppliers) ? req.body.lineSuppliers : [];
     const ProcurementSupplier = require("../models/ProcurementSupplier");
 
-    const rawItems = (pr.items || []).map((line, index) => {
+    const rawItems = selectedIndexes.map((index) => {
+      const line = pr.items[index];
+      if (!line) return null;
       const plain = typeof line.toObject === "function" ? line.toObject() : { ...line };
+      delete plain._id;
       const fromBody = lineSuppliersBody[index] || null;
       const lineSupplier = fromBody || defaultSupplierId || null;
-      return { plain, lineSupplier };
-    });
+      return { plain, lineSupplier, index };
+    }).filter(Boolean);
 
     if (!rawItems.length) {
       return res.status(400).json({ success: false, message: "Requisition has no line items to convert" });
@@ -1146,7 +1168,7 @@ exports.convertToPO = async (req, res) => {
     const nameById = new Map(supplierDocs.map((s) => [String(s._id), s.name || ""]));
 
     const lineUnitPrices = Array.isArray(req.body?.lineUnitPrices) ? req.body.lineUnitPrices : [];
-    const items = rawItems.map(({ plain, lineSupplier }, index) => {
+    const items = rawItems.map(({ plain, lineSupplier, index }) => {
       const sid = String(lineSupplier);
       const fromBody = Number(lineUnitPrices[index]);
       const unitPrice =
@@ -1156,6 +1178,7 @@ exports.convertToPO = async (req, res) => {
       const qty = Number(plain.quantity) || 0;
       return {
         ...plain,
+        prLineIndex: index,
         supplier: sid,
         supplierName: plain.supplierName || nameById.get(sid) || "",
         receivedQuantity: 0,
@@ -1163,6 +1186,12 @@ exports.convertToPO = async (req, res) => {
         lineTotal: Math.round(qty * unitPrice * 100) / 100,
       };
     });
+    if (items.some((line) => !(Number(line.unitPrice) > 0))) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter a unit price greater than 0 for every selected line",
+      });
+    }
 
     const primarySupplierId = supplierIds[0];
 
@@ -1174,8 +1203,8 @@ exports.convertToPO = async (req, res) => {
       exchangeRate: pr.exchangeRate || 1,
       prNumber: pr.requisitionNumber || "",
       items,
-      taxAmount: pr.taxAmount || 0,
-      notes: pr.notes || `Converted from ${pr.requisitionNumber}`,
+      taxAmount: 0,
+      notes: `Converted from ${pr.requisitionNumber} (lines ${selectedIndexes.map((n) => n + 1).join(", ")})`,
     });
 
     const poNumber = await nextDocumentNumber(PurchaseOrder, company_id, "PO");
@@ -1206,9 +1235,12 @@ exports.convertToPO = async (req, res) => {
 
     const vendorNote =
       supplierIds.length > 1 ? ` with ${supplierIds.length} vendors` : "";
+    const remaining = (pr.items || []).length - taken.size - selectedIndexes.length;
     return res.status(201).json({
       success: true,
-      message: `Created draft PO ${po.poNumber} from ${pr.requisitionNumber}${vendorNote}`,
+      message: `Created draft PO ${po.poNumber} from ${pr.requisitionNumber} (${selectedIndexes.length} line(s)${vendorNote})${
+        remaining > 0 ? `. ${remaining} line(s) still awaiting a PO.` : ""
+      }`,
       data: populated,
     });
   } catch (err) {

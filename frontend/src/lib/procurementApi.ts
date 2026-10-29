@@ -168,6 +168,8 @@ export type LineItem = {
   currency?: string;
   lineTotal?: number;
   department?: string;
+  /** Index of this line on the source PR when the PO was created from selected lines. */
+  prLineIndex?: number;
   /** Derived from linked PO — true once that PO line is issued or further */
   processed?: boolean;
   lineFulfillmentStatus?: string;
@@ -978,7 +980,12 @@ export const procurementApi = {
    */
   convertRequisitionToPO: (
     id: string,
-    body?: { supplier?: string; lineSuppliers?: string[]; lineUnitPrices?: number[] }
+    body?: {
+      supplier?: string;
+      lineSuppliers?: string[];
+      lineUnitPrices?: number[];
+      lineIndexes?: number[];
+    }
   ) =>
     request<{ success: boolean; message?: string; data?: PurchaseDocument }>(
       `/api/procurement/requisitions/${id}/convert-to-po`,
