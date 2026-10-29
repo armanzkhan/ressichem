@@ -50,6 +50,8 @@ const { enrichPrsWithFulfillment } = require("../utils/procurementPrFulfillment"
 const {
   slaEnabled,
   computeSlaDueAt,
+  computeHoldExpiresAt,
+  extendSlaAfterHold,
   isPastSlaDeadline,
   slaStatusForPr,
 } = require("../utils/procurementPrSameDaySla");
@@ -607,6 +609,7 @@ exports.submit = async (req, res) => {
           ),
           slaDueAt: computeSlaDueAt(new Date()),
           slaReminderSentAt: null,
+          slaRemindersSent: [],
           slaClosedByDeadline: false,
           approvedBy: undefined,
           approvedAt: undefined,
@@ -658,7 +661,7 @@ exports.approve = async (req, res) => {
         return res.status(400).json({
           success: false,
           message:
-            "Same-day SLA expired: this PR must be approved or closed on the calendar day it was submitted. It will be auto-closed if still open.",
+            "72-hour SLA expired: this PR was not fully approved within 72 hours of submission. It will be auto-closed if still open.",
         });
       }
     }
@@ -869,6 +872,8 @@ exports.reject = async (req, res) => {
           holdReason: "",
           heldBy: undefined,
           heldAt: undefined,
+          holdExpiresAt: undefined,
+          holdRemindersSent: [],
           approvedBy: undefined,
           approvedAt: undefined,
         },
@@ -923,6 +928,7 @@ exports.hold = async (req, res) => {
       }
     }
 
+    const heldAt = new Date();
     const data = await populateRequisitionAudit(
       PurchaseRequisition.findOneAndUpdate(
         { _id: existing._id, company_id, status: { $in: ["submitted", "partially_approved"] } },
@@ -930,7 +936,9 @@ exports.hold = async (req, res) => {
           status: "held",
           approvals,
           heldBy: req.user?._id,
-          heldAt: new Date(),
+          heldAt,
+          holdExpiresAt: computeHoldExpiresAt(heldAt),
+          holdRemindersSent: [],
           holdReason: reason,
         },
         { new: true }
@@ -975,6 +983,8 @@ exports.releaseHold = async (req, res) => {
       : "submitted";
     // derive returns approved only if all approved; held rows now pending → submitted or partially_approved
     const status = nextStatus === "approved" ? "approved" : nextStatus === "partially_approved" ? "partially_approved" : "submitted";
+    const releasedAt = new Date();
+    const slaDueAt = extendSlaAfterHold(existing, releasedAt);
 
     const data = await populateRequisitionAudit(
       PurchaseRequisition.findOneAndUpdate(
@@ -982,9 +992,14 @@ exports.releaseHold = async (req, res) => {
         {
           status,
           approvals,
+          slaDueAt,
+          slaRemindersSent: [],
+          slaReminderSentAt: null,
           holdReason: "",
           heldBy: undefined,
           heldAt: undefined,
+          holdExpiresAt: undefined,
+          holdRemindersSent: [],
           assignedApprover:
             firstPendingApproverId(approvals, stageOpts) || existing.assignedApprover,
         },

@@ -189,7 +189,7 @@ async function notifyPrHeld(pr, approver, reason) {
     company_id: pr.company_id,
     targetMongoUserId: targetId,
     title: "PR placed on hold",
-    message: `${prLabel(pr)} was put on hold by ${senderName(approver)}. Reason: ${reason}`,
+    message: `${prLabel(pr)} was put on hold by ${senderName(approver)}. The 72-hour SLA is paused until release. Hold lasts up to 30 days. Reason: ${reason}`,
     type: "info",
     priority: "medium",
     sender: approver,
@@ -264,22 +264,24 @@ async function notifyPrDeliveryUpdate(pr, actor, po) {
   });
 }
 
-async function notifyPrSameDayReminder(pr, approverMongoIds = []) {
+async function notifyPrSlaReminder(pr, approverMongoIds = [], options = {}) {
+  const hoursLeft = Number(options.hoursLeft) || 24;
   const uniqueIds = [...new Set((approverMongoIds || []).map((id) => String(id)).filter(Boolean))];
   const results = [];
   for (const approverMongoId of uniqueIds) {
     const notification = await notifyProcurementUser({
       company_id: pr.company_id,
       targetMongoUserId: approverMongoId,
-      title: "PR same-day deadline — afternoon reminder",
-      message: `${prLabel(pr)} must be approved or closed today. Please action it before end of day.`,
+      title: `PR approval — ${hoursLeft} hours left`,
+      message: `${prLabel(pr)} must be fully approved within 72 hours of submission. About ${hoursLeft} hours remain.`,
       type: "approval_required",
-      priority: "urgent",
+      priority: hoursLeft <= 24 ? "urgent" : "high",
       sender: null,
       data: {
         entityId: String(pr._id),
         requisitionNumber: pr.requisitionNumber,
-        action: "sla_afternoon_reminder",
+        action: "sla_reminder",
+        hoursLeft,
         audience: "approver",
         purchaseType: pr.purchaseType,
         url: prListPath(pr),
@@ -294,15 +296,16 @@ async function notifyPrSameDayReminder(pr, approverMongoIds = []) {
     const notification = await notifyProcurementUser({
       company_id: pr.company_id,
       targetMongoUserId: requesterId,
-      title: "Your PR is still open today",
-      message: `${prLabel(pr)} is not fully approved yet. Same-day SLA: it must be closed today.`,
+      title: `Your PR has ${hoursLeft} hours left`,
+      message: `${prLabel(pr)} is not fully approved yet. It will be auto-rejected if still open 72 hours after submission.`,
       type: "warning",
-      priority: "high",
+      priority: hoursLeft <= 24 ? "urgent" : "high",
       sender: null,
       data: {
         entityId: String(pr._id),
         requisitionNumber: pr.requisitionNumber,
-        action: "sla_afternoon_reminder",
+        action: "sla_reminder",
+        hoursLeft,
         audience: "requester",
         purchaseType: pr.purchaseType,
         url: prListPath(pr),
@@ -314,15 +317,50 @@ async function notifyPrSameDayReminder(pr, approverMongoIds = []) {
   return results;
 }
 
-async function notifyPrClosedBySameDaySla(pr) {
+async function notifyPrHoldReminder(pr, approverMongoIds = [], options = {}) {
+  const hoursLeft = Number(options.hoursLeft) || 24;
+  const daysLeft = Math.max(1, Math.round(hoursLeft / 24));
+  const leftLabel = hoursLeft <= 24 ? `${hoursLeft} hours` : `${daysLeft} days`;
+  const uniqueIds = [...new Set((approverMongoIds || []).map((id) => String(id)).filter(Boolean))];
+  const requesterId = requesterMongoId(pr);
+  if (requesterId) uniqueIds.push(requesterId);
+  const results = [];
+  for (const targetMongoUserId of [...new Set(uniqueIds)]) {
+    const notification = await notifyProcurementUser({
+      company_id: pr.company_id,
+      targetMongoUserId,
+      title: `PR hold — ${leftLabel} left`,
+      message: `${prLabel(pr)} is on hold and the 72-hour SLA is paused. If it is still on hold in about ${leftLabel}, it will be auto-rejected (30-day hold limit).`,
+      type: "warning",
+      priority: hoursLeft <= 24 ? "urgent" : "high",
+      sender: null,
+      data: {
+        entityId: String(pr._id),
+        requisitionNumber: pr.requisitionNumber,
+        action: "hold_reminder",
+        hoursLeft,
+        audience: String(targetMongoUserId) === String(requesterId) ? "requester" : "approver",
+        purchaseType: pr.purchaseType,
+        url: prListPath(pr),
+      },
+      actions: [{ label: "View PR", action: "view", url: prListPath(pr) }],
+    });
+    if (notification) results.push(notification);
+  }
+  return results;
+}
+
+async function notifyPrClosedBySameDaySla(pr, options = {}) {
   const results = [];
   const requesterId = requesterMongoId(pr);
   if (requesterId) {
     const notification = await notifyProcurementUser({
       company_id: pr.company_id,
       targetMongoUserId: requesterId,
-      title: "PR closed — same-day deadline missed",
-      message: `${prLabel(pr)} was automatically rejected because it was not approved/closed on the same calendar day.`,
+      title: options.title || "PR closed — 72-hour deadline missed",
+      message:
+        options.message ||
+        `${prLabel(pr)} was automatically rejected because it was not fully approved within 72 hours of submission.`,
       type: "error",
       priority: "high",
       sender: null,
@@ -350,6 +388,7 @@ module.exports = {
   notifyPrHeld,
   notifyPrPurchased,
   notifyPrDeliveryUpdate,
-  notifyPrSameDayReminder,
+  notifyPrSlaReminder,
+  notifyPrHoldReminder,
   notifyPrClosedBySameDaySla,
 };

@@ -2,10 +2,13 @@ const PurchaseRequisition = require("../models/PurchaseRequisition");
 const {
   slaEnabled,
   OPEN_STATUSES,
-  shouldSendAfternoonReminder,
   isPastSlaDeadline,
-  partsInTz,
   computeSlaDueAt,
+  nextSlaReminder,
+  isHeld,
+  isHoldExpired,
+  computeHoldExpiresAt,
+  nextHoldReminder,
 } = require("../utils/procurementPrSameDaySla");
 const {
   getActionableApprovalStage,
@@ -17,13 +20,7 @@ const procurementPrNotificationService = require("./procurementPrNotificationSer
 
 const TICK_MS = 60 * 1000;
 let timer = null;
-let lastReminderDayKey = "";
 let running = false;
-
-function dayKey(now = new Date()) {
-  const p = partsInTz(now);
-  return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
-}
 
 function currentStageApproverIds(pr) {
   const options = approvalOptionsFromPr(pr);
@@ -40,41 +37,108 @@ function currentStageApproverIds(pr) {
     .filter(Boolean);
 }
 
-async function sendAfternoonReminders(now = new Date()) {
-  const key = dayKey(now);
-  if (lastReminderDayKey === key) return { skipped: true, reason: "already_sent_today" };
-  if (!shouldSendAfternoonReminder(now)) return { skipped: true, reason: "outside_window" };
-
+async function sendDeadlineReminders(now = new Date()) {
   const open = await PurchaseRequisition.find({
     isActive: { $ne: false },
     status: { $in: OPEN_STATUSES },
     slaClosedByDeadline: { $ne: true },
   })
     .select(
-      "company_id requisitionNumber title purchaseType status approvals approvalChain skipFinanceApproval requestedBy submittedBy assignedApprover slaDueAt submittedAt createdAt slaReminderSentAt"
+      "company_id requisitionNumber title purchaseType status approvals approvalChain skipFinanceApproval requestedBy submittedBy assignedApprover slaDueAt submittedAt createdAt slaReminderSentAt slaRemindersSent"
     )
     .lean();
 
   let sent = 0;
   for (const pr of open) {
     if (isPastSlaDeadline(pr, now)) continue;
-    if (pr.slaReminderSentAt) {
-      const sentKey = dayKey(new Date(pr.slaReminderSentAt));
-      if (sentKey === key) continue;
-    }
+    const reminder = nextSlaReminder(pr, now);
+    if (!reminder) continue;
+    const dueMs = new Date(pr.slaDueAt).getTime() - now.getTime();
+    const remainingHours = Math.max(1, Math.round(dueMs / (60 * 60 * 1000)));
     const approverIds = currentStageApproverIds(pr);
     if (pr.assignedApprover) approverIds.push(String(pr.assignedApprover));
-    await procurementPrNotificationService.notifyPrSameDayReminder(pr, approverIds);
+    await procurementPrNotificationService.notifyPrSlaReminder(pr, approverIds, {
+      hoursLeft: Math.min(reminder.hoursLeft, remainingHours),
+    });
     await PurchaseRequisition.updateOne(
       { _id: pr._id },
-      { $set: { slaReminderSentAt: now } }
+      {
+        $set: { slaReminderSentAt: now },
+        $addToSet: { slaRemindersSent: { $each: reminder.alsoMark } },
+      }
     );
     sent += 1;
   }
 
-  lastReminderDayKey = key;
-  console.log(`[PR SLA] Afternoon reminders sent for ${sent} open PR(s) (${key})`);
+  if (sent) {
+    console.log(`[PR SLA] Deadline reminders sent for ${sent} open PR(s)`);
+  }
   return { sent };
+}
+
+async function sendHoldReminders(now = new Date()) {
+  const held = await PurchaseRequisition.find({
+    isActive: { $ne: false },
+    status: "held",
+    slaClosedByDeadline: { $ne: true },
+  })
+    .select(
+      "company_id requisitionNumber title purchaseType status approvals approvalChain skipFinanceApproval requestedBy submittedBy assignedApprover heldAt holdExpiresAt holdRemindersSent"
+    )
+    .lean();
+
+  let sent = 0;
+  for (const pr of held) {
+    if (!pr.holdExpiresAt && pr.heldAt) {
+      pr.holdExpiresAt = computeHoldExpiresAt(pr.heldAt);
+      await PurchaseRequisition.updateOne({ _id: pr._id }, { $set: { holdExpiresAt: pr.holdExpiresAt } });
+    }
+    const reminder = nextHoldReminder(pr, now);
+    if (!reminder) continue;
+    const dueMs = new Date(pr.holdExpiresAt).getTime() - now.getTime();
+    const remainingHours = Math.max(1, Math.round(dueMs / (60 * 60 * 1000)));
+    const approverIds = currentStageApproverIds(pr);
+    if (pr.assignedApprover) approverIds.push(String(pr.assignedApprover));
+    await procurementPrNotificationService.notifyPrHoldReminder(pr, approverIds, {
+      hoursLeft: Math.min(reminder.hoursLeft, remainingHours),
+    });
+    await PurchaseRequisition.updateOne(
+      { _id: pr._id },
+      { $addToSet: { holdRemindersSent: { $each: reminder.alsoMark } } }
+    );
+    sent += 1;
+  }
+
+  if (sent) {
+    console.log(`[PR SLA] Hold reminders sent for ${sent} PR(s)`);
+  }
+  return { sent };
+}
+
+async function rejectForDeadline(pr, now, reason) {
+  const approvals = (pr.approvals || []).map((a) => {
+    const row = typeof a.toObject === "function" ? a.toObject() : { ...a };
+    if (row.status === "pending" || row.status === "held") {
+      row.status = "cancelled";
+      row.actedAt = now;
+      row.reason = reason;
+    }
+    return row;
+  });
+
+  pr.status = "rejected";
+  pr.approvals = approvals;
+  pr.rejectionReason = reason;
+  pr.rejectedAt = now;
+  pr.rejectedBy = undefined;
+  pr.slaClosedByDeadline = true;
+  pr.holdReason = "";
+  pr.heldBy = undefined;
+  pr.heldAt = undefined;
+  pr.holdExpiresAt = undefined;
+  pr.approvedBy = undefined;
+  pr.approvedAt = undefined;
+  await pr.save();
 }
 
 async function autoCloseOverduePrs(now = new Date()) {
@@ -86,38 +150,16 @@ async function autoCloseOverduePrs(now = new Date()) {
 
   let closed = 0;
   const reason =
-    "Closed automatically: not approved/closed within the same calendar day (strict same-day SLA).";
+    "Closed automatically: not fully approved within 72 hours of submission.";
 
   for (const pr of open) {
+    if (isHeld(pr)) continue;
     if (!pr.slaDueAt) {
       pr.slaDueAt = computeSlaDueAt(pr);
     }
     if (!isPastSlaDeadline(pr, now)) continue;
 
-    // Cancel open stages — do not mark every pending person as the rejector.
-    const approvals = (pr.approvals || []).map((a) => {
-      const row = typeof a.toObject === "function" ? a.toObject() : { ...a };
-      if (row.status === "pending" || row.status === "held") {
-        row.status = "cancelled";
-        row.actedAt = now;
-        row.reason = reason;
-      }
-      return row;
-    });
-
-    pr.status = "rejected";
-    pr.approvals = approvals;
-    pr.rejectionReason = reason;
-    pr.rejectedAt = now;
-    pr.rejectedBy = undefined;
-    pr.slaClosedByDeadline = true;
-    pr.holdReason = "";
-    pr.heldBy = undefined;
-    pr.heldAt = undefined;
-    pr.approvedBy = undefined;
-    pr.approvedAt = undefined;
-    await pr.save();
-
+    await rejectForDeadline(pr, now, reason);
     void procurementPrNotificationService.notifyPrClosedBySameDaySla(pr);
     closed += 1;
   }
@@ -128,11 +170,43 @@ async function autoCloseOverduePrs(now = new Date()) {
   return { closed };
 }
 
+async function autoCloseExpiredHolds(now = new Date()) {
+  const held = await PurchaseRequisition.find({
+    isActive: { $ne: false },
+    status: "held",
+    slaClosedByDeadline: { $ne: true },
+  });
+
+  let closed = 0;
+  const reason =
+    "Closed automatically: still on hold 30 days after the hold date. The 72-hour SLA stays paused only while the hold is within 30 days.";
+
+  for (const pr of held) {
+    if (!pr.holdExpiresAt && pr.heldAt) {
+      pr.holdExpiresAt = computeHoldExpiresAt(pr.heldAt);
+    }
+    if (!isHoldExpired(pr, now)) continue;
+    await rejectForDeadline(pr, now, reason);
+    void procurementPrNotificationService.notifyPrClosedBySameDaySla(pr, {
+      title: "PR closed — 30-day hold expired",
+      message: `${pr.requisitionNumber || "PR"} was automatically rejected because it stayed on hold for 30 days.`,
+    });
+    closed += 1;
+  }
+
+  if (closed) {
+    console.log(`[PR SLA] Auto-closed ${closed} PR(s) past the 30-day hold limit`);
+  }
+  return { closed };
+}
+
 async function tick() {
   if (!slaEnabled() || running) return;
   running = true;
   try {
-    await sendAfternoonReminders();
+    await sendDeadlineReminders();
+    await sendHoldReminders();
+    await autoCloseExpiredHolds();
     await autoCloseOverduePrs();
   } catch (err) {
     console.error("[PR SLA] scheduler tick failed:", err.message);
@@ -143,7 +217,7 @@ async function tick() {
 
 function initializeProcurementPrSlaScheduler() {
   if (!slaEnabled()) {
-    console.log("[PR SLA] Same-day PR SLA scheduler disabled");
+    console.log("[PR SLA] PR SLA scheduler disabled");
     return;
   }
   if (timer) return;
@@ -155,13 +229,13 @@ function initializeProcurementPrSlaScheduler() {
     void tick();
   }, TICK_MS);
   console.log(
-    "[PR SLA] Same-day PR SLA scheduler enabled (afternoon reminder + end-of-day auto-close, Asia/Karachi)"
+    "[PR SLA] 72-hour SLA (paused on hold, hold limit 30 days; reminders at 48h/24h and hold 7d/24h)"
   );
 }
 
 module.exports = {
   initializeProcurementPrSlaScheduler,
   tick,
-  sendAfternoonReminders,
+  sendDeadlineReminders,
   autoCloseOverduePrs,
 };

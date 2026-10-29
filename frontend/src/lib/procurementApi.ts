@@ -242,6 +242,7 @@ export type PurchaseDocument = {
   rejectedAt?: string;
   heldBy?: ProcurementUser | string;
   heldAt?: string;
+  holdExpiresAt?: string | Date | null;
   /** Optional site/plant for location-wise reports */
   location?: string;
   followUpStatus?: "" | "open" | "in_progress" | "done" | string;

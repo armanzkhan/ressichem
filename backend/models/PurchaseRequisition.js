@@ -77,13 +77,19 @@ const purchaseRequisitionSchema = new mongoose.Schema(
     heldBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     heldAt: { type: Date },
     holdReason: { type: String, default: "" },
+    /** Hold pauses the 72-hour SLA until this instant (heldAt + 30 days). */
+    holdExpiresAt: { type: Date },
+    /** Hold-expiry reminder keys already sent, e.g. "hold7d", "hold24h". */
+    holdRemindersSent: { type: [String], default: [] },
     submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     submittedAt: { type: Date },
     /**
-     * Strict same-day SLA: must be approved/rejected by end of submit calendar day (Asia/Karachi).
+     * 72 hours from submit. Stored at submit so in-flight PRs keep their original deadline.
      */
     slaDueAt: { type: Date },
     slaReminderSentAt: { type: Date },
+    /** Reminder keys already sent, e.g. "48h", "24h". */
+    slaRemindersSent: { type: [String], default: [] },
     slaClosedByDeadline: { type: Boolean, default: false },
     /**
      * Optional site / plant location for location-wise reports.

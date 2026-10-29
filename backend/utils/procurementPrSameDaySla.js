@@ -1,7 +1,8 @@
 /**
- * Same-day PR approval SLA (strict).
- * Clock starts at submit (or createdAt fallback). Must be fully approved/rejected
- * by end of that calendar day in Asia/Karachi (UTC+5, no DST).
+ * PR approval SLA.
+ * Clock starts at submit (or createdAt fallback). Must be fully approved
+ * within 72 hours of that timestamp. Reminders at 48h and 24h remaining.
+ * Existing rows keep whatever slaDueAt was stored at submit.
  */
 
 const DEFAULT_TZ = "Asia/Karachi";
@@ -24,9 +25,64 @@ function slaEnabled() {
   return raw !== "0" && raw !== "false" && raw !== "off";
 }
 
-function reminderHour() {
-  const n = Number(process.env.PROCUREMENT_PR_SLA_REMINDER_HOUR);
-  return Number.isFinite(n) ? Math.min(23, Math.max(0, Math.floor(n))) : 15; // 3 PM local
+const DEFAULT_SLA_HOURS = 72;
+
+function slaWindowHours() {
+  const n = Number(process.env.PROCUREMENT_PR_SLA_HOURS);
+  if (Number.isFinite(n) && n > 0) return n;
+  return DEFAULT_SLA_HOURS;
+}
+
+function slaWindowMs() {
+  return slaWindowHours() * 60 * 60 * 1000;
+}
+
+/** Reminders fire once when remaining time first drops to these marks (most urgent first). */
+const SLA_REMINDER_MARKS = [
+  { key: "24h", hoursLeft: 24 },
+  { key: "48h", hoursLeft: 48 },
+];
+
+const DEFAULT_HOLD_DAYS = 30;
+
+function holdWindowDays() {
+  const n = Number(process.env.PROCUREMENT_PR_HOLD_DAYS);
+  if (Number.isFinite(n) && n > 0) return n;
+  return DEFAULT_HOLD_DAYS;
+}
+
+function holdWindowMs() {
+  return holdWindowDays() * 24 * 60 * 60 * 1000;
+}
+
+/** Hold-expiry reminders (most urgent first). */
+const HOLD_REMINDER_MARKS = [
+  { key: "hold24h", hoursLeft: 24 },
+  { key: "hold7d", hoursLeft: 24 * 7 },
+];
+
+function isHeld(pr) {
+  return String(pr?.status || "").toLowerCase() === "held";
+}
+
+function computeHoldExpiresAt(heldAt = new Date()) {
+  const start = new Date(heldAt);
+  if (Number.isNaN(start.getTime())) return new Date(Date.now() + holdWindowMs());
+  return new Date(start.getTime() + holdWindowMs());
+}
+
+function holdExpiryDate(pr) {
+  if (pr?.holdExpiresAt) return new Date(pr.holdExpiresAt);
+  if (pr?.heldAt) return computeHoldExpiresAt(pr.heldAt);
+  return null;
+}
+
+/** Push slaDueAt forward by the time spent on hold so remaining SLA resumes. */
+function extendSlaAfterHold(pr, releasedAt = new Date()) {
+  const heldAt = pr?.heldAt ? new Date(pr.heldAt) : releasedAt;
+  const pausedMs = Math.max(0, releasedAt.getTime() - heldAt.getTime());
+  const base = pr?.slaDueAt ? new Date(pr.slaDueAt) : computeSlaDueAt(pr);
+  return new Date(base.getTime() + pausedMs);
 }
 
 function toLocalParts(date = new Date(), offsetMs = slaOffsetMs()) {
@@ -62,7 +118,8 @@ function computeSlaDueAt(prOrDate) {
     prOrDate instanceof Date || typeof prOrDate === "string" || typeof prOrDate === "number"
       ? new Date(prOrDate)
       : slaAnchorDate(prOrDate);
-  return endOfSlaDay(anchor);
+  if (Number.isNaN(anchor.getTime())) return endOfSlaDay(new Date());
+  return new Date(anchor.getTime() + slaWindowMs());
 }
 
 function isOpenForSla(pr) {
@@ -70,9 +127,18 @@ function isOpenForSla(pr) {
 }
 
 function isPastSlaDeadline(pr, now = new Date()) {
+  // Hold freezes the 72-hour clock until release (or the 30-day hold limit).
+  if (isHeld(pr)) return false;
   const due = pr?.slaDueAt ? new Date(pr.slaDueAt) : computeSlaDueAt(pr);
   if (Number.isNaN(due.getTime())) return false;
   return now.getTime() > due.getTime();
+}
+
+function isHoldExpired(pr, now = new Date()) {
+  if (!isHeld(pr)) return false;
+  const exp = holdExpiryDate(pr);
+  if (!exp || Number.isNaN(exp.getTime())) return false;
+  return now.getTime() > exp.getTime();
 }
 
 function slaStatusForPr(pr, now = new Date()) {
@@ -81,28 +147,74 @@ function slaStatusForPr(pr, now = new Date()) {
     return {
       status: "closed_by_sla",
       dueAt: pr.slaDueAt || null,
-      label: "Closed — same-day deadline missed",
+      label: "Closed — 72-hour deadline missed",
     };
+  }
+  if (isHeld(pr)) {
+    const exp = holdExpiryDate(pr);
+    if (exp && now.getTime() > exp.getTime()) {
+      return { status: "overdue", dueAt: exp, label: "Hold expired — 30 days" };
+    }
+    return { status: "on_hold", dueAt: exp, label: "On hold — SLA paused" };
   }
   if (!isOpenForSla(pr)) {
     return { status: "n_a", dueAt: pr?.slaDueAt || null, label: "" };
   }
   const dueAt = pr?.slaDueAt ? new Date(pr.slaDueAt) : computeSlaDueAt(pr);
-  if (now.getTime() > dueAt.getTime()) {
-    return { status: "overdue", dueAt, label: "Overdue — must close today" };
+  const remaining = dueAt.getTime() - now.getTime();
+  if (remaining <= 0) {
+    return { status: "overdue", dueAt, label: "Overdue — 72-hour SLA" };
   }
-  const parts = toLocalParts(now);
-  if (parts.hour >= reminderHour()) {
-    return { status: "due_today_urgent", dueAt, label: "Due today — approve before end of day" };
+  if (remaining <= 24 * 60 * 60 * 1000) {
+    return { status: "due_24h", dueAt, label: "24 hours left" };
   }
-  return { status: "due_today", dueAt, label: "Due today (same-day SLA)" };
+  if (remaining <= 48 * 60 * 60 * 1000) {
+    return { status: "due_48h", dueAt, label: "48 hours left" };
+  }
+  return { status: "on_track", dueAt, label: "72-hour SLA" };
 }
 
-function shouldSendAfternoonReminder(now = new Date()) {
-  if (!slaEnabled()) return false;
-  const p = toLocalParts(now);
-  const hour = reminderHour();
-  return p.hour === hour && p.minute < 10;
+/**
+ * Which reminder to send now, or null.
+ * If the window jumped past an earlier mark, only the most urgent unsent mark is returned.
+ * `alsoMark` includes skipped earlier keys so they are not sent later.
+ */
+function nextSlaReminder(pr, now = new Date()) {
+  if (isHeld(pr)) return null;
+  const due = pr?.slaDueAt ? new Date(pr.slaDueAt) : null;
+  if (!due || Number.isNaN(due.getTime())) return null;
+  const remaining = due.getTime() - now.getTime();
+  if (remaining <= 0) return null;
+  const sent = new Set(pr?.slaRemindersSent || []);
+  const dueMarks = SLA_REMINDER_MARKS.filter(
+    (mark) => remaining <= mark.hoursLeft * 60 * 60 * 1000
+  );
+  const pending = dueMarks.find((mark) => !sent.has(mark.key));
+  if (!pending) return null;
+  return {
+    key: pending.key,
+    hoursLeft: pending.hoursLeft,
+    alsoMark: dueMarks.map((mark) => mark.key),
+  };
+}
+
+function nextHoldReminder(pr, now = new Date()) {
+  if (!isHeld(pr)) return null;
+  const due = holdExpiryDate(pr);
+  if (!due || Number.isNaN(due.getTime())) return null;
+  const remaining = due.getTime() - now.getTime();
+  if (remaining <= 0) return null;
+  const sent = new Set(pr?.holdRemindersSent || []);
+  const dueMarks = HOLD_REMINDER_MARKS.filter(
+    (mark) => remaining <= mark.hoursLeft * 60 * 60 * 1000
+  );
+  const pending = dueMarks.find((mark) => !sent.has(mark.key));
+  if (!pending) return null;
+  return {
+    key: pending.key,
+    hoursLeft: pending.hoursLeft,
+    alsoMark: dueMarks.map((mark) => mark.key),
+  };
 }
 
 module.exports = {
@@ -110,7 +222,7 @@ module.exports = {
   slaTimezone,
   slaOffsetMs,
   slaEnabled,
-  reminderHour,
+  slaWindowHours,
   partsInTz,
   toLocalParts,
   endOfSlaDay,
@@ -119,5 +231,14 @@ module.exports = {
   isOpenForSla,
   isPastSlaDeadline,
   slaStatusForPr,
-  shouldSendAfternoonReminder,
+  nextSlaReminder,
+  SLA_REMINDER_MARKS,
+  holdWindowDays,
+  computeHoldExpiresAt,
+  holdExpiryDate,
+  extendSlaAfterHold,
+  isHeld,
+  isHoldExpired,
+  nextHoldReminder,
+  HOLD_REMINDER_MARKS,
 };

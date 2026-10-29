@@ -99,14 +99,21 @@ function slaBadge(row: PurchaseDocument) {
       </span>
     );
   }
-  if (status === "due_today_urgent") {
+  if (status === "due_24h" || status === "due_today_urgent") {
     return (
       <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
         {label}
       </span>
     );
   }
-  if (status === "due_today") {
+  if (status === "on_hold") {
+    return (
+      <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-900 dark:bg-violet-950/40 dark:text-violet-100">
+        {label}
+      </span>
+    );
+  }
+  if (status === "due_48h" || status === "due_today" || status === "on_track") {
     return (
       <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
         {label}
@@ -696,7 +703,7 @@ export function RequisitionsView({ section }: Props) {
       rows.push({
         label: "Rejected by",
         by: row.slaClosedByDeadline
-          ? "System (same-day SLA)"
+          ? "System (72-hour SLA)"
           : procurementUserLabel(row.rejectedBy),
         at: row.rejectedAt,
         note: row.rejectionReason || undefined,
@@ -1254,13 +1261,21 @@ export function RequisitionsView({ section }: Props) {
                 </span>
               ) : null}
             </p>
-            {viewingRow.slaDueAt || viewingRow.slaLabel ? (
+            {viewingRow.status === "held" ? (
+              <p className="text-xs text-violet-800 dark:text-violet-200">
+                On hold: the 72-hour SLA is paused
+                {viewingRow.holdExpiresAt
+                  ? ` until release, or until ${procurementDateTime(String(viewingRow.holdExpiresAt))} (30 days from hold)`
+                  : " until release (30 days from hold)"}
+                .
+              </p>
+            ) : viewingRow.slaDueAt || viewingRow.slaLabel ? (
               <p className="text-xs text-amber-800 dark:text-amber-200">
-                Same-day SLA: must be approved/closed by end of submit day
+                72-hour SLA: must be fully approved within 72 hours of submit
                 {viewingRow.slaDueAt
                   ? ` (due ${procurementDateTime(String(viewingRow.slaDueAt))})`
                   : ""}
-                .
+                . Hold pauses this clock.
               </p>
             ) : null}
             {viewingRow.fulfillmentLabel || viewingRow.stockStatus ? (
