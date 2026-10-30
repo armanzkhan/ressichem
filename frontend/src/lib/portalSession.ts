@@ -33,6 +33,8 @@ export function clearAuthSession(): void {
   localStorage.removeItem("userId");
   localStorage.removeItem("procurementDepartment");
   localStorage.removeItem("procurementIsAdmin");
+  localStorage.removeItem("productionDepartments");
+  localStorage.removeItem("userEmail");
   localStorage.removeItem("qcPortal");
   clearQcHubAccessFlags();
   sessionStorage.removeItem(QC_AUTH_BOOTSTRAP_KEY);
@@ -120,6 +122,12 @@ export function hasValidProcurementSession(): boolean {
   if (typeof window === "undefined") return false;
   const token = localStorage.getItem("token");
   return normalizedUserType() === "procurement" && isJwtValid(token);
+}
+
+export function hasValidProductionSession(): boolean {
+  if (typeof window === "undefined") return false;
+  const token = localStorage.getItem("token");
+  return normalizedUserType() === "production" && isJwtValid(token);
 }
 
 export function persistQcSession({

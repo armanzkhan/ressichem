@@ -666,6 +666,10 @@ exports.submit = async (req, res) => {
 exports.approve = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
+    const remarks = String(req.body?.remarks || req.body?.reason || "").trim();
+    if (!remarks) {
+      return res.status(400).json({ success: false, message: "Remarks are required" });
+    }
     const existing = await PurchaseRequisition.findOne({
       _id: req.params.id,
       company_id,
@@ -701,12 +705,22 @@ exports.approve = async (req, res) => {
         PurchaseRequisition.findOneAndUpdate(
           { _id: existing._id, company_id, status: { $in: ["submitted", "held"] } },
           {
-            status: "approved",
-            approvedBy: req.user?._id,
-            approvedAt: new Date(),
-            holdReason: "",
-            heldBy: undefined,
-            heldAt: undefined,
+            $set: {
+              status: "approved",
+              approvedBy: req.user?._id,
+              approvedAt: new Date(),
+              holdReason: "",
+              heldBy: undefined,
+              heldAt: undefined,
+            },
+            $push: {
+              decisionLog: {
+                kind: "approved",
+                at: new Date(),
+                actorName: actorDisplayName(req.user),
+                reason: remarks,
+              },
+            },
           },
           { new: true }
         )
@@ -714,7 +728,7 @@ exports.approve = async (req, res) => {
       if (!data) {
         return res.status(400).json({ success: false, message: "Requisition not found or not awaiting approval" });
       }
-      void procurementPrNotificationService.notifyPrApproved(data, req.user);
+      void procurementPrNotificationService.notifyPrApproved(data, req.user, remarks);
       return res.json({ success: true, data });
     }
 
@@ -744,7 +758,6 @@ exports.approve = async (req, res) => {
       });
     }
 
-    const remarks = String(req.body?.remarks || req.body?.reason || "").trim();
     for (const row of actionable) {
       row.status = "approved";
       row.actedAt = new Date();
@@ -781,7 +794,17 @@ exports.approve = async (req, res) => {
     const data = await populateRequisitionAudit(
       PurchaseRequisition.findOneAndUpdate(
         { _id: existing._id, company_id, status: { $in: ["submitted", "held", "partially_approved"] } },
-        patch,
+        {
+          $set: patch,
+          $push: {
+            decisionLog: {
+              kind: "approved",
+              at: new Date(),
+              actorName: actorDisplayName(req.user),
+              reason: remarks,
+            },
+          },
+        },
         { new: true }
       )
     );
@@ -798,9 +821,9 @@ exports.approve = async (req, res) => {
     }
 
     if (nextStatus === "approved") {
-      void procurementPrNotificationService.notifyPrApproved(data, req.user);
+      void procurementPrNotificationService.notifyPrApproved(data, req.user, remarks);
     } else {
-      void procurementPrNotificationService.notifyPrPartiallyApproved(data, req.user);
+      void procurementPrNotificationService.notifyPrPartiallyApproved(data, req.user, remarks);
     }
     return res.json({ success: true, data });
   } catch (err) {
@@ -811,9 +834,9 @@ exports.approve = async (req, res) => {
 exports.reject = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
-    const reason = String(req.body?.reason || "").trim();
+    const reason = String(req.body?.remarks || req.body?.reason || "").trim();
     if (!reason) {
-      return res.status(400).json({ success: false, message: "Rejection reason is required" });
+      return res.status(400).json({ success: false, message: "Remarks are required" });
     }
     const fullAccess = hasPrFullAccess(req.user) || isProcurementAdminUser(req.user);
     const existing = await PurchaseRequisition.findOne({
@@ -930,9 +953,9 @@ exports.reject = async (req, res) => {
 exports.hold = async (req, res) => {
   try {
     const company_id = getCompanyId(req);
-    const reason = String(req.body?.reason || "").trim();
+    const reason = String(req.body?.remarks || req.body?.reason || "").trim();
     if (!reason) {
-      return res.status(400).json({ success: false, message: "Hold reason is required" });
+      return res.status(400).json({ success: false, message: "Remarks are required" });
     }
     const existing = await PurchaseRequisition.findOne({
       _id: req.params.id,

@@ -1,8 +1,6 @@
-import Signin from "@/components/Auth/Signin";
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import { Logo } from "@/components/logo";
 import { ThemeToggleSwitch } from "@/components/Layouts/header/theme-toggle";
 
 export const metadata: Metadata = {
@@ -23,33 +21,48 @@ export default function SignIn() {
       <div className="w-full max-w-6xl relative z-10">
         <div className="rounded-xl sm:rounded-2xl bg-white/80 backdrop-blur-sm shadow-2xl border border-white/20 dark:bg-gray-800/80 dark:border-gray-700/20">
           <div className="flex flex-col lg:flex-row items-center min-h-[500px] sm:min-h-[600px]">
-            {/* Sign-in Form */}
             <div className="w-full lg:w-1/2">
               <div className="w-full p-4 sm:p-6 lg:p-8 xl:p-12">
-                <Signin />
-                <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                <div className="mb-8 text-center">
+                  <div className="mb-5 flex justify-center">
+                    <Image src="/images/logo/logo.png" alt="Ressichem" width={220} height={60} className="h-14 w-auto sm:h-16" priority />
+                  </div>
+                  <h2 className="text-2xl font-bold text-blue-950 dark:text-white sm:text-3xl">Choose a system</h2>
+                  <p className="mt-2 text-sm text-blue-800 dark:text-blue-200">Sign in to QC, Procurement, or Production.</p>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Link
                     href="/qc/site-login"
-                    className="w-full inline-flex items-center justify-center rounded-xl bg-blue-900 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-900/25 transition-all duration-200 hover:bg-blue-800 hover:shadow-xl hover:shadow-blue-900/30"
+                    className="inline-flex items-center justify-center rounded-xl bg-blue-900 px-4 py-4 text-sm font-semibold text-white shadow-lg shadow-blue-900/25 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-xl"
                   >
                     QC Site Login
                   </Link>
                   <Link
                     href="/qc/hub-login"
-                    className="w-full inline-flex items-center justify-center rounded-xl bg-blue-900 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-900/25 transition-all duration-200 hover:bg-blue-800 hover:shadow-xl hover:shadow-blue-900/30"
+                    className="inline-flex items-center justify-center rounded-xl bg-blue-900 px-4 py-4 text-sm font-semibold text-white shadow-lg shadow-blue-900/25 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-xl"
                   >
                     QC Hub Login
                   </Link>
-                </div>
-                <div className="mt-3">
                   <Link
                     href="/procurement/login"
-                    className="w-full inline-flex items-center justify-center rounded-xl bg-blue-900 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-900/25 transition-all duration-200 hover:bg-blue-800 hover:shadow-xl hover:shadow-blue-900/30"
+                    className="inline-flex items-center justify-center rounded-xl bg-blue-900 px-4 py-4 text-sm font-semibold text-white shadow-lg shadow-blue-900/25 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-xl sm:col-span-2"
                   >
                     Procurement System Login
                   </Link>
+                  <Link
+                    href="/production/login"
+                    className="inline-flex items-center justify-center rounded-xl bg-blue-900 px-4 py-4 text-sm font-semibold text-white shadow-lg shadow-blue-900/25 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-xl"
+                  >
+                    Production Site Login
+                  </Link>
+                  <Link
+                    href="/production/hub-login"
+                    className="inline-flex items-center justify-center rounded-xl bg-blue-900 px-4 py-4 text-sm font-semibold text-white shadow-lg shadow-blue-900/25 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-xl"
+                  >
+                    Production Hub Login
+                  </Link>
                 </div>
-                <div className="mt-3 flex justify-center">
+                <div className="mt-6 flex justify-center">
                   <div className="inline-flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
                     <svg className="w-3 h-3 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
@@ -59,9 +72,6 @@ export default function SignIn() {
                     </span>
                   </div>
                 </div>
-                <p className="mt-3 text-center text-xs text-blue-900 dark:text-blue-300">
-                  Choose QC Site or QC Hub. Admin/users can sign in above.
-                </p>
               </div>
             </div>
 

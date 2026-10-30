@@ -24,8 +24,9 @@ export default function ConditionalLayout({ children }: ConditionalLayoutProps) 
   // QC / Procurement modules have their own dedicated layouts + login
   const isQCRoute = pathname.startsWith('/qc');
   const isProcurementRoute = pathname.startsWith('/procurement');
+  const isProductionRoute = pathname.startsWith('/production');
 
-  if (isCustomerRoute || isQCRoute || isProcurementRoute) {
+  if (isCustomerRoute || isQCRoute || isProcurementRoute || isProductionRoute) {
     return <>{children}</>;
   }
 

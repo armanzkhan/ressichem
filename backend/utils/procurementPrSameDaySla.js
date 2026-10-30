@@ -21,8 +21,8 @@ function slaOffsetMs() {
 }
 
 function slaEnabled() {
-  const raw = String(process.env.PROCUREMENT_PR_SLA_ENABLED || "true").toLowerCase();
-  return raw !== "0" && raw !== "false" && raw !== "off";
+  // The 72-hour approval clock is removed. Hold still has its own 30-day limit.
+  return false;
 }
 
 const DEFAULT_SLA_HOURS = 72;

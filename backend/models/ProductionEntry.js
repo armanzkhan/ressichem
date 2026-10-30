@@ -1,0 +1,163 @@
+const mongoose = require("mongoose");
+
+const materialLineSchema = new mongoose.Schema(
+  {
+    name: { type: String, default: "" },
+    code: { type: String, default: "" },
+    lotNumber: { type: String, default: "", index: true },
+    qtyIssued: { type: Number, default: 0 },
+    qtyConsumed: { type: Number, default: 0 },
+    /** Recipe quantity as written on the process log (LMS / Reactors). */
+    recipe: { type: String, default: "" },
+    /** Actual quantity as written on the process log. */
+    actual: { type: String, default: "" },
+    supplier: { type: String, default: "" },
+    qcStatus: { type: String, default: "" },
+    /** manual until SAP issue records are connected */
+    source: { type: String, default: "manual" },
+  },
+  { _id: false }
+);
+
+const productionEntrySchema = new mongoose.Schema(
+  {
+    company_id: { type: String, required: true, index: true },
+    department: {
+      type: String,
+      enum: ["zrs", "lms", "drymix", "bfs"],
+      required: true,
+      index: true,
+    },
+    factory: {
+      type: String,
+      enum: ["hub", "site", "lahore"],
+      required: true,
+      index: true,
+    },
+    /** Loading date (ZRS), draining date (LMS), production date (Drymix), or packing date (BFS). */
+    recordDate: { type: Date, required: true, index: true },
+    grade: { type: String, default: "" },
+    batchNumber: { type: String, default: "" },
+    reactor: { type: String, default: "" },
+    outputKg: { type: Number, default: 0 },
+    plannedQtyKg: { type: Number, default: 0 },
+    shift: { type: String, default: "" },
+    operator: { type: String, default: "" },
+    supervisor: { type: String, default: "" },
+    startTime: { type: String, default: "" },
+    endTime: { type: String, default: "" },
+    durationMinutes: { type: Number, default: 0 },
+    machine: { type: String, default: "" },
+    temperature: { type: String, default: "" },
+    mixingTime: { type: String, default: "" },
+    speed: { type: String, default: "" },
+    processNotes: { type: String, default: "" },
+    recipeName: { type: String, default: "" },
+    recipeRevision: { type: String, default: "" },
+    materials: { type: [materialLineSchema], default: [] },
+    /** Laboratory result. Entered here until the lab system is linked. */
+    qcStatus: { type: String, default: "pending" },
+    labReportRef: { type: String, default: "" },
+    qcSource: { type: String, default: "laboratory" },
+    resinBatch: { type: String, default: "" },
+    hardenerBatch: { type: String, default: "" },
+    kitSizeKg: { type: Number, default: 0 },
+    kitQuantity: { type: Number, default: 0 },
+    packSize: { type: String, default: "" },
+    numberOfPacks: { type: Number, default: 0 },
+    finishedBatch: { type: String, default: "" },
+    qtyPackedKg: { type: Number, default: 0 },
+    balanceKg: { type: Number, default: 0 },
+    releaseStatus: { type: String, default: "pending" },
+    wipOpeningKg: { type: Number, default: 0 },
+    wipClosingKg: { type: Number, default: 0 },
+    wastageKg: { type: Number, default: 0 },
+    rejectedKg: { type: Number, default: 0 },
+    reworkKg: { type: Number, default: 0 },
+    downtimeMinutes: { type: Number, default: 0 },
+    downtimeReason: { type: String, default: "" },
+    deviation: { type: String, default: "" },
+    lossReason: { type: String, default: "" },
+    formatNo: { type: String, default: "" },
+    srNo: { type: String, default: "" },
+    vesselNo: { type: String, default: "" },
+    sheetDepartment: { type: String, default: "" },
+    chargingDate: { type: Date },
+    drainingDate: { type: Date },
+    chargingOperator: { type: String, default: "" },
+    drainingOperator: { type: String, default: "" },
+    inputKg: { type: Number, default: 0 },
+    yieldPct: { type: Number, default: 0 },
+    totalHours: { type: String, default: "" },
+    workOrderNo: { type: String, default: "" },
+    rawWeights: {
+      mr: { type: String, default: "" },
+      bg: { type: String, default: "" },
+      ws: { type: String, default: "" },
+      ws2: { type: String, default: "" },
+      sg03: { type: String, default: "" },
+      sg: { type: String, default: "" },
+      mp: { type: String, default: "" },
+      mPowder: { type: String, default: "" },
+      massaNo: { type: String, default: "" },
+    },
+    qcSample: {
+      result: { type: String, default: "" },
+      startTime: { type: String, default: "" },
+      endTime: { type: String, default: "" },
+      sampleQty: { type: String, default: "" },
+      sampleTime: { type: String, default: "" },
+      mixingTime: { type: String, default: "" },
+      agitator: { type: String, default: "" },
+      remarks: { type: String, default: "" },
+    },
+    packaging: {
+      packType: { type: String, default: "" },
+      unitWeight: { type: String, default: "" },
+      unitQuantity: { type: String, default: "" },
+      totalWeight: { type: String, default: "" },
+      otherDetails: { type: String, default: "" },
+    },
+    tempLog: {
+      type: [
+        {
+          time: { type: String, default: "" },
+          reactorTemp: { type: String, default: "" },
+          heatingTemp: { type: String, default: "" },
+          coolingTemp: { type: String, default: "" },
+          setPoint: { type: String, default: "" },
+          pressure: { type: String, default: "" },
+          remarks: { type: String, default: "" },
+        },
+      ],
+      default: [],
+    },
+    additionalRemarks: { type: String, default: "" },
+    signOff: {
+      dispatchedBy: { type: String, default: "" },
+      dispatchedTime: { type: String, default: "" },
+      dispatchedDate: { type: String, default: "" },
+      approvedBy: { type: String, default: "" },
+      approvedTime: { type: String, default: "" },
+      approvedDate: { type: String, default: "" },
+      receivedBy: { type: String, default: "" },
+      receivedTime: { type: String, default: "" },
+      receivedDate: { type: String, default: "" },
+      inchargeA: { type: String, default: "" },
+      inchargeB: { type: String, default: "" },
+      inchargeC: { type: String, default: "" },
+    },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    createdByName: { type: String, default: "" },
+    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    updatedByName: { type: String, default: "" },
+    isActive: { type: Boolean, default: true },
+  },
+  { timestamps: true }
+);
+
+productionEntrySchema.index({ company_id: 1, department: 1, recordDate: -1 });
+productionEntrySchema.index({ company_id: 1, batchNumber: 1 });
+productionEntrySchema.index({ company_id: 1, "materials.lotNumber": 1 });
+
+module.exports = mongoose.model("ProductionEntry", productionEntrySchema);

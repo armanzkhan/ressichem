@@ -109,14 +109,15 @@ async function notifyPrSubmittedToApprovers(pr, submitter, approverMongoIds = []
   return results;
 }
 
-async function notifyPrApproved(pr, approver) {
+async function notifyPrApproved(pr, approver, remarks = "") {
   const targetId = requesterMongoId(pr);
   if (!targetId) return null;
+  const note = String(remarks || "").trim();
   return notifyProcurementUser({
     company_id: pr.company_id,
     targetMongoUserId: targetId,
     title: "PR approved",
-    message: `${prLabel(pr)} was fully approved by ${senderName(approver)}.`,
+    message: `${prLabel(pr)} was fully approved by ${senderName(approver)}.${note ? ` Remarks: ${note}` : ""}`,
     type: "success",
     priority: "medium",
     sender: approver,
@@ -132,7 +133,7 @@ async function notifyPrApproved(pr, approver) {
   });
 }
 
-async function notifyPrPartiallyApproved(pr, approver) {
+async function notifyPrPartiallyApproved(pr, approver, remarks = "") {
   const targetId = requesterMongoId(pr);
   if (!targetId) return null;
   const approvals = pr.approvals || [];
@@ -142,7 +143,7 @@ async function notifyPrPartiallyApproved(pr, approver) {
     company_id: pr.company_id,
     targetMongoUserId: targetId,
     title: "PR partially approved",
-    message: `${prLabel(pr)}: ${senderName(approver)} approved (${done}/${total}). Waiting for remaining approvals.`,
+    message: `${prLabel(pr)}: ${senderName(approver)} approved (${done}/${total}). Waiting for remaining approvals.${String(remarks || "").trim() ? ` Remarks: ${String(remarks).trim()}` : ""}`,
     type: "info",
     priority: "medium",
     sender: approver,
@@ -189,7 +190,7 @@ async function notifyPrHeld(pr, approver, reason) {
     company_id: pr.company_id,
     targetMongoUserId: targetId,
     title: "PR placed on hold",
-    message: `${prLabel(pr)} was put on hold by ${senderName(approver)}. The 72-hour SLA is paused until release. Hold lasts up to 30 days. Reason: ${reason}`,
+    message: `${prLabel(pr)} was put on hold by ${senderName(approver)}. Hold lasts up to 30 days. Remarks: ${reason}`,
     type: "info",
     priority: "medium",
     sender: approver,
@@ -330,7 +331,7 @@ async function notifyPrHoldReminder(pr, approverMongoIds = [], options = {}) {
       company_id: pr.company_id,
       targetMongoUserId,
       title: `PR hold — ${leftLabel} left`,
-      message: `${prLabel(pr)} is on hold and the 72-hour SLA is paused. If it is still on hold in about ${leftLabel}, it will be auto-rejected (30-day hold limit).`,
+      message: `${prLabel(pr)} is on hold. If it is still on hold in about ${leftLabel}, it will be auto-rejected (30-day hold limit).`,
       type: "warning",
       priority: hoursLeft <= 24 ? "urgent" : "high",
       sender: null,

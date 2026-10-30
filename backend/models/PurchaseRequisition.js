@@ -96,7 +96,7 @@ const purchaseRequisitionSchema = new mongoose.Schema(
     /** Rejection and hold remarks kept after resubmit or release. */
     decisionLog: [
       {
-        kind: { type: String, enum: ["rejected", "held"], required: true },
+        kind: { type: String, enum: ["rejected", "held", "approved"], required: true },
         at: { type: Date, default: Date.now },
         actorName: { type: String, default: "" },
         reason: { type: String, default: "" },

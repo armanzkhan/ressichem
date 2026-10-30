@@ -210,13 +210,15 @@ async function autoCloseExpiredHolds(now = new Date()) {
 }
 
 async function tick() {
-  if (!slaEnabled() || running) return;
+  if (running) return;
   running = true;
   try {
-    await sendDeadlineReminders();
+    if (slaEnabled()) {
+      await sendDeadlineReminders();
+      await autoCloseOverduePrs();
+    }
     await sendHoldReminders();
     await autoCloseExpiredHolds();
-    await autoCloseOverduePrs();
   } catch (err) {
     console.error("[PR SLA] scheduler tick failed:", err.message);
   } finally {
@@ -225,21 +227,15 @@ async function tick() {
 }
 
 function initializeProcurementPrSlaScheduler() {
-  if (!slaEnabled()) {
-    console.log("[PR SLA] PR SLA scheduler disabled");
-    return;
-  }
   if (timer) return;
-  // Run soon after boot, then every minute
+  // Run soon after boot, then every minute. 72-hour approval SLA stays off.
   setTimeout(() => {
     void tick();
   }, 15_000);
   timer = setInterval(() => {
     void tick();
   }, TICK_MS);
-  console.log(
-    "[PR SLA] 72-hour SLA (paused on hold, hold limit 30 days; reminders at 48h/24h and hold 7d/24h)"
-  );
+  console.log("[PR hold] 72-hour approval SLA is off. A hold still auto-closes after 30 days.");
 }
 
 module.exports = {

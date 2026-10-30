@@ -88,41 +88,6 @@ function approvalStageLabel(stage?: string) {
   return "Dept";
 }
 
-function slaBadge(row: PurchaseDocument) {
-  const status = String(row.slaStatus || "").toLowerCase();
-  if (!status || status === "n_a" || status === "disabled") return null;
-  const label = row.slaLabel || status;
-  if (status === "overdue" || status === "closed_by_sla") {
-    return (
-      <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-800 dark:bg-red-950/50 dark:text-red-200">
-        {label}
-      </span>
-    );
-  }
-  if (status === "due_24h" || status === "due_today_urgent") {
-    return (
-      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-        {label}
-      </span>
-    );
-  }
-  if (status === "on_hold") {
-    return (
-      <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-900 dark:bg-violet-950/40 dark:text-violet-100">
-        {label}
-      </span>
-    );
-  }
-  if (status === "due_48h" || status === "due_today" || status === "on_track") {
-    return (
-      <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
-        {label}
-      </span>
-    );
-  }
-  return null;
-}
-
 function approvalChainKey(row: PurchaseDocument) {
   const key = String(row.approvalChain || "").toLowerCase();
   if (key === "lab_then_finance" || key === "skip_finance" || key === "standard") return key;
@@ -631,8 +596,8 @@ export function RequisitionsView({ section }: Props) {
   const runReviewAction = async () => {
     if (!reviewAction) return;
     const reason = reviewReason.trim();
-    if (reviewAction.type !== "approve" && !reason) {
-      setError(`${reviewAction.type === "reject" ? "Rejection" : "Hold"} reason is required`);
+    if (!reason) {
+      setError("Remarks are required");
       return;
     }
     setReviewSaving(true);
@@ -720,7 +685,8 @@ export function RequisitionsView({ section }: Props) {
     if (row.decisionLog?.length) {
       for (const entry of row.decisionLog) {
         rows.push({
-          label: entry.kind === "held" ? "Held by" : "Rejected by",
+          label:
+            entry.kind === "held" ? "Held by" : entry.kind === "approved" ? "Approved by" : "Rejected by",
           by: entry.actorName || "—",
           at: entry.at ? String(entry.at) : undefined,
           note: entry.reason || undefined,
@@ -1077,7 +1043,6 @@ export function RequisitionsView({ section }: Props) {
               </span>,
               <span key={`st-${r._id}`} className="inline-flex flex-col gap-0.5">
                 <StatusBadge status={r.status} />
-                {slaBadge(r)}
               </span>,
               r.stockStatus || r.fulfillmentStatus ? (
                 <span key={`ff-${r._id}`} className="inline-flex flex-col gap-0.5">
@@ -1363,7 +1328,6 @@ export function RequisitionsView({ section }: Props) {
             <p className="flex flex-wrap items-center gap-2">
               <span className="font-medium text-blue-900 dark:text-blue-200">Status:</span>{" "}
               <StatusBadge status={viewingRow.status} />
-              {slaBadge(viewingRow)}
               {viewingRow.approvals?.length ? (
                 <span className="text-xs text-blue-600 dark:text-blue-300">
                   Approvals {approvalProgressLabel(viewingRow)}
@@ -1371,20 +1335,12 @@ export function RequisitionsView({ section }: Props) {
               ) : null}
             </p>
             {viewingRow.status === "held" ? (
-              <p className="text-xs text-violet-800 dark:text-violet-200">
-                On hold: the 72-hour SLA is paused
+              <p className="text-sm font-medium text-violet-800 dark:text-violet-200">
+                On hold until release
                 {viewingRow.holdExpiresAt
-                  ? ` until release, or until ${procurementDateTime(String(viewingRow.holdExpiresAt))} (30 days from hold)`
-                  : " until release (30 days from hold)"}
+                  ? `, or until ${procurementDateTime(String(viewingRow.holdExpiresAt))} (30 days from hold)`
+                  : " (up to 30 days)"}
                 .
-              </p>
-            ) : viewingRow.slaDueAt || viewingRow.slaLabel ? (
-              <p className="text-xs text-amber-800 dark:text-amber-200">
-                72-hour SLA: must be fully approved within 72 hours of submit
-                {viewingRow.slaDueAt
-                  ? ` (due ${procurementDateTime(String(viewingRow.slaDueAt))})`
-                  : ""}
-                . Hold pauses this clock.
               </p>
             ) : null}
             {viewingRow.fulfillmentLabel || viewingRow.stockStatus ? (
@@ -1424,22 +1380,30 @@ export function RequisitionsView({ section }: Props) {
                         ? "Approval chain (departments → Lahore finance / Tahira)"
                         : "Approval chain (departments → finance)"}
                 </p>
-                <ul className="space-y-1 text-gray-700 dark:text-gray-300">
+                <ul className="space-y-2 text-gray-700 dark:text-gray-300">
                   {viewingRow.approvals.map((a, i) => (
-                    <li key={a._id || `${a.department}-${i}`} className="flex flex-wrap items-center gap-2">
-                      <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
-                        {approvalStageLabel(a.stage)}
-                      </span>
-                      <span className="font-medium">{a.department}</span>
-                      <StatusBadge status={a.status} />
-                      {String(a.status || "").toLowerCase() !== "cancelled" ? (
-                        <span>{procurementUserLabel(a.approver)}</span>
-                      ) : null}
-                      {a.actedAt ? <span className="text-xs">{procurementDateTime(a.actedAt)}</span> : null}
-                      {a.reason ? (
-                        <span className="text-xs text-slate-600 dark:text-slate-400">
-                          · Remarks: {a.reason}
+                    <li
+                      key={a._id || `${a.department}-${i}`}
+                      className="rounded-lg border-2 border-blue-200 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-900"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+                          {approvalStageLabel(a.stage)}
                         </span>
+                        <span className="font-medium">{a.department}</span>
+                        <StatusBadge status={a.status} />
+                        {String(a.status || "").toLowerCase() !== "cancelled" ? (
+                          <span>{procurementUserLabel(a.approver)}</span>
+                        ) : null}
+                        {a.actedAt ? <span className="text-xs">{procurementDateTime(a.actedAt)}</span> : null}
+                      </div>
+                      {a.reason ? (
+                        <p className="mt-2 rounded-lg border-2 border-amber-400 bg-amber-50 px-3 py-2 text-base font-semibold leading-snug text-slate-950 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-50">
+                          <span className="mr-2 text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                            Remarks
+                          </span>
+                          {a.reason}
+                        </p>
                       ) : null}
                     </li>
                   ))}
@@ -1508,7 +1472,7 @@ export function RequisitionsView({ section }: Props) {
                     {entry.by && entry.at ? " · " : ""}
                     {entry.at ? procurementDateTime(entry.at) : !entry.by && !entry.note ? "—" : ""}
                     {entry.note ? (
-                      <span className="mt-0.5 block text-sm font-medium text-slate-800 dark:text-slate-100">
+                      <span className="mt-1 block rounded-lg border-2 border-amber-400 bg-amber-50 px-3 py-2 text-base font-semibold leading-snug text-slate-950 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-50">
                         Remarks: {entry.note}
                       </span>
                     ) : null}
@@ -1665,26 +1629,26 @@ export function RequisitionsView({ section }: Props) {
           }}
         >
           <div className="space-y-4">
-            <p className="text-sm text-blue-800 dark:text-blue-100">
+            <p className="text-sm font-medium text-blue-900 dark:text-blue-50">
               {reviewAction.type === "reject"
-                ? `Provide a reason for rejecting ${reviewAction.label}. The requester can edit and resubmit.`
+                ? `Remarks are required to reject ${reviewAction.label}. The requester can edit and resubmit.`
                 : reviewAction.type === "hold"
-                  ? `Provide a reason for holding ${reviewAction.label}. You can release, approve, or reject later.`
-                  : `Confirm approval of ${reviewAction.label}. Remarks are optional and will appear in the PR history.`}
+                  ? `Remarks are required to hold ${reviewAction.label}. You can release, approve, or reject later.`
+                  : `Remarks are required to approve ${reviewAction.label}. They stay on this approval step.`}
             </p>
-            <Field
-              label={reviewAction.type === "approve" ? "Remarks (optional)" : "Reason"}
-              value={reviewReason}
-              onChange={setReviewReason}
-              required={reviewAction.type !== "approve"}
-              placeholder={
-                reviewAction.type === "reject"
-                  ? "e.g. Budget not approved"
-                  : reviewAction.type === "hold"
-                    ? "e.g. Need vendor quote"
-                    : "e.g. Prices checked, OK to proceed"
-              }
-            />
+            <label className="block">
+              <span className="text-base font-bold text-blue-950 dark:text-blue-50">
+                Remarks <span className="text-red-600">*</span>
+              </span>
+              <textarea
+                required
+                rows={5}
+                value={reviewReason}
+                onChange={(e) => setReviewReason(e.target.value)}
+                placeholder="Write the remarks for this step. They are saved on the requisition and shown to the requester."
+                className="mt-2 w-full rounded-xl border-2 border-blue-600 bg-amber-50 px-4 py-3 text-base font-semibold text-slate-950 outline-none focus:border-blue-800 focus:ring-2 focus:ring-blue-300 dark:border-blue-400 dark:bg-slate-950 dark:text-white"
+              />
+            </label>
             <footer className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
@@ -1698,8 +1662,8 @@ export function RequisitionsView({ section }: Props) {
               </button>
               <button
                 type="button"
-                disabled={reviewSaving}
-                className={`px-4 py-2 rounded-lg text-white ${
+                disabled={reviewSaving || !reviewReason.trim()}
+                className={`px-4 py-2 rounded-lg text-white disabled:opacity-50 ${
                   reviewAction.type === "reject"
                     ? "bg-red-600"
                     : reviewAction.type === "hold"

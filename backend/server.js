@@ -260,6 +260,10 @@ app.use("/api/procurement/costing", procurementCostingRoutes);
 app.use("/api/procurement/notifications", procurementNotificationRoutes);
 app.use("/api/procurement/ai", procurementAssistantRoutes);
 
+// ===== Production System =====
+app.use("/api/production/auth", require("./routes/productionAuthRoutes"));
+app.use("/api/production", require("./routes/productionRoutes"));
+
 // ===== WebSocket Setup =====
 const http = require("http");
 const https = require("https");
