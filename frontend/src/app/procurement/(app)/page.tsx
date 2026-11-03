@@ -19,6 +19,7 @@ import {
   type ProcurementAccessLevel,
 } from "@/lib/procurementRoles";
 import type { TradeSection } from "@/lib/procurementScope";
+import { ApprovedPrDailyCost } from "@/components/procurement/ApprovedPrDailyCost";
 
 type DashboardResponse = {
   user?: {
@@ -93,6 +94,9 @@ export default function ProcurementDashboardPage() {
     [allowedSections, accessLevel, department]
   );
 
+  const showApprovedCost =
+    String(user?.email || "").trim().toLowerCase() === "tahira@ressichem.com";
+
   const cards = useMemo(
     () => buildDashboardCards(allowedSections, data?.statsBySection || {}, accessLevel, department),
     [allowedSections, data?.statsBySection, accessLevel, department]
@@ -127,6 +131,8 @@ export default function ProcurementDashboardPage() {
           </p>
         </div>
       </article>
+
+      {showApprovedCost ? <ApprovedPrDailyCost /> : null}
 
       {cards.length ? (
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

@@ -27,6 +27,21 @@ function canDeletePurchaseOrder(user) {
   return canSoftDeleteProcurement(user);
 }
 
+async function attachRequisitionFromPrNumber(company_id, body) {
+  if (!body || body.requisition) return body;
+  const prNumber = String(body.prNumber || "").trim();
+  if (!prNumber) return body;
+  const pr = await PurchaseRequisition.findOne({
+    company_id,
+    requisitionNumber: prNumber,
+    isActive: { $ne: false },
+  })
+    .select("_id")
+    .lean();
+  if (pr) body.requisition = pr._id;
+  return body;
+}
+
 async function loadLinkedPr(po) {
   const prId = po?.requisition;
   if (!prId) return null;
@@ -109,6 +124,7 @@ exports.create = async (req, res) => {
     const company_id = getCompanyId(req);
     const body = await prepareCommercialPayload(req.body || {});
     await persistSupplierBanking(normalizeSupplierIds(body), body.supplierBanking, req.user?._id);
+    await attachRequisitionFromPrNumber(company_id, body);
 
     // Lahore buyers may only create Lahore plant POs
     let plantScope = String(body.plantScope || "").trim().toLowerCase();
@@ -162,6 +178,8 @@ exports.update = async (req, res) => {
     }
     const body = await prepareCommercialPayload(req.body || {});
     await persistSupplierBanking(normalizeSupplierIds(body), body.supplierBanking, req.user?._id);
+    if (!body.requisition && existing.requisition) body.requisition = existing.requisition;
+    if (!body.requisition) await attachRequisitionFromPrNumber(company_id, body);
     if (isLahorePlantScopedUser(req.user) && !isProcurementAdminUser(req.user)) {
       body.plantScope = "lahore";
     }

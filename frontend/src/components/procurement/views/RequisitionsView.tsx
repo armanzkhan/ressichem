@@ -20,6 +20,7 @@ import {
   purchaseTypeForSection,
 } from "@/lib/procurementScope";
 import { recordTotalLabel } from "@/lib/procurementRecordSummary";
+import { formatProcurementAmount } from "@/lib/procurementMoney";
 import {
   accessLevelFromRole,
 } from "@/lib/procurementRoles";
@@ -1294,6 +1295,19 @@ export function RequisitionsView({ section }: Props) {
                           {item.description}
                         </p>
                       ) : null}
+                      {Number(item.costLineTotal) > 0 || Number(item.costUnitPrice) > 0 ? (
+                        <p className="mt-1 text-sm font-bold text-blue-950 dark:text-blue-50">
+                          Unit price {item.costCurrency || viewingRow.costCurrency || "PKR"}{" "}
+                          {formatProcurementAmount(Number(item.costUnitPrice) || 0)}
+                          {" · "}
+                          Line total {item.costCurrency || viewingRow.costCurrency || "PKR"}{" "}
+                          {formatProcurementAmount(Number(item.costLineTotal) || 0)}
+                        </p>
+                      ) : viewingRow.status === "approved" ? (
+                        <p className="mt-1 text-sm font-semibold text-amber-800 dark:text-amber-200">
+                          No price on this line yet
+                        </p>
+                      ) : null}
                       <div className="mt-1 flex flex-wrap items-center gap-2">
                         {viewingRow.status === "approved" ? (
                           <StatusBadge
@@ -1324,6 +1338,10 @@ export function RequisitionsView({ section }: Props) {
                   {viewingRow.poNumber ? ` · PO ${viewingRow.poNumber}` : ""}
                 </p>
               ) : null}
+              <p className="mt-3 border-t border-blue-200 pt-2 text-base font-bold text-blue-950 dark:border-slate-600 dark:text-white">
+                Total {viewingRow.costCurrency || viewingRow.currency || "PKR"}{" "}
+                {formatProcurementAmount(Number(viewingRow.costTotal) || 0)}
+              </p>
             </div>
             <p className="flex flex-wrap items-center gap-2">
               <span className="font-medium text-blue-900 dark:text-blue-200">Status:</span>{" "}

@@ -146,6 +146,27 @@ function takenPrLineIndexes(pr, pos) {
   return taken;
 }
 
+function round2(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+/** Purchase-order price when present, otherwise the price stored on the requisition line. */
+function lineCost(pr, prLine, po, poLine) {
+  const qty = Number(prLine?.quantity) || Number(poLine?.quantity) || 0;
+  const prUnit = Number(prLine?.unitPrice) || 0;
+  const poUnit = Number(poLine?.unitPrice) || 0;
+  const unitPrice = poUnit > 0 ? poUnit : prUnit;
+  const poLineTotal = Number(poLine?.lineTotal) || 0;
+  const prLineTotal = Number(prLine?.lineTotal) || 0;
+  const lineTotal =
+    poLineTotal > 0 ? poLineTotal : unitPrice > 0 ? round2(qty * unitPrice) : prLineTotal;
+  return {
+    costUnitPrice: round2(unitPrice),
+    costLineTotal: round2(lineTotal),
+    costCurrency: String(po?.currency || pr?.currency || "PKR").trim() || "PKR",
+  };
+}
+
 function enrichPrItemsWithLineFulfillment(pr, pos) {
   const prItems = Array.isArray(pr.items) ? pr.items : [];
   if (!prItems.length) {
@@ -176,7 +197,8 @@ function enrichPrItemsWithLineFulfillment(pr, pos) {
     } else if (lineMeta.lineFulfillmentStatus === "awaiting_po" && active.length) {
       lineMeta.lineFulfillmentLabel = "remaining — awaiting PO";
     }
-    return { ...prLine, ...lineMeta };
+    const cost = lineCost(pr, prLine, linked?.po, linked?.poLine);
+    return { ...prLine, ...lineMeta, ...cost };
   });
 
   return { items, linesProcessed, linesTotal: items.length };
@@ -266,31 +288,51 @@ async function enrichPrsWithFulfillment(PurchaseOrder, company_id, rows = []) {
   if (!rows.length) return rows;
 
   const prIds = rows.map((r) => r._id).filter(Boolean);
-  const pos = await PurchaseOrder.find({
-    company_id,
-    requisition: { $in: prIds },
-    isActive: { $ne: false },
-  })
-    .select("poNumber status items requisition updatedAt")
-    .lean();
+  const numbers = [...new Set(rows.map((r) => String(r.requisitionNumber || "").trim()).filter(Boolean))];
+  const or = [];
+  if (prIds.length) or.push({ requisition: { $in: prIds } });
+  if (numbers.length) or.push({ prNumber: { $in: numbers } });
+  const pos = or.length
+    ? await PurchaseOrder.find({
+        company_id,
+        isActive: { $ne: false },
+        $or: or,
+      })
+        .select("poNumber status currency total items requisition prNumber updatedAt")
+        .lean()
+    : [];
 
+  const idByNumber = new Map(
+    rows.map((r) => [String(r.requisitionNumber || "").trim(), String(r._id)])
+  );
+  const rowIds = new Set(rows.map((r) => String(r._id)));
   const byPr = new Map();
   for (const po of pos) {
-    const key = String(po.requisition);
+    const linkedId = po.requisition ? String(po.requisition) : "";
+    const numberId = idByNumber.get(String(po.prNumber || "").trim()) || "";
+    // A saved requisition id wins. prNumber is used only when the PO was
+    // created from the form and never stored the requisition link.
+    const key = linkedId && rowIds.has(linkedId) ? linkedId : !linkedId ? numberId : "";
+    if (!key) continue;
     if (!byPr.has(key)) byPr.set(key, []);
-    byPr.get(key).push(po);
+    const list = byPr.get(key);
+    if (!list.some((existing) => String(existing._id) === String(po._id))) list.push(po);
   }
 
   return rows.map((pr) => {
     const linked = byPr.get(String(pr._id)) || [];
     const { items, linesProcessed, linesTotal } = enrichPrItemsWithLineFulfillment(pr, linked);
     const header = headerFulfillmentFromLines(pr, items, linked);
+    const costCurrency = items.find((line) => line.costCurrency)?.costCurrency || pr.currency || "PKR";
+    const costTotal = round2(items.reduce((sum, line) => sum + (Number(line.costLineTotal) || 0), 0));
     return {
       ...pr,
       ...header,
       items,
       linesProcessed,
       linesTotal,
+      costCurrency,
+      costTotal,
     };
   });
 }

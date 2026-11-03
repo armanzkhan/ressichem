@@ -1,8 +1,10 @@
 /**
- * Promote rana.mehtab@ressichem.com to Procurement Buyer — Local (Lahore).
+ * Ensure rana.mehtab@ressichem.com is the Lahore procurement buyer (PR + PO, Lahore only).
+ * Does not change an existing password.
  * Run: node scripts/promote-rana-lahore-buyer.js
  */
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const User = require("../models/User");
 const Role = require("../models/Role");
@@ -39,24 +41,51 @@ async function permissionIdsForRole(company_id, roleName) {
   await mongoose.connect(URI, { dbName: "Ressichem" });
   const email = "rana.mehtab@ressichem.com";
   const company_id = "RESSICHEM";
-  const user = await User.findOne({
-    company_id,
-    email: new RegExp(`^${email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
-  });
-  if (!user) {
-    console.error("User not found");
-    process.exit(1);
-  }
-
   const roleName = "Procurement Buyer";
   const department = departmentFromArea("local_lahore");
   const { roleId, permissionIds } = await permissionIdsForRole(company_id, roleName);
 
-  user.role = roleName;
-  user.roles = [roleId];
-  user.permissions = permissionIds;
-  user.department = department;
-  await user.save();
+  let user = await User.findOne({
+    company_id,
+    email: new RegExp(`^${email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
+  });
+  let created = false;
+  if (!user) {
+    const password = process.env.LAHORE_BUYER_PASSWORD || "RanaLahore@2026";
+    user = await User.create({
+      company_id,
+      user_id: `user_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      email,
+      password: await bcrypt.hash(password, 10),
+      firstName: "Rana",
+      lastName: "Mehtab",
+      phone: "",
+      department,
+      role: roleName,
+      roles: [roleId],
+      permissions: permissionIds,
+      modules: ["PROCUREMENT"],
+      isActive: true,
+      isCustomer: false,
+      isManager: false,
+      isCompanyAdmin: false,
+    });
+    created = true;
+    console.log("created", email);
+  } else {
+    const modules = new Set(user.modules || []);
+    modules.add("PROCUREMENT");
+    user.role = roleName;
+    user.roles = [roleId];
+    user.permissions = permissionIds;
+    user.department = department;
+    user.modules = [...modules];
+    user.isActive = true;
+    if (!user.firstName) user.firstName = "Rana";
+    if (!user.lastName) user.lastName = "Mehtab";
+    await user.save();
+    console.log("updated", email);
+  }
 
   console.log(
     JSON.stringify(
@@ -64,8 +93,9 @@ async function permissionIdsForRole(company_id, roleName) {
         email: user.email,
         role: user.role,
         department: user.department,
+        modules: user.modules,
+        created,
         permissionCount: permissionIds.length,
-        hasPoCreate: permissionIds.length > 0,
       },
       null,
       2

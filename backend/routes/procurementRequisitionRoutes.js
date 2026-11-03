@@ -12,6 +12,11 @@ router.use(permissionMiddleware(["procurement.access"]));
 router.get("/", permissionMiddleware(["procurement.requisitions.read"]), ctrl.list);
 router.get("/report/monthly", permissionMiddleware(["procurement.requisitions.read"]), reportCtrl.monthlyReport);
 router.get(
+  "/report/approved-daily-cost",
+  permissionMiddleware(["procurement.requisitions.read"]),
+  reportCtrl.approvedDailyCost
+);
+router.get(
   "/report/monthly/export",
   permissionMiddleware(["procurement.requisitions.read"]),
   reportCtrl.exportMonthlyReport

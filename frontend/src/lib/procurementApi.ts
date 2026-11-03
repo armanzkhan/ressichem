@@ -177,6 +177,9 @@ export type LineItem = {
   qtyOrdered?: number;
   qtyReceived?: number;
   poLineId?: string;
+  costUnitPrice?: number;
+  costLineTotal?: number;
+  costCurrency?: string;
 };
 
 export type PrApproval = {
@@ -267,6 +270,8 @@ export type PurchaseDocument = {
   qtyReceived?: number;
   /** Count of PR lines on an issued+ PO */
   linesProcessed?: number;
+  costCurrency?: string;
+  costTotal?: number;
   linesTotal?: number;
 };
 
@@ -786,6 +791,29 @@ export const procurementApi = {
       };
     }>(`/api/procurement/requisitions/report/monthly?${sp}`);
   },
+
+  approvedDailyCost: () =>
+    request<{
+      success: boolean;
+      data: {
+        days: {
+          date: string;
+          requisitionCount: number;
+          requisitions: {
+            _id: string;
+            requisitionNumber: string;
+            title: string;
+            purchaseType?: "local" | "foreign";
+            currency: string;
+            estimatedCost: number;
+          }[];
+          totals: { currency: string; amount: number }[];
+        }[];
+        totals: { currency: string; amount: number }[];
+        requisitionCount: number;
+        unpricedCount: number;
+      };
+    }>("/api/procurement/requisitions/report/approved-daily-cost"),
 
   monthlyPrReportExportPath: (params: {
     year: number;
