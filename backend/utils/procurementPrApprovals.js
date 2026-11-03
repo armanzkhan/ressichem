@@ -11,6 +11,7 @@ const {
   requesterApprovalChain,
   isLahorePr,
   lahoreFinalApproverEmail,
+  estimateEmailsForPr,
 } = require("./procurementPrRouting");
 
 async function resolveUserIdByEmail(company_id, email) {
@@ -395,7 +396,19 @@ function stagesComplete(approvals, stage) {
  * - skip_finance: department → boss
  * - lab_then_finance: department → lab → finance
  */
+function hasEstimateStage(approvals = []) {
+  return approvals.some((row) => approvalStage(row) === "estimate");
+}
+
+function estimateStillOpen(approvals = []) {
+  return approvals.some(
+    (row) =>
+      approvalStage(row) === "estimate" && (row.status === "pending" || row.status === "held")
+  );
+}
+
 function getActionableApprovalStage(approvals = [], options = {}) {
+  if (estimateStillOpen(approvals)) return "estimate";
   const depts = departmentApprovals(approvals);
   if (!depts.length) return "department";
   if (!depts.every((a) => a.status === "approved")) return "department";
@@ -486,15 +499,23 @@ function actionableApprovalRows(approvals = [], user, options = {}) {
   const { allowAdmin = true, ...stageOptions } = options;
   const stage = getActionableApprovalStage(approvals, stageOptions);
   if (stage === "done") return [];
-  const isAdmin =
-    allowAdmin && (isProcurementAdminUser(user) || hasPrFullAccess(user));
   const actorId = String(user?._id || "");
-  return approvals.filter((a) => {
-    if (approvalStage(a) !== stage) return false;
-    if (a.status !== "pending" && a.status !== "held") return false;
-    if (isAdmin) return true;
-    return approvalApproverId(a) === actorId;
-  });
+  const openRows = approvals.filter(
+    (row) =>
+      approvalStage(row) === stage && (row.status === "pending" || row.status === "held")
+  );
+  // Any listed procurement user may enter the price. Only that person's row is acted on.
+  if (stage === "estimate") {
+    return openRows.filter((row) => approvalApproverId(row) === actorId);
+  }
+  // After the estimate, department managers act one at a time, in chain order.
+  if (stage === "department" && hasEstimateStage(approvals)) {
+    const first = openRows[0];
+    if (!first || approvalApproverId(first) !== actorId) return [];
+    return [first];
+  }
+  const isAdmin = allowAdmin && (isProcurementAdminUser(user) || hasPrFullAccess(user));
+  return openRows.filter((row) => isAdmin || approvalApproverId(row) === actorId);
 }
 
 function userHasApprovalRoleOnPr(user, pr) {
@@ -510,15 +531,11 @@ function userHasApprovalRoleOnPr(user, pr) {
 }
 
 function pendingApprovalsForUser(pr, userId) {
-  const actorId = String(userId || "");
-  const approvals = pr.approvals || [];
-  const stage = getActionableApprovalStage(approvals, approvalOptionsFromPr(pr));
-  return approvals.filter(
-    (a) =>
-      approvalApproverId(a) === actorId &&
-      a.status === "pending" &&
-      approvalStage(a) === stage
-  );
+  return actionableApprovalRows(
+    pr.approvals || [],
+    { _id: userId },
+    { ...approvalOptionsFromPr(pr), allowAdmin: false }
+  ).filter((row) => row.status === "pending");
 }
 
 function countApprovalProgress(approvals = []) {
@@ -532,7 +549,10 @@ function deriveStatusAfterApprovals(approvals = [], options = {}) {
   if (!approvals.length) return "approved";
   if (approvals.some((a) => a.status === "rejected")) return "rejected";
   if (!stagesComplete(approvals, "department")) {
-    if (approvals.some((a) => a.status === "approved")) return "partially_approved";
+    const managerApproved = approvals.some(
+      (row) => approvalStage(row) !== "estimate" && row.status === "approved"
+    );
+    if (managerApproved) return "partially_approved";
     return "submitted";
   }
   const stages = corporateStagesForOptions(options);
@@ -635,6 +655,24 @@ function uniqueApproverIds(approvals = []) {
   return ids;
 }
 
+async function buildEstimateApprovals(company_id, pr) {
+  const emails = estimateEmailsForPr(pr);
+  const approvals = [];
+  for (const email of emails) {
+    const userId = await resolveUserIdByEmail(company_id, email);
+    if (!userId) continue;
+    approvals.push({
+      department: isLahorePr(pr) ? "Procurement estimate (Lahore)" : "Procurement estimate",
+      departmentKey: "procurement estimate",
+      stage: "estimate",
+      approver: userId,
+      status: "pending",
+      reason: "",
+    });
+  }
+  return { approvals, emails };
+}
+
 module.exports = {
   collectDepartmentsFromPr,
   departmentsTitleLabel,
@@ -644,11 +682,14 @@ module.exports = {
   ensureDepartmentMappedToUser,
   ensureDepartmentsMappedToUser,
   buildApprovalsForDepartments,
+  buildEstimateApprovals,
   applyRequesterDepartmentApproverOverride,
   assignDepartmentApprovalsToRequester,
   advanceCorporateApprovalStages,
   getActionableApprovalStage,
   actionableApprovalRows,
+  hasEstimateStage,
+  estimateStillOpen,
   userHasApprovalRoleOnPr,
   pendingApprovalsForUser,
   countApprovalProgress,

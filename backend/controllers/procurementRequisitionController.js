@@ -12,8 +12,10 @@ const {
   requesterApprovalChain,
   resolveApprovalChainForSubmit,
   hasPrFullAccess,
+  canViewAllRequisitions,
   normalizeEmail,
   isCorporatePipelineApproverUser,
+  estimateEmailsForPr,
   corporateApproverStageForUser,
   isLahorePr,
   isLahorePlantScopedUser,
@@ -25,6 +27,7 @@ const {
   collectDepartmentsFromPr,
   departmentsTitleLabel,
   buildApprovalsForDepartments,
+  buildEstimateApprovals,
   ensureDepartmentsMappedToUser,
   assertCorporateApproversConfigured,
   advanceCorporateApprovalStages,
@@ -248,8 +251,17 @@ exports.list = async (req, res) => {
 };
 
 function userCanViewPr(req, pr) {
-  if (isProcurementAdminUser(req.user) || hasPrFullAccess(req.user)) return true;
+  if (isProcurementAdminUser(req.user) || hasPrFullAccess(req.user) || canViewAllRequisitions(req.user)) {
+    return true;
+  }
   if (isPrRequester(req.user, pr)) return true;
+  const actorId = String(req.user?._id || "");
+  if (
+    actorId &&
+    (pr.approvals || []).some((row) => approvalApproverId(row) === actorId)
+  ) {
+    return true;
+  }
   if (canApproveRequisitions(req.user) || isCorporatePipelineApproverUser(req.user)) {
     if (userHasApprovalRoleOnPr(req.user, pr)) return true;
     const stage = corporateApproverStageForUser(req.user);
@@ -606,6 +618,23 @@ exports.submit = async (req, res) => {
       if (requesterEmail === labApproverEmail() && req.user?._id) {
         approvals = assignDepartmentApprovalsToRequester(approvals, req.user._id);
       }
+
+      const estimate = await buildEstimateApprovals(company_id, {
+        ...existing.toObject(),
+        title: departmentsTitleLabel(departments),
+        items: existing.items,
+        location: existing.location,
+        lahoreFinalApproval: Boolean(
+          existing.lahoreFinalApproval || isLahorePr(existing, departments)
+        ),
+      });
+      if (!estimate.approvals.length) {
+        return res.status(400).json({
+          success: false,
+          message: `No active procurement user can enter the estimated price. Expected ${estimate.emails.join(", ")}.`,
+        });
+      }
+      approvals = [...estimate.approvals, ...approvals];
     }
 
     const nextStatus = resumedAfterSla ? deriveStatusAfterApprovals(approvals, stageOpts) : "submitted";
@@ -653,11 +682,156 @@ exports.submit = async (req, res) => {
       return res.status(400).json({ success: false, message: "Requisition not found or cannot be submitted" });
     }
 
-    const notifyIds = resumedAfterSla
-      ? [assignedApprover].filter(Boolean)
-      : uniqueApproverIds(approvals);
-    void procurementPrNotificationService.notifyPrSubmittedToApprovers(data, req.user, notifyIds);
+    const waitingForEstimate = (approvals || []).some(
+      (row) => approvalStage(row) === "estimate" && row.status === "pending"
+    );
+    const notifyIds = waitingForEstimate
+      ? approvals
+          .filter((row) => approvalStage(row) === "estimate" && row.status === "pending")
+          .map((row) => row.approver)
+      : resumedAfterSla
+        ? [assignedApprover].filter(Boolean)
+        : uniqueApproverIds(approvals);
+    void procurementPrNotificationService.notifyPrSubmittedToApprovers(
+      data,
+      req.user,
+      notifyIds,
+      waitingForEstimate
+        ? {
+            title: "PR needs an estimated price",
+            message: `${data.requisitionNumber} is waiting for an estimated price on each line.`,
+          }
+        : undefined
+    );
     return res.json({ success: true, data });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.saveEstimatedPrices = async (req, res) => {
+  try {
+    const company_id = getCompanyId(req);
+    const existing = await PurchaseRequisition.findOne({
+      _id: req.params.id,
+      company_id,
+      isActive: { $ne: false },
+      status: { $in: ["submitted", "held", "partially_approved"] },
+    });
+    if (!existing) {
+      return res.status(400).json({ success: false, message: "Requisition not found or not waiting for a price" });
+    }
+
+    const stageOpts = await approvalOptionsForPrDoc(existing);
+    let approvals = (existing.approvals || []).map((row) =>
+      typeof row.toObject === "function" ? row.toObject() : { ...row }
+    );
+    if (getActionableApprovalStage(approvals, stageOpts) !== "estimate") {
+      return res.status(400).json({
+        success: false,
+        message: "This requisition is not waiting for an estimated price",
+      });
+    }
+
+    const allowed = new Set(estimateEmailsForPr(existing).map((email) => normalizeEmail(email)));
+    const actorEmail = normalizeEmail(req.user?.email);
+    if (!allowed.has(actorEmail)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only procurement can enter the estimated price for this requisition",
+      });
+    }
+    const actionable = actionableApprovalRows(approvals, req.user, stageOpts);
+    if (!actionable.length) {
+      return res.status(403).json({
+        success: false,
+        message: "This estimated price is assigned to another procurement user",
+      });
+    }
+
+    const prices = req.body?.lineUnitPrices;
+    const items = existing.items || [];
+    if (!Array.isArray(prices) || prices.length !== items.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter an estimated unit price for every line",
+      });
+    }
+    if (prices.some((price) => !(Number(price) > 0))) {
+      return res.status(400).json({
+        success: false,
+        message: "Every line needs an estimated unit price greater than 0",
+      });
+    }
+
+    const remarks = String(req.body?.remarks || "").trim() || "Estimated prices entered";
+    const pricedItems = items.map((line, index) => {
+      const plain = typeof line.toObject === "function" ? line.toObject() : { ...line };
+      const qty = Number(plain.quantity) || 0;
+      const unitPrice = Number(prices[index]);
+      return {
+        ...plain,
+        unitPrice,
+        lineTotal: Math.round(qty * unitPrice * 100) / 100,
+      };
+    });
+    const subtotal = Math.round(pricedItems.reduce((sum, line) => sum + (Number(line.lineTotal) || 0), 0) * 100) / 100;
+    const taxAmount = Number(existing.taxAmount) || 0;
+    const now = new Date();
+    const actorId = String(req.user?._id || "");
+    for (const row of approvals) {
+      if (approvalStage(row) !== "estimate") continue;
+      if (row.status !== "pending" && row.status !== "held") continue;
+      if (approvalApproverId(row) === actorId) {
+        row.status = "approved";
+        row.actedAt = now;
+        row.reason = remarks;
+      } else {
+        row.status = "cancelled";
+        row.actedAt = now;
+        row.reason = "Estimated price entered by another procurement user";
+      }
+    }
+
+    const nextStatus = deriveStatusAfterApprovals(approvals, stageOpts);
+    const data = await populateRequisitionAudit(
+      PurchaseRequisition.findOneAndUpdate(
+        { _id: existing._id, company_id },
+        {
+          $set: {
+            items: pricedItems,
+            subtotal,
+            total: Math.round((subtotal + taxAmount) * 100) / 100,
+            ...(existing.purchaseType === "local" ? { currency: "PKR" } : {}),
+            approvals,
+            status: nextStatus,
+            assignedApprover: firstPendingApproverId(approvals, stageOpts) || existing.assignedApprover,
+          },
+          $push: {
+            decisionLog: {
+              kind: "approved",
+              at: now,
+              actorName: actorDisplayName(req.user),
+              reason: remarks,
+            },
+          },
+        },
+        { new: true }
+      )
+    );
+    if (!data) {
+      return res.status(400).json({ success: false, message: "Requisition not found or not waiting for a price" });
+    }
+
+    const nextManager = firstPendingApproverId(approvals, stageOpts);
+    if (nextManager && getActionableApprovalStage(approvals, stageOpts) === "department") {
+      void procurementPrNotificationService.notifyPrSubmittedToApprovers(data, req.user, [nextManager]);
+    }
+    return res.json({
+      success: true,
+      data,
+      message: "Estimated prices saved. The requisition has moved to the next approver.",
+    });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -754,7 +928,13 @@ exports.approve = async (req, res) => {
       return res.status(403).json({
         success: false,
         message:
-          "You have no pending approval on the current stage of this PR (department, finance, or boss).",
+          "You have no pending approval on the current stage of this PR (estimate, department, finance, or boss).",
+      });
+    }
+    if (getActionableApprovalStage(approvals, stageOpts) === "estimate") {
+      return res.status(400).json({
+        success: false,
+        message: "Enter the estimated unit price on every line before this requisition moves to the managers.",
       });
     }
 
@@ -818,6 +998,11 @@ exports.approve = async (req, res) => {
         req.user,
         newlyAdded.map((r) => r.approver)
       );
+    } else if (nextStatus !== "approved" && getActionableApprovalStage(approvals, stageOpts) === "department") {
+      const nextManager = firstPendingApproverId(approvals, stageOpts);
+      if (nextManager) {
+        void procurementPrNotificationService.notifyPrSubmittedToApprovers(data, req.user, [nextManager]);
+      }
     }
 
     if (nextStatus === "approved") {
@@ -874,6 +1059,12 @@ exports.reject = async (req, res) => {
       `${approvalStage(row)}:${approvalApproverId(row)}:${String(row.departmentKey || row.department || "")}`;
     const actionableKeys = new Set(actionable.map(rowKey));
     const currentStage = getActionableApprovalStage(approvals, stageOpts);
+    if (currentStage === "estimate") {
+      return res.status(400).json({
+        success: false,
+        message: "Enter the estimated unit price on every line. Reject is available after the price is saved.",
+      });
+    }
 
     approvals = approvals.map((row) => {
       if (row.status !== "pending" && row.status !== "held") return row;
@@ -978,6 +1169,12 @@ exports.hold = async (req, res) => {
       return res.status(403).json({
         success: false,
         message: "You have no pending approval on the current stage to hold.",
+      });
+    }
+    if (getActionableApprovalStage(approvals, stageOpts) === "estimate") {
+      return res.status(400).json({
+        success: false,
+        message: "Enter the estimated unit price on every line. Hold is available after the price is saved.",
       });
     }
     for (const row of actionable) {

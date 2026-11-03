@@ -733,6 +733,11 @@ export const procurementApi = {
       method: "POST",
       body: JSON.stringify({ remarks: String(remarks || "").trim() }),
     }),
+  saveRequisitionEstimate: (id: string, body: { lineUnitPrices: number[]; remarks?: string }) =>
+    request<{ success: boolean; data: PurchaseDocument; message?: string }>(
+      `/api/procurement/requisitions/${id}/estimate`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
   rejectRequisition: (id: string, reason: string) =>
     request(`/api/procurement/requisitions/${id}/reject`, {
       method: "POST",

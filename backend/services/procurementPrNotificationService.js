@@ -73,7 +73,7 @@ async function notifyPrSubmitted(pr, submitter, approverMongoId) {
   return notifyPrSubmittedToApprovers(pr, submitter, approverMongoId ? [approverMongoId] : []);
 }
 
-async function notifyPrSubmittedToApprovers(pr, submitter, approverMongoIds = []) {
+async function notifyPrSubmittedToApprovers(pr, submitter, approverMongoIds = [], options = {}) {
   const submitterMongoId = submitter?._id ? String(submitter._id) : "";
   const uniqueIds = [...new Set((approverMongoIds || []).map((id) => String(id)).filter(Boolean))];
 
@@ -89,8 +89,10 @@ async function notifyPrSubmittedToApprovers(pr, submitter, approverMongoIds = []
     const notification = await notifyProcurementUser({
       company_id: pr.company_id,
       targetMongoUserId: approverMongoId,
-      title: "PR awaiting your approval",
-      message: `${prLabel(pr)} needs your approval (routed by ${senderName(submitter)}).`,
+      title: options.title || "PR awaiting your approval",
+      message:
+        options.message ||
+        `${prLabel(pr)} needs your approval (routed by ${senderName(submitter)}).`,
       type: "approval_required",
       priority: "high",
       sender: submitter,

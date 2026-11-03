@@ -11,7 +11,8 @@ const prApprovalSchema = new mongoose.Schema(
      */
     stage: {
       type: String,
-      enum: ["department", "lab", "finance", "boss"],
+      // estimate = procurement price before any manager; then department managers one at a time
+      enum: ["estimate", "department", "lab", "finance", "boss"],
       default: "department",
     },
     approver: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },

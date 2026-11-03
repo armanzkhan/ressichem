@@ -4,6 +4,10 @@ const SOFT_DELETE_EMAILS = new Set(["arman@ressichem.com"]);
 /** View / edit / delete / reject any PR (approved or not). */
 const PR_FULL_ACCESS_EMAILS = new Set(["salim@gmail.com"]);
 
+export function currentProcurementEmail(): string {
+  return storedEmail();
+}
+
 function storedEmail(): string {
   if (typeof window === "undefined") return "";
   const fromStorage = (localStorage.getItem("userEmail") || "").trim().toLowerCase();

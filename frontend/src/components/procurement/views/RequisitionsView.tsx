@@ -24,7 +24,7 @@ import { formatProcurementAmount } from "@/lib/procurementMoney";
 import {
   accessLevelFromRole,
 } from "@/lib/procurementRoles";
-import { canProcurementSoftDelete, hasPrFullAccess } from "@/lib/procurementAccess";
+import { canProcurementSoftDelete, currentProcurementEmail, hasPrFullAccess } from "@/lib/procurementAccess";
 
 const emptyForm = () => ({
   title: "",
@@ -83,6 +83,7 @@ function departmentsFromLines(lines: RequisitionLine[]) {
 
 function approvalStageLabel(stage?: string) {
   const s = String(stage || "department").toLowerCase();
+  if (s === "estimate") return "Price";
   if (s === "lab") return "Lab";
   if (s === "finance") return "Finance";
   if (s === "boss") return "Final";
@@ -97,6 +98,15 @@ function approvalChainKey(row: PurchaseDocument) {
 }
 
 /** Lahore may be sticky flag, location, title, or department (e.g. "Administration (Lahore)"). */
+function pricesFromRequisition(row: PurchaseDocument) {
+  const next: Record<number, string> = {};
+  (row.items || []).forEach((item, index) => {
+    const price = Number(item.unitPrice) || 0;
+    next[index] = price > 0 ? String(price) : "";
+  });
+  return next;
+}
+
 function isLahorePr(row?: {
   location?: string;
   title?: string;
@@ -111,6 +121,19 @@ function isLahorePr(row?: {
   if (row.lahoreFinalApproval) return true;
   if (hasLahore(row.location) || hasLahore(row.title)) return true;
   return (row.items || []).some((line) => hasLahore(line.department));
+}
+
+const HUB_ESTIMATE_EMAILS = ["salim@gmail.com", "hanif@ressichem.com", "ahabib@ressichem.com"];
+const LAHORE_ESTIMATE_EMAIL = "rana.mehtab@ressichem.com";
+
+function estimateStageOpen(row?: PurchaseDocument) {
+  return (row?.approvals || []).some(
+    (entry) => entry.stage === "estimate" && (entry.status === "pending" || entry.status === "held")
+  );
+}
+
+function hasEstimateStage(row?: PurchaseDocument) {
+  return (row?.approvals || []).some((entry) => entry.stage === "estimate");
 }
 
 /** Corporate steps that unlock after departments (shown even before rows exist). */
@@ -253,6 +276,25 @@ export function RequisitionsView({ section }: Props) {
     if (!open) return false;
     const approvals = row.approvals || [];
     const isOpenStatus = (status?: string) => status === "pending" || status === "held";
+    const hasEstimate = approvals.some((entry) => entry.stage === "estimate");
+    const estimateOpen = approvals.some(
+      (entry) => entry.stage === "estimate" && isOpenStatus(entry.status)
+    );
+    if (estimateOpen) {
+      return approvals.some((entry) => {
+        const id = approvalActorId(entry.approver);
+        return Boolean(
+          entry.stage === "estimate" && id && String(id) === String(currentUserId) && isOpenStatus(entry.status)
+        );
+      });
+    }
+    if (hasEstimate) {
+      const firstDepartment = approvals.find(
+        (entry) => (entry.stage || "department") === "department" && isOpenStatus(entry.status)
+      );
+      const id = approvalActorId(firstDepartment?.approver);
+      return Boolean(id && String(id) === String(currentUserId));
+    }
     const mine = approvals.filter((a) => {
       const id = approvalActorId(a.approver);
       return Boolean(id && String(id) === String(currentUserId) && isOpenStatus(a.status));
@@ -290,17 +332,32 @@ export function RequisitionsView({ section }: Props) {
       seen.add(key);
       names.push(label);
     }
-    if (names.length) return names.join(", ");
+    if (names.length) {
+      if (approvals.some((entry) => entry.stage === "estimate") && stage === "department") {
+        return names[0];
+      }
+      return names.join(", ");
+    }
     return row.assignedApprover ? procurementUserLabel(row.assignedApprover) : "—";
   };
 
+  const canEnterEstimate = (row: PurchaseDocument) => {
+    if (!estimateStageOpen(row)) return false;
+    const email = currentProcurementEmail();
+    const allowed = isLahorePr(row) ? [LAHORE_ESTIMATE_EMAIL] : HUB_ESTIMATE_EMAILS;
+    return allowed.includes(email);
+  };
+
   /**
-   * Approve / Hold / Reject only when THIS user is the pending approver
-   * (or PR full-access). Do not unlock every open PR for Company Admin /
-   * Approver roles (that flooded tahira@ / finance@ with Moiz/others' PRs).
+   * Approve / Hold / Reject only when THIS user is the pending approver.
+   * While procurement still owes an estimated price, those actions stay closed.
+   * After the price is saved, managers act one at a time.
    */
-  const canActAsApproverOnPr = (row: PurchaseDocument) =>
-    prFullAccess || isPendingApproverOnPr(row);
+  const canActAsApproverOnPr = (row: PurchaseDocument) => {
+    if (estimateStageOpen(row)) return false;
+    if (hasEstimateStage(row)) return isPendingApproverOnPr(row);
+    return prFullAccess || isPendingApproverOnPr(row);
+  };
 
   /** Buyers and admins — requesters do not create Purchase Orders. */
   const canConvertAnyApprovedPo =
@@ -352,6 +409,9 @@ export function RequisitionsView({ section }: Props) {
 
   const canOpenEditForm = (row: PurchaseDocument) => canEditOrSubmitPr(row) || canApproverAmendPr(row);
   const [viewingRow, setViewingRow] = useState<PurchaseDocument | null>(null);
+  const [estimatePrices, setEstimatePrices] = useState<Record<number, string>>({});
+  const [estimateRemarks, setEstimateRemarks] = useState("");
+  const [savingEstimate, setSavingEstimate] = useState(false);
   const [reviewAction, setReviewAction] = useState<{
     id: string;
     type: "reject" | "hold" | "approve";
@@ -453,6 +513,8 @@ export function RequisitionsView({ section }: Props) {
         const res = await procurementApi.getRequisition(fromList?._id || openId);
         if (cancelled) return;
         setViewingRow(res.data);
+        setEstimatePrices(pricesFromRequisition(res.data));
+        setEstimateRemarks("");
         setShowForm(false);
         setEditingId(null);
         setError("");
@@ -530,6 +592,8 @@ export function RequisitionsView({ section }: Props) {
     try {
       const res = await procurementApi.getRequisition(row._id);
       setViewingRow(res.data);
+      setEstimatePrices(pricesFromRequisition(res.data));
+      setEstimateRemarks("");
       const next: Record<number, boolean> = {};
       (res.data.items || []).forEach((item, i) => {
         next[i] = lineOpenForPo(item);
@@ -540,6 +604,32 @@ export function RequisitionsView({ section }: Props) {
       setEditingMeta(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load requisition");
+    }
+  };
+
+  const saveEstimatedPrices = async () => {
+    if (!viewingRow || savingEstimate) return;
+    const items = viewingRow.items || [];
+    const lineUnitPrices = items.map((_, index) => Number(estimatePrices[index]));
+    if (lineUnitPrices.some((price) => !(price > 0))) {
+      setError("Enter an estimated unit price greater than 0 on every line");
+      return;
+    }
+    setSavingEstimate(true);
+    setError("");
+    try {
+      const res = await procurementApi.saveRequisitionEstimate(viewingRow._id, {
+        lineUnitPrices,
+        remarks: estimateRemarks,
+      });
+      setViewingRow(null);
+      setEstimateRemarks("");
+      await load();
+      if (res.message) setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the estimated prices");
+    } finally {
+      setSavingEstimate(false);
     }
   };
 
@@ -882,6 +972,18 @@ export function RequisitionsView({ section }: Props) {
                     }}
                   >
                     Edit
+                  </button>
+                ) : null}
+                {canEnterEstimate(r) ? (
+                  <button
+                    type="button"
+                    className="text-blue-700 text-xs dark:text-blue-300"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openRequisition(r);
+                    }}
+                  >
+                    Enter price
                   </button>
                 ) : null}
                 {canActAsApproverOnPr(r) &&
@@ -1295,7 +1397,41 @@ export function RequisitionsView({ section }: Props) {
                           {item.description}
                         </p>
                       ) : null}
-                      {Number(item.costLineTotal) > 0 || Number(item.costUnitPrice) > 0 ? (
+                      {canEnterEstimate(viewingRow) ? (
+                        <label className="mt-2 block text-sm font-semibold text-blue-950 dark:text-blue-50">
+                          Estimated unit price ({viewingRow.purchaseType === "foreign" ? viewingRow.currency || "USD" : "PKR"})
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className={`${procurementFieldClass} mt-1`}
+                            value={estimatePrices[i] ?? ""}
+                            onChange={(e) =>
+                              setEstimatePrices((prev) => ({ ...prev, [i]: e.target.value }))
+                            }
+                          />
+                        </label>
+                      ) : Number(item.unitPrice) > 0 ? (
+                        <p className="mt-1 text-sm font-bold text-blue-950 dark:text-blue-50">
+                          Estimated unit price {viewingRow.currency || "PKR"}{" "}
+                          {formatProcurementAmount(Number(item.unitPrice) || 0)}
+                          {" · "}
+                          Estimated line total {viewingRow.currency || "PKR"}{" "}
+                          {formatProcurementAmount(
+                            Number(item.lineTotal) > 0
+                              ? Number(item.lineTotal)
+                              : (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)
+                          )}
+                          {Number(item.costUnitPrice) > 0 &&
+                          Math.abs(Number(item.costUnitPrice) - Number(item.unitPrice)) > 0.009 ? (
+                            <>
+                              {" · "}
+                              Purchase unit {item.costCurrency || viewingRow.costCurrency || "PKR"}{" "}
+                              {formatProcurementAmount(Number(item.costUnitPrice) || 0)}
+                            </>
+                          ) : null}
+                        </p>
+                      ) : Number(item.costLineTotal) > 0 || Number(item.costUnitPrice) > 0 ? (
                         <p className="mt-1 text-sm font-bold text-blue-950 dark:text-blue-50">
                           Unit price {item.costCurrency || viewingRow.costCurrency || "PKR"}{" "}
                           {formatProcurementAmount(Number(item.costUnitPrice) || 0)}
@@ -1339,9 +1475,37 @@ export function RequisitionsView({ section }: Props) {
                 </p>
               ) : null}
               <p className="mt-3 border-t border-blue-200 pt-2 text-base font-bold text-blue-950 dark:border-slate-600 dark:text-white">
-                Total {viewingRow.costCurrency || viewingRow.currency || "PKR"}{" "}
-                {formatProcurementAmount(Number(viewingRow.costTotal) || 0)}
+                {(viewingRow.items || []).some((item) => Number(item.unitPrice) > 0)
+                  ? `Estimated total ${viewingRow.currency || "PKR"} ${formatProcurementAmount(
+                      (viewingRow.items || []).reduce((sum, item) => {
+                        const line =
+                          Number(item.lineTotal) > 0
+                            ? Number(item.lineTotal)
+                            : (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+                        return sum + line;
+                      }, 0)
+                    )}`
+                  : `Total ${viewingRow.costCurrency || viewingRow.currency || "PKR"} ${formatProcurementAmount(
+                      Number(viewingRow.costTotal) || 0
+                    )}`}
               </p>
+              {(viewingRow.items || []).some((item) => Number(item.unitPrice) > 0) &&
+              Number(viewingRow.costTotal) > 0 &&
+              Math.abs(
+                Number(viewingRow.costTotal) -
+                  (viewingRow.items || []).reduce((sum, item) => {
+                    const line =
+                      Number(item.lineTotal) > 0
+                        ? Number(item.lineTotal)
+                        : (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+                    return sum + line;
+                  }, 0)
+              ) > 0.009 ? (
+                <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  Purchase total {viewingRow.costCurrency || "PKR"}{" "}
+                  {formatProcurementAmount(Number(viewingRow.costTotal) || 0)}
+                </p>
+              ) : null}
             </div>
             <p className="flex flex-wrap items-center gap-2">
               <span className="font-medium text-blue-900 dark:text-blue-200">Status:</span>{" "}
@@ -1447,6 +1611,17 @@ export function RequisitionsView({ section }: Props) {
                       </li>
                     ))}
                 </ul>
+                {hasEstimateStage(viewingRow) ? (
+                  <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
+                    {estimateStageOpen(viewingRow)
+                      ? isLahorePr(viewingRow)
+                        ? "Waiting for rana.mehtab@ressichem.com to enter the estimated price. Then the assigned managers approve one at a time, then Lahore Finance (tahira@ressichem.com)."
+                        : "Waiting for procurement (salim@gmail.com, hanif@ressichem.com, or ahabib@ressichem.com) to enter the estimated price. Then the assigned managers approve one at a time, then Finance."
+                      : isLahorePr(viewingRow)
+                        ? "Estimated price is saved. Managers approve one at a time, then Lahore Finance (tahira@ressichem.com)."
+                        : "Estimated price is saved. Managers approve one at a time, then Finance."}
+                  </p>
+                ) : null}
                 {approvalChainKey(viewingRow) === "lab_then_finance" ? (
                   !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "lab") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
@@ -1517,6 +1692,27 @@ export function RequisitionsView({ section }: Props) {
                 >
                   Create PO for selected lines
                 </button>
+              ) : null}
+              {canEnterEstimate(viewingRow) ? (
+                <div className="flex w-full flex-col items-end gap-2">
+                  <label className="w-full text-sm font-semibold text-blue-950 dark:text-blue-50">
+                    Remarks (optional)
+                    <input
+                      className={`${procurementFieldClass} mt-1`}
+                      value={estimateRemarks}
+                      onChange={(e) => setEstimateRemarks(e.target.value)}
+                      placeholder="Estimated prices entered"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-lg bg-blue-700 text-white text-sm disabled:opacity-60"
+                    disabled={savingEstimate}
+                    onClick={() => void saveEstimatedPrices()}
+                  >
+                    {savingEstimate ? "Saving…" : "Save estimated prices"}
+                  </button>
+                </div>
               ) : null}
               {canOpenEditForm(viewingRow) ? (
                 <button

@@ -39,6 +39,7 @@ router.patch(
   permissionMiddleware(["procurement.requisitions.read"]),
   ctrl.updateFollowUp
 );
+router.post("/:id/estimate", permissionMiddleware(["procurement.access"]), ctrl.saveEstimatedPrices);
 router.post("/:id/submit", permissionMiddleware(["procurement.requisitions.update"]), ctrl.submit);
 // Department-mapped approvers may only have create/read — controller still enforces assignee via assertCanActOnPr
 router.post(

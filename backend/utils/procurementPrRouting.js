@@ -64,6 +64,15 @@ const LAB_THEN_FINANCE_DEPARTMENTS = new Set([
 /** Lahore Finance Manager (tahira@). */
 const LAHORE_FINAL_APPROVER_EMAIL = "tahira@ressichem.com";
 
+/** Procurement users who enter the estimated price before managers see the PR. */
+const HUB_ESTIMATE_EMAILS = ["salim@gmail.com", "hanif@ressichem.com", "ahabib@ressichem.com"];
+/** Lahore purchase requisitions are priced by Rana before the Lahore approvers. */
+const LAHORE_ESTIMATE_EMAIL = "rana.mehtab@ressichem.com";
+
+function estimateEmailsForPr(pr) {
+  return isLahorePr(pr) ? [LAHORE_ESTIMATE_EMAIL] : HUB_ESTIMATE_EMAILS;
+}
+
 /** Finance stage for Lahore — always tahira@. */
 function lahoreFinanceStageDef() {
   return {
@@ -521,9 +530,31 @@ function corporateApproverStageForUser(user) {
 }
 
 /**
+ * Hub finance (finance@) can read every requisition, including Lahore, Karachi, and Hub.
+ * Lahore finance (tahira@) stays on the Lahore queue.
+ */
+function canViewAllRequisitions(user) {
+  const email = userEmail(user);
+  if (!email) return false;
+  const lahoreFinance = new Set(
+    [LAHORE_FINAL_APPROVER_EMAIL, process.env.PROCUREMENT_LAHORE_APPROVER_EMAIL]
+      .map((item) => normalizeEmail(item))
+      .filter(Boolean)
+  );
+  if (lahoreFinance.has(email)) return false;
+  const finance = new Set(
+    ["finance@ressichem.com", process.env.PROCUREMENT_FINANCE_APPROVER_EMAIL]
+      .map((item) => normalizeEmail(item))
+      .filter(Boolean)
+  );
+  return finance.has(email);
+}
+
+/**
  * Scope PR list/report queries by role:
  * - PR full-access (salim@): company-wide
- * - finance / lab / Lahore final / Siraj final: own + assigned + on approvals
+ * - Hub finance (finance@): company-wide, every location
+ * - lab / Lahore final / Siraj final: own + assigned + on approvals
  *   even if the account is also Company Admin (otherwise tahira@ sees all 50+ PRs)
  * - other admins: company-wide
  * - department approver: own + assigned + on approvals
@@ -533,9 +564,9 @@ function corporateApproverStageForUser(user) {
  */
 function applyPurchaseRequisitionVisibility(query, user) {
   if (!query || !user) return query;
-  if (hasPrFullAccess(user)) return query;
+  if (hasPrFullAccess(user) || canViewAllRequisitions(user)) return query;
 
-  // Corporate finals/finance/lab must stay scoped — do not expand to company-wide via admin flag.
+  // Corporate finals/lab/Lahore finance must stay scoped — do not expand to company-wide via admin flag.
   if (isCorporatePipelineApproverUser(user)) {
     query.$or = [
       { requestedBy: user._id },
@@ -556,8 +587,26 @@ function applyPurchaseRequisitionVisibility(query, user) {
     return query;
   }
 
+  const estimateEmails = new Set(
+    [...HUB_ESTIMATE_EMAILS, LAHORE_ESTIMATE_EMAIL].map((email) => normalizeEmail(email))
+  );
+  if (estimateEmails.has(userEmail(user))) {
+    const or = [
+      { requestedBy: user._id },
+      { assignedApprover: user._id },
+      { "approvals.approver": user._id },
+    ];
+    if (canCreatePurchaseOrders(user)) or.push({ status: "approved" });
+    query.$or = or;
+    return applyLahorePlantScopeToPrQuery(query, user);
+  }
+
   if (canCreatePurchaseOrders(user)) {
-    query.$or = [{ requestedBy: user._id }, { status: "approved" }];
+    query.$or = [
+      { requestedBy: user._id },
+      { status: "approved" },
+      { "approvals.approver": user._id },
+    ];
     return applyLahorePlantScopeToPrQuery(query, user);
   }
 
@@ -577,6 +626,9 @@ module.exports = {
   PROCUREMENT_PR_FULL_ACCESS_EMAILS,
   PROCUREMENT_SOFT_DELETE_EMAILS,
   LAHORE_FINAL_APPROVER_EMAIL,
+  HUB_ESTIMATE_EMAILS,
+  LAHORE_ESTIMATE_EMAIL,
+  estimateEmailsForPr,
   normalizeDepartment,
   normalizeEmail,
   isLahoreLocation,
@@ -594,6 +646,7 @@ module.exports = {
   isCorporatePipelineApproverUser,
   corporateApproverStageForUser,
   hasPrFullAccess,
+  canViewAllRequisitions,
   canSoftDeleteProcurement,
   canApproveRequisitions,
   canCreateRequisitions,
