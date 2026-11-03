@@ -120,7 +120,7 @@ export default function ManagerNotificationPopup({
   if (!isVisible) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-50 max-w-sm w-full">
+    <div className="fixed top-20 right-4 z-50 w-[min(22rem,calc(100vw-2rem))]">
       <div 
         className={`
           ${getNotificationColor()}
@@ -137,7 +137,7 @@ export default function ManagerNotificationPopup({
           <div className="flex items-center space-x-3">
             {getNotificationIcon()}
             <div>
-              <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-white break-words">
                 {notification.title}
               </h4>
               <p className="text-xs text-gray-600 dark:text-gray-300">
@@ -161,7 +161,7 @@ export default function ManagerNotificationPopup({
         </div>
 
         {/* Message */}
-        <p className="text-sm text-gray-700 dark:text-gray-300 mb-3">
+        <p className="text-sm text-gray-700 dark:text-gray-300 mb-3 break-words">
           {notification.message}
         </p>
 

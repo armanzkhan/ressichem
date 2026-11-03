@@ -213,6 +213,8 @@ export type PurchaseDocument = {
   supplier?: ProcurementSupplier | string;
   suppliers?: (ProcurementSupplier | string)[];
   title?: string;
+  /** Purpose of the requisition, entered by the requester. */
+  subject?: string;
   status: string;
   rejectionReason?: string;
   holdReason?: string;

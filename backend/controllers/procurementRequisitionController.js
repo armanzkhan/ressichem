@@ -333,6 +333,7 @@ exports.create = async (req, res) => {
       company_id,
       requisitionNumber,
       title,
+      subject: String(body.subject || "").trim(),
       items,
       subtotal,
       taxAmount,

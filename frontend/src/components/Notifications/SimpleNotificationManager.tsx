@@ -115,7 +115,7 @@ export default function SimpleNotificationManager({ children }: SimpleNotificati
             />
           ) : (
             /* Default notification for non-managers */
-            <div className="fixed top-4 right-4 z-[9999] max-w-sm">
+            <div className="fixed top-20 right-4 z-[9999] w-[min(22rem,calc(100vw-2rem))]">
               <div 
                 className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-4 cursor-pointer hover:shadow-xl transition-shadow"
                 onClick={() => {
@@ -136,15 +136,15 @@ export default function SimpleNotificationManager({ children }: SimpleNotificati
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className={`w-2 h-2 rounded-full ${
+                    <div className="flex items-start gap-2 mb-2 min-w-0">
+                      <div className={`mt-1.5 w-2 h-2 shrink-0 rounded-full ${
                         isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
                       }`} />
-                      <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
+                      <h4 className="min-w-0 text-sm font-semibold text-gray-900 dark:text-white break-words">
                         {currentNotification.title}
                       </h4>
                     </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mb-2 break-words">
                       {currentNotification.message}
                     </p>
                     <div className="text-xs text-gray-500 dark:text-gray-400">

@@ -135,10 +135,10 @@ export function ProcurementNotificationBell() {
                         ].join(" ")}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-semibold text-slate-900 dark:text-white">{n.title}</p>
+                          <p className="min-w-0 text-sm font-semibold text-slate-900 dark:text-white break-words">{n.title}</p>
                           {unread ? <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-red-600" aria-hidden /> : null}
                         </div>
-                        <p className="mt-1 text-sm leading-snug text-slate-700 dark:text-slate-200 line-clamp-4">{n.message}</p>
+                        <p className="mt-1 text-sm leading-snug text-slate-700 dark:text-slate-200 break-words">{n.message}</p>
                         <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">{formatNotificationTime(n.createdAt)}</p>
                       </Link>
                     </li>

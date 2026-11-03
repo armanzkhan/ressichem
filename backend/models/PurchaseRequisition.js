@@ -35,6 +35,8 @@ const purchaseRequisitionSchema = new mongoose.Schema(
     supplier: { type: mongoose.Schema.Types.ObjectId, ref: "ProcurementSupplier" },
     /** Display label: unique departments joined (legacy single-dept still works). */
     title: { type: String, default: "" },
+    /** Why this requisition was raised. Shown in the list; not overwritten by department names. */
+    subject: { type: String, default: "", trim: true },
     purchaseType: { type: String, enum: ["local", "foreign"], default: "foreign" },
     status: {
       type: String,

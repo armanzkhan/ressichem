@@ -378,7 +378,9 @@ export function Table({
                       key={j}
                       className={[
                         "py-2.5 px-3 text-blue-900 dark:text-slate-100 align-top",
-                        j === cells.length - 1 ? "whitespace-normal" : "whitespace-nowrap",
+                        j === cells.length - 1
+                          ? "whitespace-normal min-w-[8.5rem]"
+                          : "max-w-[14rem] overflow-hidden",
                       ].join(" ")}
                     >
                       {cell}

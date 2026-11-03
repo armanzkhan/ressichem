@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { procurementApi, type ProcurementItem, type ProcurementSupplier, type PurchaseDocument } from "@/lib/procurementApi";
 import {
@@ -27,10 +27,27 @@ import {
 import { canProcurementSoftDelete, currentProcurementEmail, hasPrFullAccess } from "@/lib/procurementAccess";
 
 const emptyForm = () => ({
+  subject: "",
   title: "",
   location: "",
   lines: [] as RequisitionLine[],
 });
+
+function prSearchText(row: PurchaseDocument) {
+  const parts = [
+    row.requisitionNumber,
+    row.subject,
+    row.notes,
+    row.title,
+    row.location,
+    procurementUserLabel(row.requestedBy),
+    ...(row.items || []).flatMap((item) => [item.itemName, item.itemCode, item.description, item.department]),
+  ];
+  return parts
+    .map((part) => String(part || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+}
 
 const PR_STATUS_FILTERS = [
   { value: "", label: "All approval statuses" },
@@ -184,11 +201,13 @@ function approvalProgressLabel(row: PurchaseDocument) {
 }
 
 function requisitionToForm(row: PurchaseDocument): {
+  subject: string;
   title: string;
   location: string;
   lines: RequisitionLine[];
 } {
   return {
+    subject: row.subject || "",
     title: row.title || "",
     location: row.location || "",
     lines: (row.items || []).map((item) => ({
@@ -427,6 +446,7 @@ export function RequisitionsView({ section }: Props) {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [statusFilter, setStatusFilter] = useState("");
   const [fulfillmentFilter, setFulfillmentFilter] = useState("");
+  const [search, setSearch] = useState("");
   const [followUpDraft, setFollowUpDraft] = useState<{
     id: string;
     status: string;
@@ -578,9 +598,22 @@ export function RequisitionsView({ section }: Props) {
     }
   };
 
-  const allSelected = rows.length > 0 && selectedIds.length === rows.length;
+  const visibleRows = useMemo(() => {
+    const tokens = search
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (!tokens.length) return rows;
+    return rows.filter((row) => {
+      const haystack = prSearchText(row);
+      return tokens.every((token) => haystack.includes(token));
+    });
+  }, [rows, search]);
+
+  const allSelected = visibleRows.length > 0 && visibleRows.every((row) => selectedIds.includes(row._id));
   const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? [] : rows.map((r) => r._id));
+    setSelectedIds(allSelected ? [] : visibleRows.map((r) => r._id));
   };
   const toggleSelectOne = (id: string) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -728,6 +761,10 @@ export function RequisitionsView({ section }: Props) {
       setError("Add at least one line item");
       return;
     }
+    if (!form.subject.trim()) {
+      setError("Enter a subject or purpose for this requisition");
+      return;
+    }
     if (form.lines.some((l) => !l.item)) {
       setError("Select an item on every line");
       return;
@@ -742,6 +779,7 @@ export function RequisitionsView({ section }: Props) {
       const purchaseType = purchaseTypeForSection(section);
       const depts = departmentsFromLines(form.lines);
       const body = {
+        subject: form.subject.trim(),
         title: depts.join(", ") || form.title.trim(),
         purchaseType,
         currency: purchaseType === "local" ? "PKR" : "USD",
@@ -838,12 +876,28 @@ export function RequisitionsView({ section }: Props) {
   return (
     <PageShell
       title={pageTitle(section, "pr")}
-      summary={loading ? undefined : recordTotalLabel(rows.length, "requisition", "requisitions")}
+      summary={
+        loading
+          ? undefined
+          : search.trim()
+            ? `${visibleRows.length} of ${recordTotalLabel(rows.length, "requisition", "requisitions")}`
+            : recordTotalLabel(rows.length, "requisition", "requisitions")
+      }
       onBulkImport={canBulkImport ? () => setShowBulkImport(true) : undefined}
       onAdd={canCreate ? openCreate : undefined}
     >
       {error ? <Alert message={error} /> : null}
       <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-3 mb-3">
+        <label className="text-xs text-blue-800 dark:text-blue-200 w-full sm:min-w-[18rem] sm:flex-1">
+          Search
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Subject, keywords, or PR number"
+            className={`${procurementFieldClass} mt-1 w-full`}
+          />
+        </label>
         <label className="text-xs text-blue-800 dark:text-blue-200 w-full sm:w-auto">
           Approval status
           <select
@@ -897,7 +951,7 @@ export function RequisitionsView({ section }: Props) {
         <LoadingText />
       ) : (
         <Table
-          onRowClick={(index) => openRequisition(rows[index])}
+          onRowClick={(index) => openRequisition(visibleRows[index])}
           headers={
             canDelete
               ? [
@@ -910,6 +964,7 @@ export function RequisitionsView({ section }: Props) {
                     onChange={toggleSelectAll}
                   />,
                   "PR #",
+                  "Subject",
                   "Created",
                   "Created by",
                   "Departments",
@@ -920,6 +975,7 @@ export function RequisitionsView({ section }: Props) {
                 ]
               : [
                   "PR #",
+                  "Subject",
                   "Created",
                   "Created by",
                   "Departments",
@@ -929,9 +985,22 @@ export function RequisitionsView({ section }: Props) {
                   "Actions",
                 ]
           }
-          rows={rows.map((r) => {
+          rows={visibleRows.map((r) => {
             const actionCell = (
-              <span key={`act-${r._id}`} className="flex flex-wrap gap-x-2 gap-y-1 max-w-[14rem]">
+              <span key={`act-${r._id}`} className="flex min-w-[7.5rem] flex-col items-start gap-1">
+                {canEnterEstimate(r) ? (
+                  <button
+                    type="button"
+                    className="whitespace-nowrap text-xs font-semibold text-blue-700 dark:text-blue-300"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openRequisition(r);
+                    }}
+                  >
+                    Enter estimated price
+                  </button>
+                ) : null}
+                <span className="flex flex-wrap gap-x-2 gap-y-1">
                 {canEditOrSubmitPr(r) ? (
                   <button
                     type="button"
@@ -972,18 +1041,6 @@ export function RequisitionsView({ section }: Props) {
                     }}
                   >
                     Edit
-                  </button>
-                ) : null}
-                {canEnterEstimate(r) ? (
-                  <button
-                    type="button"
-                    className="text-blue-700 text-xs dark:text-blue-300"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void openRequisition(r);
-                    }}
-                  >
-                    Enter price
                   </button>
                 ) : null}
                 {canActAsApproverOnPr(r) &&
@@ -1103,6 +1160,7 @@ export function RequisitionsView({ section }: Props) {
                     Delete
                   </button>
                 ) : null}
+                </span>
               </span>
             );
 
@@ -1114,8 +1172,16 @@ export function RequisitionsView({ section }: Props) {
                 ? `Created ${procurementDateTime(createdAt)} · Submitted ${procurementDateTime(submittedAt)}`
                 : procurementDateTime(createdAt);
             const createdByLabel = procurementUserLabel(r.requestedBy);
+            const subject = r.subject?.trim() || "—";
             const baseCells = [
               r.requisitionNumber || "—",
+              <span
+                key={`sub-${r._id}`}
+                className="block max-w-[14rem] truncate text-xs font-medium text-slate-900 dark:text-white"
+                title={subject}
+              >
+                {subject}
+              </span>,
               <span
                 key={`dt-${r._id}`}
                 className="block max-w-[8.5rem] text-xs leading-snug text-blue-900 dark:text-slate-100"
@@ -1161,7 +1227,7 @@ export function RequisitionsView({ section }: Props) {
               ),
               <span
                 key={`asg-${r._id}`}
-                className="block max-w-[10rem] text-xs font-semibold text-slate-900 dark:text-white"
+                className="block max-w-[9rem] truncate text-xs font-semibold text-slate-900 dark:text-white"
                 title={currentStageAssigneeLabel(r)}
               >
                 {currentStageAssigneeLabel(r)}
@@ -1213,6 +1279,13 @@ export function RequisitionsView({ section }: Props) {
                 </p>
               </div>
             ) : null}
+            <Field
+              label="Subject / purpose"
+              value={form.subject}
+              onChange={(subject) => setForm({ ...form, subject })}
+              placeholder="e.g. Tyres for the plant vehicle"
+              required
+            />
             <Field
               label="Location / site (optional)"
               value={form.location}
@@ -1312,6 +1385,10 @@ export function RequisitionsView({ section }: Props) {
                   · {procurementDateTime(viewingRow.createdAt)}
                 </span>
               ) : null}
+            </p>
+            <p>
+              <span className="font-medium text-blue-900 dark:text-blue-200">Subject:</span>{" "}
+              {viewingRow.subject?.trim() || "—"}
             </p>
             <p>
               <span className="font-medium text-blue-900 dark:text-blue-200">Departments:</span>{" "}
