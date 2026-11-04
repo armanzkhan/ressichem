@@ -34,6 +34,7 @@ import {
   Table,
   procurementFieldClass,
   procurementSecondaryButtonClass,
+  procurementUserLabel,
 } from "@/components/procurement/procurement-ui";
 import { BulkImportModal } from "@/components/procurement/BulkImportModal";
 import {
@@ -85,6 +86,7 @@ export function PurchaseOrdersView({ section }: Props) {
   const [formLoading, setFormLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<CommercialDocumentForm>(emptyCommercialForm());
+  const [createdByLabel, setCreatedByLabel] = useState("");
   const [canDelete, setCanDelete] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -123,6 +125,7 @@ export function PurchaseOrdersView({ section }: Props) {
 
   const openCreate = () => {
     setEditingId(null);
+    setCreatedByLabel("");
     setCreatingPo(true);
     const isLocal = lockedPurchaseType === "local";
     const lahoreBuyer = /\blahore\b/i.test(getProcurementSessionArea() || "");
@@ -146,6 +149,7 @@ export function PurchaseOrdersView({ section }: Props) {
       const res = await procurementApi.getPurchaseOrder(id);
       const loaded = docToCommercialForm(res.data as unknown as Record<string, unknown>, "draft");
       setForm({ ...loaded, purchaseType: lockedPurchaseType });
+      setCreatedByLabel(procurementUserLabel(res.data.createdBy));
       setEditingId(id);
       setCreatingPo(false);
       setShowForm(true);
@@ -406,6 +410,7 @@ export function PurchaseOrdersView({ section }: Props) {
                   />,
                   "PO #",
                   "PO Date",
+                  "Created by",
                   "Type",
                   "Supplier",
                   "Status",
@@ -413,7 +418,7 @@ export function PurchaseOrdersView({ section }: Props) {
                   "Total",
                   "Actions",
                 ]
-              : ["PO #", "PO Date", "Type", "Supplier", "Status", "Currency", "Total", "Actions"]
+              : ["PO #", "PO Date", "Created by", "Type", "Supplier", "Status", "Currency", "Total", "Actions"]
           }
           rows={rows.map((r) => {
             const actionCell = (
@@ -504,9 +509,17 @@ export function PurchaseOrdersView({ section }: Props) {
               </span>
             );
 
+            const createdByLabel = procurementUserLabel(r.createdBy);
             const baseCells = [
               r.poNumber || "-",
               formatPoListDate(r.documentDate),
+              <span
+                key={`by-${r._id}`}
+                className="block max-w-[9rem] truncate text-xs text-blue-900 dark:text-slate-100"
+                title={createdByLabel}
+              >
+                {createdByLabel}
+              </span>,
               r.purchaseType === "local" ? "Local" : "Import",
               poSuppliersLabel(r, suppliers),
               <StatusBadge key={`st-${r._id}`} status={r.status} />,
@@ -550,6 +563,11 @@ export function PurchaseOrdersView({ section }: Props) {
             <LoadingText>Loading document...</LoadingText>
           ) : (
             <form onSubmit={save} className="space-y-4">
+              {editingId ? (
+                <p className="text-sm text-blue-900 dark:text-blue-100">
+                  <span className="font-medium">Created by:</span> {createdByLabel || "—"}
+                </p>
+              ) : null}
               {section === "local" ? (
                 <FormLabel>
                   Supplier *

@@ -22,6 +22,7 @@ const procurementPrNotificationService = require("../services/procurementPrNotif
 
 const supplierPopulate =
   "supplierCode name defaultCurrency paymentTerms street city address country mobile phone phoneDialCode taxId banking";
+const creatorPopulate = "firstName lastName email";
 
 function canDeletePurchaseOrder(user) {
   return canSoftDeleteProcurement(user);
@@ -74,6 +75,7 @@ exports.list = async (req, res) => {
     const data = await PurchaseOrder.find(query)
       .populate("supplier", supplierPopulate)
       .populate("suppliers", supplierPopulate)
+      .populate("createdBy", creatorPopulate)
       .populate("pfi", "pfiNumber")
       .sort({ createdAt: -1 })
       .lean();
@@ -91,6 +93,7 @@ exports.getById = async (req, res) => {
       .populate("supplier", supplierPopulate)
       .populate("suppliers", supplierPopulate)
       .populate("requisition", "requisitionNumber")
+      .populate("createdBy", creatorPopulate)
       .populate("pfi", "pfiNumber")
       .lean();
     if (!data) return res.status(404).json({ success: false, message: "Purchase order not found" });

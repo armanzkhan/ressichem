@@ -229,6 +229,8 @@ export type PurchaseDocument = {
   createdAt?: string;
   updatedAt?: string;
   requestedBy?: ProcurementUser | string;
+  /** User who created this purchase order. */
+  createdBy?: ProcurementUser | string;
   submittedBy?: ProcurementUser | string;
   submittedAt?: string;
   assignedApprover?: ProcurementUser | string;
