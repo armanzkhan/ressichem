@@ -21,7 +21,7 @@ export default function DepartmentLogPage() {
   if (!allowed) {
     return (
       <p className="text-sm text-blue-800 dark:text-blue-100">
-        This account records Reactor Area, Liquid (LMS), and BFS. Drymix laboratory results stay in QC Hub.
+        This account cannot open that production log.
       </p>
     );
   }

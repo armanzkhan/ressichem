@@ -141,13 +141,97 @@ function labForEntry(entry, byBatch) {
   return { labRecords, labStatus: summarizeLab(labRecords) };
 }
 
+function normalizeLabStatus(status) {
+  const value = String(status || "").trim().toLowerCase().replace(/_/g, " ");
+  if (value === "approved" || value === "ok") return "approved";
+  if (value === "rejected" || value === "not ok") return "rejected";
+  return "pending";
+}
+
+function decisionFromRecords(records) {
+  if (!records.length) return null;
+  const statuses = records.map((row) => normalizeLabStatus(row.status));
+  if (statuses.some((status) => status === "rejected")) return "rejected";
+  if (statuses.every((status) => status === "approved")) return "approved";
+  return "pending";
+}
+
+function recordsForBatch(byBatch, value) {
+  return byBatch.get(batchKey(value)) || [];
+}
+
+/** Laboratory approval for this log. Packing needs both the resin batch and the hardener batch. */
+function statusFromLaboratory(entry, byBatch) {
+  if (entry.department === "bfs") {
+    const resin = recordsForBatch(byBatch, entry.resinBatch);
+    const hardener = recordsForBatch(byBatch, entry.hardenerBatch);
+    if (!resin.length && !hardener.length) return null;
+    const resinStatus = decisionFromRecords(resin);
+    const hardenerStatus = decisionFromRecords(hardener);
+    if (resinStatus === "rejected" || hardenerStatus === "rejected") return "rejected";
+    if (resinStatus === "approved" && hardenerStatus === "approved") return "approved";
+    return "pending";
+  }
+  const seen = new Set();
+  const own = [];
+  for (const value of [entry.batchNumber, entry.finishedBatch]) {
+    const key = batchKey(value);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    own.push(...recordsForBatch(byBatch, value));
+  }
+  return decisionFromRecords(own);
+}
+
+function specCheckFor(status) {
+  if (status === "approved") return "Within specification";
+  if (status === "rejected") return "Out of specification";
+  return "Pending specification check";
+}
+
+function reportReference(entry, records, fromLab) {
+  const typed = String(entry.labReportRef || "").trim();
+  if (typed) return typed;
+  if (!fromLab) return "";
+  return records.map((row) => [row.source, row.area, row.batchNo].filter(Boolean).join(" ")).join("; ");
+}
+
+function countsAsPendingLab(status) {
+  const value = String(status || "pending").toLowerCase();
+  return value !== "approved" && value !== "rejected";
+}
+
+function applyLaboratoryResult(entry, byBatch) {
+  const linked = labForEntry(entry, byBatch);
+  const fromLab = statusFromLaboratory(entry, byBatch);
+  const entered = String(entry.qcStatus || "pending");
+  const qcStatus = fromLab || entered || "pending";
+  return {
+    ...entry,
+    ...linked,
+    enteredQcStatus: entered,
+    qcStatus,
+    specCheck: specCheckFor(qcStatus),
+    labReportRef: reportReference(entry, linked.labRecords, Boolean(fromLab)),
+    qcSource: fromLab ? "laboratory" : entry.qcSource || "manual",
+  };
+}
+
 async function attachLabLinks(company_id, entries) {
   const batches = [];
   for (const entry of entries) {
     batches.push(entry.batchNumber, entry.finishedBatch, entry.resinBatch, entry.hardenerBatch);
   }
   const byBatch = await loadLabByBatch(company_id, batches);
-  return entries.map((entry) => ({ ...entry, ...labForEntry(entry, byBatch) }));
+  return entries.map((entry) => applyLaboratoryResult(entry, byBatch));
 }
 
-module.exports = { attachLabLinks, loadLabByBatch, labForEntry, summarizeLab };
+module.exports = {
+  attachLabLinks,
+  loadLabByBatch,
+  labForEntry,
+  summarizeLab,
+  applyLaboratoryResult,
+  countsAsPendingLab,
+  specCheckFor,
+};

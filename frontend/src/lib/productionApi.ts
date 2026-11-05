@@ -41,6 +41,9 @@ export type ProductionEntry = {
   recipeRevision: string;
   materials: MaterialLine[];
   qcStatus: string;
+  enteredQcStatus?: string;
+  specCheck?: string;
+  qcSource?: string;
   labReportRef: string;
   resinBatch: string;
   hardenerBatch: string;
@@ -163,10 +166,18 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const productionApi = {
   catalog: () => request<{ success: boolean; data: ProductionCatalog }>("/api/production/catalog"),
   me: () => request<{ success: boolean; data: { email: string; departments: ProductionDepartment[] } }>("/api/production/auth/me"),
-  lab: (batches: string[]) =>
-    request<{ success: boolean; data: LabRecord[]; labStatus: string }>(
-      `/api/production/lab?batches=${encodeURIComponent(batches.join(","))}`
-    ),
+  lab: (query: { department: ProductionDepartment; batchNumber?: string; resinBatch?: string; hardenerBatch?: string }) => {
+    const p = new URLSearchParams();
+    p.set("department", query.department);
+    const batches = [query.batchNumber, query.resinBatch, query.hardenerBatch].map((value) => String(value || "").trim()).filter(Boolean);
+    if (batches.length) p.set("batches", batches.join(","));
+    if (query.batchNumber) p.set("batchNumber", query.batchNumber);
+    if (query.resinBatch) p.set("resinBatch", query.resinBatch);
+    if (query.hardenerBatch) p.set("hardenerBatch", query.hardenerBatch);
+    return request<{ success: boolean; data: LabRecord[]; labStatus: string; qcStatus: string; specCheck: string; labReportRef: string; qcSource: string }>(
+      `/api/production/lab?${p.toString()}`
+    );
+  },
   list: (query: string) =>
     request<{ success: boolean; data: ProductionEntry[]; totals: { count: number; outputKg: number; plannedQtyKg: number; wastageKg: number; rejectedKg: number } }>(
       `/api/production/entries${query}`

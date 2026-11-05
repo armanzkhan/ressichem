@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { DEPARTMENT_META, FACTORY_LABEL, productionApi, type ProductionEntry } from "@/lib/productionApi";
 import { procurementFieldClass, procurementPanelClass } from "@/components/procurement/procurementTheme";
 
@@ -24,7 +24,10 @@ function LineList({ title, rows }: { title: string; rows: ProductionEntry[] }) {
                 {row.resinBatch ? ` · Resin ${row.resinBatch}` : ""}
                 {row.hardenerBatch ? ` · Hardener ${row.hardenerBatch}` : ""}
                 {" · "}
-                {row.outputKg} KG · QC {row.qcStatus} · Release {row.releaseStatus}
+                {row.outputKg} KG · QC {row.qcStatus}
+                {row.specCheck ? ` · ${row.specCheck}` : ""}
+                {row.labReportRef ? ` · Report ${row.labReportRef}` : ""}
+                {" · "}Release {row.releaseStatus}
               </p>
               {row.labRecords?.length ? (
                 <p className="mt-1 text-xs text-blue-700 dark:text-blue-200">
@@ -38,10 +41,15 @@ function LineList({ title, rows }: { title: string; rows: ProductionEntry[] }) {
                 <p className="mt-1 text-xs text-blue-700 dark:text-blue-200">
                   Materials:{" "}
                   {row.materials
-                    .map((line) => `${line.name || line.code} lot ${line.lotNumber || "—"} (${line.qtyConsumed || 0} KG, QC ${line.qcStatus || "—"})`)
+                    .map((line) => {
+                      const recipe = line.recipe ? `, recipe ${line.recipe}` : "";
+                      const actual = line.actual ? `, actual ${line.actual}` : "";
+                      return `${line.name || line.code} lot ${line.lotNumber || "—"}${recipe}${actual} (${line.qtyConsumed || 0} KG, QC ${line.qcStatus || "—"})`;
+                    })
                     .join("; ")}
                 </p>
               ) : null}
+              {row.processNotes ? <p className="mt-1 text-xs text-blue-700 dark:text-blue-200">{row.processNotes}</p> : null}
             </li>
           ))}
         </ul>
@@ -53,19 +61,36 @@ function LineList({ title, rows }: { title: string; rows: ProductionEntry[] }) {
 export default function TraceabilityPage() {
   const [q, setQ] = useState("");
   const [error, setError] = useState("");
+  const [recent, setRecent] = useState<ProductionEntry[]>([]);
   const [production, setProduction] = useState<ProductionEntry[] | null>(null);
   const [packing, setPacking] = useState<ProductionEntry[] | null>(null);
 
-  const search = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    productionApi
+      .list("?limit=24")
+      .then((res) => setRecent(res.data || []))
+      .catch(() => setRecent([]));
+  }, []);
+
+  const runTrace = async (value: string) => {
+    const term = value.trim();
+    setQ(term);
     setError("");
+    if (!term) return;
     try {
-      const res = await productionApi.trace(q.trim());
+      const res = await productionApi.trace(term);
       setProduction(res.data.production);
       setPacking(res.data.packing);
     } catch (err) {
+      setProduction(null);
+      setPacking(null);
       setError(err instanceof Error ? err.message : "Search failed");
     }
+  };
+
+  const search = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await runTrace(q);
   };
 
   return (
@@ -87,7 +112,35 @@ export default function TraceabilityPage() {
           Trace
         </button>
       </form>
+      {recent.length ? (
+        <div className={`${procurementPanelClass} p-3`}>
+          <h3 className="mb-2 text-sm font-semibold text-blue-950 dark:text-blue-50">Saved batches</h3>
+          <div className="flex flex-wrap gap-2">
+            {recent.map((row) => {
+              const label = row.batchNumber || row.finishedBatch || row.grade;
+              return (
+                <button
+                  key={row._id}
+                  type="button"
+                  className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-left text-xs text-blue-900 hover:bg-blue-100 dark:border-slate-600 dark:bg-slate-800 dark:text-blue-100"
+                  onClick={() => void runTrace(label)}
+                >
+                  {label}
+                  <span className="mt-0.5 block text-[10px] text-blue-700 dark:text-blue-300">
+                    {DEPARTMENT_META[row.department]?.label} · {FACTORY_LABEL[row.factory]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-blue-700 dark:text-blue-200">No saved batches to trace yet.</p>
+      )}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {!production && !packing && !error ? (
+        <p className="text-sm text-blue-700 dark:text-blue-200">Choose a saved batch, or type a batch, lot, grade, or material, then press Trace.</p>
+      ) : null}
       {production && packing ? (
         <>
           <LineList title="Production batches" rows={production} />

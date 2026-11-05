@@ -15,7 +15,7 @@ export const SHEET_META: Record<ProductionDepartment, { formatNo: string; title:
   zrs: { formatNo: "PRD/FRM-001-01", title: "Process Log Sheet Reactors" },
   lms: { formatNo: "PRD/FRM-001-02", title: "Process Log Sheet LMS" },
   drymix: { formatNo: "PRD/FRM-001-03", title: "Process Log Sheet (Drymix)" },
-  bfs: { formatNo: "", title: "BFS Packing Log" },
+  bfs: { formatNo: "PRD/FRM-001-04", title: "Process Log Sheet BFS Packing" },
 };
 
 const PACK_TYPES = ["Can", "Bag", "Drum", "Bottle", "Bucket", "Set", "Kit"];
@@ -31,6 +31,8 @@ type Draft = {
   reactor: string;
   outputKg: string;
   operator: string;
+  shift: string;
+  machine: string;
   vesselNo: string;
   srNo: string;
   sheetDepartment: string;
@@ -93,6 +95,8 @@ function draftFromEntry(department: ProductionDepartment, entry?: ProductionEntr
     reactor: entry?.reactor || "",
     outputKg: entry?.outputKg ? String(entry.outputKg) : "",
     operator: entry?.operator || "",
+    shift: entry?.shift || "",
+    machine: entry?.machine || "",
     vesselNo: entry?.vesselNo || "",
     srNo: entry?.srNo || "",
     sheetDepartment: entry?.sheetDepartment || (department === "drymix" ? "Drymix" : ""),
@@ -202,13 +206,35 @@ function SignOff({
   );
 }
 
-function LabLinkPanel({ records, loading }: { records: LabRecord[]; loading?: boolean }) {
+function LabLinkPanel({
+  records,
+  loading,
+  qcStatus,
+  specCheck,
+  labReportRef,
+  fromLaboratory,
+}: {
+  records: LabRecord[];
+  loading?: boolean;
+  qcStatus?: string;
+  specCheck?: string;
+  labReportRef?: string;
+  fromLaboratory?: boolean;
+}) {
+  const result = qcStatus || (records.length ? "pending" : "pending");
+  const check = specCheck || (result === "approved" ? "Within specification" : result === "rejected" ? "Out of specification" : "Pending specification check");
   return (
     <div className="mt-2 border border-slate-500 p-2 text-sm">
       <p className="font-semibold">Laboratory</p>
-      <p className="text-xs text-slate-600">QC Site Zepoxy lab (asad@ressichem.com) · QC Hub Drymix lab (arsalan@ressichem.com)</p>
+      <p className="text-xs text-slate-600">QC Site Zepoxy lab · QC Hub Drymix lab</p>
+      <div className="mt-1 grid gap-1 md:grid-cols-2">
+        <p>Test result: <span className="capitalize">{result}</span></p>
+        <p>Specification check: {check}</p>
+        <p>Report reference: {labReportRef || "—"}</p>
+        <p>QC approval: <span className="capitalize">{result === "approved" ? "Approved" : result === "rejected" ? "Rejected" : "Pending"}</span>{fromLaboratory ? " · laboratory" : " · recorded on this batch"}</p>
+      </div>
       {loading ? <p className="mt-1">Checking laboratory records…</p> : null}
-      {!loading && records.length === 0 ? <p className="mt-1">No laboratory record for this batch yet.</p> : null}
+      {!loading && records.length === 0 ? <p className="mt-1">No laboratory record for this batch yet. The status recorded on the batch is used.</p> : null}
       {records.length ? (
         <ul className="mt-1 space-y-1">
           {records.map((row) => (
@@ -236,7 +262,13 @@ export function ProcessSheetView({ entry }: { entry: ProductionEntry }) {
       {entry.department === "lms" ? <LmsBody draft={draft} readOnly /> : null}
       {entry.department === "drymix" ? <DrymixBody draft={draft} readOnly /> : null}
       {entry.department === "bfs" ? <BfsBody draft={draft} readOnly /> : null}
-      <LabLinkPanel records={entry.labRecords || []} />
+      <LabLinkPanel
+        records={entry.labRecords || []}
+        qcStatus={entry.qcStatus}
+        specCheck={entry.specCheck}
+        labReportRef={entry.labReportRef}
+        fromLaboratory={entry.qcSource === "laboratory"}
+      />
       <SignOff value={draft.signOff} remarks={draft.additionalRemarks} readOnly />
     </article>
   );
@@ -259,6 +291,12 @@ export function ProcessSheetEditor({
 }) {
   const [draft, setDraft] = useState<Draft>(() => draftFromEntry(department, initial));
   const [labRecords, setLabRecords] = useState<LabRecord[]>(initial?.labRecords || []);
+  const [labMeta, setLabMeta] = useState({
+    qcStatus: initial?.qcStatus || "pending",
+    specCheck: initial?.specCheck || "Pending specification check",
+    labReportRef: initial?.labReportRef || "",
+    qcSource: initial?.qcSource || "manual",
+  });
   const [labLoading, setLabLoading] = useState(false);
   const grades = catalog?.grades[department] || [];
   const labKey = [draft.batchNumber, draft.resinBatch, draft.hardenerBatch].join("|");
@@ -267,14 +305,22 @@ export function ProcessSheetEditor({
     const batches = [draft.batchNumber, draft.resinBatch, draft.hardenerBatch].map((value) => value.trim()).filter(Boolean);
     if (!batches.length) {
       setLabRecords([]);
+      setLabMeta({ qcStatus: "pending", specCheck: "Pending specification check", labReportRef: "", qcSource: "manual" });
       return;
     }
     let cancel = false;
     setLabLoading(true);
     productionApi
-      .lab(batches)
+      .lab({ department, batchNumber: draft.batchNumber, resinBatch: draft.resinBatch, hardenerBatch: draft.hardenerBatch })
       .then((res) => {
-        if (!cancel) setLabRecords(res.data || []);
+        if (cancel) return;
+        setLabRecords(res.data || []);
+        setLabMeta({
+          qcStatus: res.qcStatus || "pending",
+          specCheck: res.specCheck || "Pending specification check",
+          labReportRef: res.labReportRef || "",
+          qcSource: res.qcSource || "manual",
+        });
       })
       .catch(() => {
         if (!cancel) setLabRecords([]);
@@ -285,7 +331,7 @@ export function ProcessSheetEditor({
     return () => {
       cancel = true;
     };
-  }, [labKey, draft.batchNumber, draft.resinBatch, draft.hardenerBatch]);
+  }, [department, labKey, draft.batchNumber, draft.resinBatch, draft.hardenerBatch]);
   const set = (patch: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...patch }));
   const outputPreview = useMemo(() => {
     if (department !== "bfs") return "";
@@ -311,6 +357,8 @@ export function ProcessSheetEditor({
       reactor: draft.reactor,
       outputKg: department === "bfs" ? Number(outputPreview) || 0 : department === "drymix" ? Number(totalWeight) || 0 : Number(draft.outputKg) || 0,
       operator: department === "zrs" ? draft.chargingOperator : draft.operator,
+      shift: draft.shift,
+      machine: draft.machine,
       vesselNo: draft.vesselNo,
       srNo: draft.srNo,
       sheetDepartment: draft.sheetDepartment,
@@ -346,6 +394,13 @@ export function ProcessSheetEditor({
     });
   };
 
+  const fromLaboratory = labMeta.qcSource === "laboratory";
+  const sheetStatus = draft.qcSample.result === "OK" ? "approved" : draft.qcSample.result === "NOT OK" ? "rejected" : "";
+  const recordedStatus = initial?.enteredQcStatus || (initial?.qcSource === "laboratory" ? "pending" : initial?.qcStatus) || "pending";
+  const shownStatus = fromLaboratory ? labMeta.qcStatus : sheetStatus || recordedStatus;
+  const shownCheck =
+    shownStatus === "approved" ? "Within specification" : shownStatus === "rejected" ? "Out of specification" : "Pending specification check";
+
   return (
     <form onSubmit={save} className="process-sheet bg-white p-3 text-slate-950">
       <div className="no-print mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -367,7 +422,14 @@ export function ProcessSheetEditor({
       {department === "lms" ? <LmsBody draft={draft} grades={grades} onChange={set} /> : null}
       {department === "drymix" ? <DrymixBody draft={draft} grades={grades} onChange={set} /> : null}
       {department === "bfs" ? <BfsBody draft={draft} grades={grades} outputPreview={outputPreview} kitSizes={catalog?.kitSizesKg || []} onChange={set} /> : null}
-      <LabLinkPanel records={labRecords} loading={labLoading} />
+      <LabLinkPanel
+        records={labRecords}
+        loading={labLoading}
+        qcStatus={shownStatus}
+        specCheck={fromLaboratory ? labMeta.specCheck || shownCheck : shownCheck}
+        labReportRef={fromLaboratory ? labMeta.labReportRef : initial?.labReportRef || ""}
+        fromLaboratory={fromLaboratory}
+      />
       <SignOff
         value={draft.signOff}
         remarks={draft.additionalRemarks}
@@ -641,25 +703,105 @@ function BfsBody({
   onChange?: (patch: Partial<Draft>) => void;
   readOnly?: boolean;
 }) {
-  const field = (value: string, key: keyof Draft) =>
-    readOnly ? value || "—" : <input className={cellIn} value={value} onChange={(e) => onChange?.({ [key]: e.target.value })} />;
+  const setLine = (index: number, patch: Partial<Line>) => {
+    const lines = draft.lines.map((line, i) => (i === index ? { ...line, ...patch } : line));
+    onChange?.({ lines });
+  };
+  const text = (value: string, key: keyof Draft, list?: string) =>
+    readOnly ? value || "—" : <input className={cellIn} list={list} value={value} onChange={(e) => onChange?.({ [key]: e.target.value })} />;
+  const output =
+    outputPreview ||
+    (Number(draft.kitSizeKg) > 0 && Number(draft.kitQuantity) > 0
+      ? String(Math.round(Number(draft.kitSizeKg) * Number(draft.kitQuantity) * 1000) / 1000)
+      : "—");
   return (
-    <table className={`${box} w-full text-sm`}>
-      <tbody>
-        <tr><td className="border border-slate-500 px-2 py-1">Packing date</td><td className="border border-slate-500">{readOnly ? draft.recordDate : <input type="date" className={cellIn} value={draft.recordDate} onChange={(e) => onChange?.({ recordDate: e.target.value })} />}</td></tr>
-        <tr><td className="border border-slate-500 px-2 py-1">Kit grade</td><td className="border border-slate-500">{readOnly ? draft.grade : <input className={cellIn} list="bfs-grades" value={draft.grade} onChange={(e) => onChange?.({ grade: e.target.value })} />}</td></tr>
-        <tr><td className="border border-slate-500 px-2 py-1">Resin batch #</td><td className="border border-slate-500">{field(draft.resinBatch, "resinBatch")}</td></tr>
-        <tr><td className="border border-slate-500 px-2 py-1">Hardener batch #</td><td className="border border-slate-500">{field(draft.hardenerBatch, "hardenerBatch")}</td></tr>
-        <tr><td className="border border-slate-500 px-2 py-1">Kit size (KG)</td><td className="border border-slate-500">{readOnly ? draft.kitSizeKg : <input className={cellIn} list="bfs-sizes" inputMode="decimal" value={draft.kitSizeKg} onChange={(e) => onChange?.({ kitSizeKg: e.target.value })} />}</td></tr>
-        <tr><td className="border border-slate-500 px-2 py-1">Kit quantity</td><td className="border border-slate-500">{field(draft.kitQuantity, "kitQuantity")}</td></tr>
-        <tr><td className="border border-slate-500 px-2 py-1">Output (KG)</td><td className="border border-slate-500 px-2 py-1">{outputPreview || (Number(draft.kitSizeKg) && Number(draft.kitQuantity) ? String(Math.round(Number(draft.kitSizeKg) * Number(draft.kitQuantity) * 1000) / 1000) : "—")}</td></tr>
-      </tbody>
+    <>
+      <div className="grid gap-2 lg:grid-cols-2">
+        <table className={`${box} w-full text-sm`}>
+          <tbody>
+            <tr>
+              <td className="w-36 border border-slate-500 px-2 py-1 font-medium">Packing date</td>
+              <td className="border border-slate-500">
+                {readOnly ? draft.recordDate || "—" : <input type="date" className={cellIn} value={draft.recordDate} onChange={(e) => onChange?.({ recordDate: e.target.value })} />}
+              </td>
+            </tr>
+            <tr>
+              <td className="border border-slate-500 px-2 py-1 font-medium">Product grade</td>
+              <td className="border border-slate-500">{text(draft.grade, "grade", "bfs-grades")}</td>
+            </tr>
+            <tr>
+              <td className="border border-slate-500 px-2 py-1 font-medium">Operator</td>
+              <td className="border border-slate-500">{text(draft.operator, "operator")}</td>
+            </tr>
+            <tr>
+              <td className="border border-slate-500 px-2 py-1 font-medium">Shift</td>
+              <td className="border border-slate-500">{text(draft.shift, "shift")}</td>
+            </tr>
+            <tr>
+              <td className="border border-slate-500 px-2 py-1 font-medium">Machine</td>
+              <td className="border border-slate-500">{text(draft.machine, "machine")}</td>
+            </tr>
+            <tr>
+              <td className="border border-slate-500 px-2 py-1 font-medium">W.O #</td>
+              <td className="border border-slate-500">{text(draft.workOrderNo, "workOrderNo")}</td>
+            </tr>
+          </tbody>
+        </table>
+        <table className={`${box} w-full text-sm`}>
+          <tbody>
+            <tr>
+              <td className="w-40 border border-slate-500 px-2 py-1 font-medium">Resin batch #</td>
+              <td className="border border-slate-500">{text(draft.resinBatch, "resinBatch")}</td>
+            </tr>
+            <tr>
+              <td className="border border-slate-500 px-2 py-1 font-medium">Hardener batch #</td>
+              <td className="border border-slate-500">{text(draft.hardenerBatch, "hardenerBatch")}</td>
+            </tr>
+            <tr>
+              <td className="border border-slate-500 px-2 py-1 font-medium">Kit size (KG)</td>
+              <td className="border border-slate-500">
+                {readOnly ? draft.kitSizeKg || "—" : <input className={cellIn} list="bfs-sizes" inputMode="decimal" value={draft.kitSizeKg} onChange={(e) => onChange?.({ kitSizeKg: e.target.value })} />}
+              </td>
+            </tr>
+            <tr>
+              <td className="border border-slate-500 px-2 py-1 font-medium">Kit quantity</td>
+              <td className="border border-slate-500">{text(draft.kitQuantity, "kitQuantity")}</td>
+            </tr>
+            <tr>
+              <td className="border border-slate-500 px-2 py-1 font-medium">Output (KG)</td>
+              <td className="border border-slate-500 px-2 py-1">{output}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <table className={`${box} mt-2 w-full text-sm`}>
+        <thead>
+          <tr>
+            <th className="w-10 border border-slate-500 px-2 py-1">#</th>
+            <th className="border border-slate-500 px-2 py-1">Material</th>
+            <th className="border border-slate-500 px-2 py-1">Lot / batch</th>
+            <th className="border border-slate-500 px-2 py-1">Recipe</th>
+            <th className="border border-slate-500 px-2 py-1">Actual</th>
+          </tr>
+        </thead>
+        <tbody>
+          {draft.lines.map((line, i) => (
+            <tr key={i}>
+              <td className="border border-slate-500 px-2 text-center">{i + 1}</td>
+              <td className="border border-slate-500">{readOnly ? line.name : <input className={cellIn} value={line.name} onChange={(e) => setLine(i, { name: e.target.value })} />}</td>
+              <td className="border border-slate-500">{readOnly ? line.lotNumber : <input className={cellIn} value={line.lotNumber} onChange={(e) => setLine(i, { lotNumber: e.target.value })} />}</td>
+              <td className="border border-slate-500">{readOnly ? line.recipe : <input className={cellIn} value={line.recipe} onChange={(e) => setLine(i, { recipe: e.target.value })} />}</td>
+              <td className="border border-slate-500">{readOnly ? line.actual : <input className={cellIn} value={line.actual} onChange={(e) => setLine(i, { actual: e.target.value })} />}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
       {!readOnly ? (
         <>
           <datalist id="bfs-grades">{(grades || []).map((g) => <option key={g} value={g} />)}</datalist>
           <datalist id="bfs-sizes">{(kitSizes || []).map((g) => <option key={g} value={String(g)} />)}</datalist>
         </>
       ) : null}
-    </table>
+    </>
   );
 }

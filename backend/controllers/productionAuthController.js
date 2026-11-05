@@ -31,7 +31,7 @@ exports.login = async (req, res) => {
     if (!canUseProduction(actor)) {
       return res.status(403).json({
         success: false,
-        message: "This account is not a Reactor, LMS, or BFS production user.",
+        message: "This account is not a production user.",
       });
     }
 

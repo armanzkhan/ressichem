@@ -1,4 +1,4 @@
-// Ensure Reactor / LMS / BFS production logins exist.
+// Ensure Reactor / LMS / Drymix / BFS production logins exist.
 // Does not change a password that is already set.
 //
 // Usage (from repo root):
@@ -41,7 +41,7 @@ async function run() {
       const modules = new Set(user.modules || []);
       modules.add("PRODUCTION");
       user.modules = [...modules];
-      if (!user.department) user.department = "Production — Reactor / LMS / BFS";
+      if (!user.department) user.department = "Production — Reactor / LMS / Drymix / BFS";
       if (!user.role) user.role = "Production";
       user.isActive = user.isActive !== false;
       await user.save();
@@ -56,7 +56,7 @@ async function run() {
       firstName: account.firstName,
       lastName: account.lastName,
       phone: "",
-      department: "Production — Reactor / LMS / BFS",
+      department: "Production — Reactor / LMS / Drymix / BFS",
       role: "Production",
       roles: [],
       permissions: [],

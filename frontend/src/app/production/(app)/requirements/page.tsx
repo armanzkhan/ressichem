@@ -13,7 +13,7 @@ const sections = [
   },
   {
     title: "What will come from Laboratory",
-    body: "Batch test result, specification check, laboratory report reference, and QC approval or rejection. Until the laboratory system is connected, those fields are recorded on the batch and marked as laboratory data. The daily report counts batches still pending laboratory approval.",
+    body: "Batch test result, specification check, laboratory report reference, and QC approval or rejection. When a QC Site or QC Hub record matches the batch, that result is used on the log and in the daily report. Packing uses the resin batch and the hardener batch, and both must be approved. Until a match exists, those fields stay as recorded on the batch. The daily report counts batches still pending laboratory approval.",
   },
   {
     title: "What will come from SAP",

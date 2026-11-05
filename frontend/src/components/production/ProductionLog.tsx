@@ -426,10 +426,9 @@ export function ProductionLog({ department }: { department: ProductionDepartment
                   )}
                   <td className="px-3 py-2 font-semibold">{kg(row.outputKg)}</td>
                   <td className="px-3 py-2">{row.shift || "—"}</td>
-                  <td className="px-3 py-2 capitalize">
-                    {row.labRecords?.length
-                      ? row.labRecords.map((lab) => `${lab.source} ${lab.status}`).join(", ")
-                      : row.qcStatus || "—"}
+                  <td className="px-3 py-2 capitalize" title={[row.specCheck, row.labReportRef].filter(Boolean).join(" · ")}>
+                    {row.qcStatus || "—"}
+                    {row.qcSource === "laboratory" ? " · laboratory" : ""}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     <button

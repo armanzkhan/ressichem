@@ -1,11 +1,11 @@
-/** Production operators for Reactor Area, LMS, and BFS. Drymix lab stays in QC Hub. */
+/** Production Site logs: Reactor Area, LMS, Drymix, and BFS packing. */
 const PRODUCTION_OPERATORS = {
-  "ubaid@ressichem.com": ["zrs", "lms", "bfs"],
-  "production.zepoxy@ressichem.com": ["zrs", "lms", "bfs"],
+  "ubaid@ressichem.com": ["zrs", "lms", "drymix", "bfs"],
+  "production.zepoxy@ressichem.com": ["zrs", "lms", "drymix", "bfs"],
 };
 
 const ALL_DEPARTMENTS = ["zrs", "lms", "drymix", "bfs"];
-const SITE_DEPARTMENTS = ["zrs", "lms", "bfs"];
+const SITE_DEPARTMENTS = ["zrs", "lms", "drymix", "bfs"];
 
 /** Roles offered on Production Site signup. */
 const PRODUCTION_SIGNUP_ROLES = {
@@ -13,7 +13,7 @@ const PRODUCTION_SIGNUP_ROLES = {
     role: "Production Operator",
     label: "Operator",
     departments: SITE_DEPARTMENTS,
-    department: "Production — Reactor / LMS / BFS",
+    department: "Production — Reactor / LMS / Drymix / BFS",
   },
   manager: {
     role: "Production Manager",

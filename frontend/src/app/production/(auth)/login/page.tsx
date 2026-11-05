@@ -73,6 +73,7 @@ function ProductionLoginContent() {
           <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-blue-800 dark:text-blue-200">
             <span className="rounded-full bg-blue-100 px-3 py-1 font-medium dark:border dark:border-slate-600 dark:bg-slate-800">Reactor Area</span>
             <span className="rounded-full bg-blue-100 px-3 py-1 font-medium dark:border dark:border-slate-600 dark:bg-slate-800">LMS</span>
+            <span className="rounded-full bg-blue-100 px-3 py-1 font-medium dark:border dark:border-slate-600 dark:bg-slate-800">Drymix</span>
             <span className="rounded-full bg-blue-100 px-3 py-1 font-medium dark:border dark:border-slate-600 dark:bg-slate-800">BFS</span>
           </div>
         </div>

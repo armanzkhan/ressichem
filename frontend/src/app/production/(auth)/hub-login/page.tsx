@@ -22,7 +22,7 @@ export default function ProductionHubLoginPage() {
           </div>
         </div>
         <p className="rounded-xl border-2 border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-900 dark:border-slate-600 dark:bg-slate-800 dark:text-blue-50">
-          Production Hub will be added later. Use Production Site Login for Reactor Area, LMS, and BFS.
+          Production Hub will be added later. Use Production Site Login for Reactor Area, LMS, Drymix, and BFS.
         </p>
         <Link href="/auth/sign-in" className="mt-4 block w-full rounded-xl bg-blue-600 p-4 text-center text-sm font-semibold text-white">
           Back to sign in

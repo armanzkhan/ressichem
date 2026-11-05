@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const ProductionEntry = require("../models/ProductionEntry");
 const { productionDepartmentsForUser } = require("../utils/productionAccess");
-const { attachLabLinks, loadLabByBatch, summarizeLab } = require("../services/productionLabLink");
+const { attachLabLinks, loadLabByBatch, applyLaboratoryResult, countsAsPendingLab } = require("../services/productionLabLink");
 
 const DEPARTMENTS = new Set(["zrs", "lms", "drymix", "bfs"]);
 const FACTORIES = new Set(["hub", "site", "lahore"]);
@@ -47,7 +47,7 @@ function dayKey(date) {
   return d.toISOString().slice(0, 10);
 }
 
-const SCOPE_MESSAGE = "This account records Reactor Area, Liquid (LMS), and BFS. Drymix laboratory results stay in QC Hub.";
+const SCOPE_MESSAGE = "This account cannot open that production log.";
 
 function guardProduction(req, res, department) {
   const allowed = productionDepartmentsForUser(req.user);
@@ -282,17 +282,32 @@ exports.lab = async (req, res) => {
       .map((value) => value.trim())
       .filter(Boolean)
       .slice(0, 20);
-    const byBatch = await loadLabByBatch(getCompanyId(req), batches);
-    const seen = new Set();
-    const data = [];
-    for (const records of byBatch.values()) {
-      for (const record of records) {
-        if (seen.has(record.id)) continue;
-        seen.add(record.id);
-        data.push(record);
-      }
-    }
-    return res.json({ success: true, data, labStatus: summarizeLab(data) });
+    const department = String(req.query.department || "");
+    const entry = {
+      department: DEPARTMENTS.has(department) ? department : "zrs",
+      batchNumber: String(req.query.batchNumber || batches[0] || "").trim(),
+      finishedBatch: "",
+      resinBatch: String(req.query.resinBatch || "").trim(),
+      hardenerBatch: String(req.query.hardenerBatch || "").trim(),
+      qcStatus: "pending",
+      labReportRef: "",
+    };
+    const byBatch = await loadLabByBatch(getCompanyId(req), [
+      ...batches,
+      entry.batchNumber,
+      entry.resinBatch,
+      entry.hardenerBatch,
+    ]);
+    const applied = applyLaboratoryResult(entry, byBatch);
+    return res.json({
+      success: true,
+      data: applied.labRecords,
+      labStatus: applied.labStatus,
+      qcStatus: applied.qcStatus,
+      specCheck: applied.specCheck,
+      labReportRef: applied.labReportRef,
+      qcSource: applied.qcSource,
+    });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -399,21 +414,33 @@ exports.summary = async (req, res) => {
     if (!allowed) return;
     const company_id = getCompanyId(req);
     const match = { company_id, isActive: { $ne: false }, department: { $in: allowed } };
-    const rows = await ProductionEntry.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: { department: "$department", factory: "$factory" },
-          count: { $sum: 1 },
-          outputKg: { $sum: "$outputKg" },
-          plannedQtyKg: { $sum: "$plannedQtyKg" },
-          wastageKg: { $sum: "$wastageKg" },
-          rejectedKg: { $sum: "$rejectedKg" },
-          pendingQc: { $sum: { $cond: [{ $eq: ["$qcStatus", "pending"] }, 1, 0] } },
-        },
-      },
-    ]);
-    return res.json({ success: true, data: rows });
+    const rows = await ProductionEntry.find(match)
+      .select("department factory outputKg plannedQtyKg wastageKg rejectedKg qcStatus batchNumber finishedBatch resinBatch hardenerBatch labReportRef qcSource")
+      .lean();
+    const linked = await attachLabLinks(company_id, rows);
+    const groups = new Map();
+    for (const row of linked) {
+      const key = `${row.department}|${row.factory}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          _id: { department: row.department, factory: row.factory },
+          count: 0,
+          outputKg: 0,
+          plannedQtyKg: 0,
+          wastageKg: 0,
+          rejectedKg: 0,
+          pendingQc: 0,
+        });
+      }
+      const group = groups.get(key);
+      group.count += 1;
+      group.outputKg += num(row.outputKg);
+      group.plannedQtyKg += num(row.plannedQtyKg);
+      group.wastageKg += num(row.wastageKg);
+      group.rejectedKg += num(row.rejectedKg);
+      if (countsAsPendingLab(row.qcStatus)) group.pendingQc += 1;
+    }
+    return res.json({ success: true, data: [...groups.values()] });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -428,9 +455,11 @@ exports.dpr = async (req, res) => {
       return res.status(403).json({ success: false, message: SCOPE_MESSAGE });
     }
     if (!filter.department) filter.department = { $in: allowed };
+    const company_id = getCompanyId(req);
     const rows = await ProductionEntry.find(filter).sort({ recordDate: 1 }).lean();
+    const linked = await attachLabLinks(company_id, rows);
     const groups = new Map();
-    for (const row of rows) {
+    for (const row of linked) {
       const key = [dayKey(row.recordDate), row.factory, row.department, row.shift || "—", row.grade || "—", row.machine || row.reactor || "—"].join("|");
       if (!groups.has(key)) {
         groups.set(key, {
@@ -467,7 +496,7 @@ exports.dpr = async (req, res) => {
       g.downtimeMinutes += num(row.downtimeMinutes);
       g.wipOpeningKg += num(row.wipOpeningKg);
       g.wipClosingKg += num(row.wipClosingKg);
-      if (row.qcStatus === "pending") g.pendingQc += 1;
+      if (countsAsPendingLab(row.qcStatus)) g.pendingQc += 1;
       if (row.operator && !g.operators.includes(row.operator)) g.operators.push(row.operator);
     }
     const data = [...groups.values()].map((g) => ({
@@ -524,7 +553,11 @@ exports.exportCsv = async (req, res) => {
       return res.status(403).json({ success: false, message: SCOPE_MESSAGE });
     }
     if (!filter.department) filter.department = { $in: allowed };
-    const rows = await ProductionEntry.find(filter).sort({ recordDate: -1 }).limit(5000).lean();
+    const company_id = getCompanyId(req);
+    const rows = await attachLabLinks(
+      company_id,
+      await ProductionEntry.find(filter).sort({ recordDate: -1 }).limit(5000).lean()
+    );
     const headers = [
       "Date",
       "Factory",
@@ -542,6 +575,8 @@ exports.exportCsv = async (req, res) => {
       "Kit size KG",
       "Kit quantity",
       "QC status",
+      "Specification check",
+      "Laboratory report",
       "Wastage KG",
       "Rejected KG",
       "Downtime min",
@@ -567,6 +602,8 @@ exports.exportCsv = async (req, res) => {
             row.kitSizeKg,
             row.kitQuantity,
             row.qcStatus,
+            row.specCheck,
+            row.labReportRef,
             row.wastageKg,
             row.rejectedKg,
             row.downtimeMinutes,
