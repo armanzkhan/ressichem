@@ -50,6 +50,7 @@ const {
   approvalOptionsForPrDoc,
   ensureLahoreBossApprover,
   stripObsoleteBossApprovals,
+  ensureHubFinanceApprover,
   approvalOptionsFromPr,
 } = require("../utils/procurementPrApprovals");
 const procurementPrNotificationService = require("../services/procurementPrNotificationService");
@@ -189,6 +190,9 @@ exports.list = async (req, res) => {
           const stripped = stripObsoleteBossApprovals(row, approvals, stageOpts);
           approvals = stripped.approvals;
           changed = changed || stripped.changed;
+          const hubFinance = await ensureHubFinanceApprover(company_id, approvals);
+          approvals = hubFinance.approvals;
+          changed = changed || hubFinance.reassigned;
         }
 
         const needsSticky = isLahore && !hadSticky;
@@ -973,6 +977,8 @@ exports.approve = async (req, res) => {
       } else {
         const stripped = stripObsoleteBossApprovals(existing, approvals, stageOpts);
         approvals = stripped.approvals;
+        const hubFinance = await ensureHubFinanceApprover(company_id, approvals);
+        approvals = hubFinance.approvals;
       }
     }
 

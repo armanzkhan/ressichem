@@ -317,7 +317,11 @@ export function RequisitionsView({ section }: Props) {
       const firstDepartment = approvals.find(
         (entry) => (entry.stage || "department") === "department" && isOpenStatus(entry.status)
       );
-      const id = approvalActorId(firstDepartment?.approver);
+      const current =
+        firstDepartment ||
+        approvals.find((entry) => entry.stage === "finance" && isOpenStatus(entry.status)) ||
+        approvals.find((entry) => entry.stage === "boss" && isOpenStatus(entry.status));
+      const id = approvalActorId(current?.approver);
       return Boolean(id && String(id) === String(currentUserId));
     }
     const mine = approvals.filter((a) => {

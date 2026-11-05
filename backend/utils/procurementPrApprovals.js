@@ -120,6 +120,29 @@ async function ensureLahoreBossApprover(company_id, approvals = [], options = {}
   return { approvals: next, reassigned };
 }
 
+/** Hub finance is finance@. A pending row mapped to someone else is moved back. */
+async function ensureHubFinanceApprover(company_id, approvals = []) {
+  const email =
+    normalizeEmail(process.env.PROCUREMENT_FINANCE_APPROVER_EMAIL) || "finance@ressichem.com";
+  const userId = await resolveUserIdByEmail(company_id, email);
+  const next = approvals.map((a) => (typeof a?.toObject === "function" ? a.toObject() : { ...a }));
+  if (!userId) return { approvals: next, reassigned: false };
+  let reassigned = false;
+  for (const row of next) {
+    if (approvalStage(row) !== "finance") continue;
+    if (row.status !== "pending" && row.status !== "held") continue;
+    if (approvalApproverId(row) !== String(userId)) {
+      row.approver = userId;
+      reassigned = true;
+    }
+    if (row.department !== "Finance Manager") {
+      row.department = "Finance Manager";
+      reassigned = true;
+    }
+  }
+  return { approvals: next, reassigned };
+}
+
 async function resolveRequesterEmail(pr) {
   if (pr?.requestedBy?.email) return normalizeEmail(pr.requestedBy.email);
   const id = pr?.requestedBy?._id || pr?.requestedBy;
@@ -703,6 +726,7 @@ module.exports = {
   approvalOptionsFromPr,
   approvalOptionsForPrDoc,
   ensureLahoreBossApprover,
+  ensureHubFinanceApprover,
   stripObsoleteBossApprovals,
   resolveRequesterEmail,
   CORPORATE_APPROVAL_STAGES,

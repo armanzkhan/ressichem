@@ -24,6 +24,7 @@ const DEPARTMENT_APPROVER_EMAILS = {
 const FINANCE_STAGE = {
   stage: "finance",
   department: "Finance Manager",
+  fixedEmail: "finance@ressichem.com",
   envKey: "PROCUREMENT_FINANCE_APPROVER_EMAIL",
 };
 
