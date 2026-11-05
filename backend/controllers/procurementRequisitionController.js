@@ -16,6 +16,7 @@ const {
   normalizeEmail,
   isCorporatePipelineApproverUser,
   estimateEmailsForPr,
+  canAlsoEnterLahoreEstimate,
   corporateApproverStageForUser,
   isLahorePr,
   isLahorePlantScopedUser,
@@ -33,6 +34,8 @@ const {
   advanceCorporateApprovalStages,
   actionableApprovalRows,
   getActionableApprovalStage,
+  estimateStillOpen,
+  hasEstimateStage,
   approvalStage,
   userHasApprovalRoleOnPr,
   pendingApprovalsForUser,
@@ -276,6 +279,13 @@ function userCanViewPr(req, pr) {
     }
   }
   if (canCreatePurchaseOrders(req.user) && String(pr.status || "").toLowerCase() === "approved") {
+    return true;
+  }
+  if (
+    canAlsoEnterLahoreEstimate(req.user?.email) &&
+    isLahorePr(pr) &&
+    estimateStillOpen(pr.approvals || [])
+  ) {
     return true;
   }
   // Read-only viewers (no create / approve / PO) may view company PRs
@@ -727,7 +737,13 @@ exports.saveEstimatedPrices = async (req, res) => {
     let approvals = (existing.approvals || []).map((row) =>
       typeof row.toObject === "function" ? row.toObject() : { ...row }
     );
-    if (getActionableApprovalStage(approvals, stageOpts) !== "estimate") {
+    const stage = getActionableApprovalStage(approvals, stageOpts);
+    const status = String(existing.status || "").toLowerCase();
+    const revising =
+      stage !== "estimate" &&
+      hasEstimateStage(approvals) &&
+      ["submitted", "held", "partially_approved"].includes(status);
+    if (stage !== "estimate" && !revising) {
       return res.status(400).json({
         success: false,
         message: "This requisition is not waiting for an estimated price",
@@ -736,6 +752,9 @@ exports.saveEstimatedPrices = async (req, res) => {
 
     const allowed = new Set(estimateEmailsForPr(existing).map((email) => normalizeEmail(email)));
     const actorEmail = normalizeEmail(req.user?.email);
+    const lahoreAssist =
+      isLahorePr(existing) && canAlsoEnterLahoreEstimate(actorEmail);
+    if (lahoreAssist) allowed.add(actorEmail);
     if (!allowed.has(actorEmail)) {
       return res.status(403).json({
         success: false,
@@ -743,7 +762,7 @@ exports.saveEstimatedPrices = async (req, res) => {
       });
     }
     const actionable = actionableApprovalRows(approvals, req.user, stageOpts);
-    if (!actionable.length) {
+    if (!revising && !actionable.length && !lahoreAssist) {
       return res.status(403).json({
         success: false,
         message: "This estimated price is assigned to another procurement user",
@@ -765,7 +784,9 @@ exports.saveEstimatedPrices = async (req, res) => {
       });
     }
 
-    const remarks = String(req.body?.remarks || "").trim() || "Estimated prices entered";
+    const remarks =
+      String(req.body?.remarks || "").trim() ||
+      (revising ? "Estimated prices revised" : "Estimated prices entered");
     const pricedItems = items.map((line, index) => {
       const plain = typeof line.toObject === "function" ? line.toObject() : { ...line };
       const qty = Number(plain.quantity) || 0;
@@ -780,6 +801,38 @@ exports.saveEstimatedPrices = async (req, res) => {
     const taxAmount = Number(existing.taxAmount) || 0;
     const now = new Date();
     const actorId = String(req.user?._id || "");
+    if (revising) {
+      const data = await populateRequisitionAudit(
+        PurchaseRequisition.findOneAndUpdate(
+          { _id: existing._id, company_id },
+          {
+            $set: {
+              items: pricedItems,
+              subtotal,
+              total: Math.round((subtotal + taxAmount) * 100) / 100,
+              ...(existing.purchaseType === "local" ? { currency: "PKR" } : {}),
+            },
+            $push: {
+              decisionLog: {
+                kind: "estimate_revised",
+                at: now,
+                actorName: actorDisplayName(req.user),
+                reason: remarks,
+              },
+            },
+          },
+          { new: true }
+        )
+      );
+      if (!data) {
+        return res.status(400).json({ success: false, message: "Requisition not found or not waiting for a price" });
+      }
+      return res.json({
+        success: true,
+        data,
+        message: "Estimated prices updated.",
+      });
+    }
     for (const row of approvals) {
       if (approvalStage(row) !== "estimate") continue;
       if (row.status !== "pending" && row.status !== "held") continue;

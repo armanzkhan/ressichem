@@ -142,6 +142,12 @@ function isLahorePr(row?: {
 
 const HUB_ESTIMATE_EMAILS = ["salim@gmail.com", "hanif@ressichem.com", "ahabib@ressichem.com"];
 const LAHORE_ESTIMATE_EMAIL = "rana.mehtab@ressichem.com";
+const LAHORE_ESTIMATE_ALSO_EMAILS = [
+  "salim@gmail.com",
+  "tahira@ressichem.com",
+  "hanif@ressichem.com",
+  "ahabib@ressichem.com",
+];
 
 function estimateStageOpen(row?: PurchaseDocument) {
   return (row?.approvals || []).some(
@@ -360,12 +366,25 @@ export function RequisitionsView({ section }: Props) {
     return row.assignedApprover ? procurementUserLabel(row.assignedApprover) : "—";
   };
 
-  const canEnterEstimate = (row: PurchaseDocument) => {
-    if (!estimateStageOpen(row)) return false;
+  const canPriceThisPr = (row: PurchaseDocument) => {
     const email = currentProcurementEmail();
-    const allowed = isLahorePr(row) ? [LAHORE_ESTIMATE_EMAIL] : HUB_ESTIMATE_EMAILS;
-    return allowed.includes(email);
+    if (isLahorePr(row)) {
+      return email === LAHORE_ESTIMATE_EMAIL || LAHORE_ESTIMATE_ALSO_EMAILS.includes(email);
+    }
+    return HUB_ESTIMATE_EMAILS.includes(email);
   };
+
+  const canEnterEstimate = (row: PurchaseDocument) => estimateStageOpen(row) && canPriceThisPr(row);
+
+  /** Correct a saved estimate until the requisition is fully approved. Does not move the approval chain. */
+  const canReviseEstimate = (row: PurchaseDocument) => {
+    if (!canPriceThisPr(row) || estimateStageOpen(row) || !hasEstimateStage(row)) return false;
+    const status = String(row.status || "").toLowerCase();
+    if (!["submitted", "held", "partially_approved"].includes(status)) return false;
+    return (row.items || []).some((item) => Number(item.unitPrice) > 0);
+  };
+
+  const canEditEstimate = (row: PurchaseDocument) => canEnterEstimate(row) || canReviseEstimate(row);
 
   /**
    * Approve / Hold / Reject only when THIS user is the pending approver.
@@ -815,7 +834,13 @@ export function RequisitionsView({ section }: Props) {
       for (const entry of row.decisionLog) {
         rows.push({
           label:
-            entry.kind === "held" ? "Held by" : entry.kind === "approved" ? "Approved by" : "Rejected by",
+            entry.kind === "held"
+              ? "Held by"
+              : entry.kind === "estimate_revised"
+                ? "Estimated price revised by"
+                : entry.kind === "approved"
+                  ? "Approved by"
+                  : "Rejected by",
           by: entry.actorName || "—",
           at: entry.at ? String(entry.at) : undefined,
           note: entry.reason || undefined,
@@ -988,7 +1013,7 @@ export function RequisitionsView({ section }: Props) {
           rows={visibleRows.map((r) => {
             const actionCell = (
               <span key={`act-${r._id}`} className="flex min-w-[7.5rem] flex-col items-start gap-1">
-                {canEnterEstimate(r) ? (
+                {canEditEstimate(r) ? (
                   <button
                     type="button"
                     className="whitespace-nowrap text-xs font-semibold text-blue-700 dark:text-blue-300"
@@ -997,7 +1022,7 @@ export function RequisitionsView({ section }: Props) {
                       void openRequisition(r);
                     }}
                   >
-                    Enter estimated price
+                    {canReviseEstimate(r) ? "Edit estimated price" : "Enter estimated price"}
                   </button>
                 ) : null}
                 <span className="flex flex-wrap gap-x-2 gap-y-1">
@@ -1474,7 +1499,7 @@ export function RequisitionsView({ section }: Props) {
                           {item.description}
                         </p>
                       ) : null}
-                      {canEnterEstimate(viewingRow) ? (
+                      {canEditEstimate(viewingRow) ? (
                         <label className="mt-2 block text-sm font-semibold text-blue-950 dark:text-blue-50">
                           Estimated unit price ({viewingRow.purchaseType === "foreign" ? viewingRow.currency || "USD" : "PKR"})
                           <input
@@ -1692,7 +1717,7 @@ export function RequisitionsView({ section }: Props) {
                   <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                     {estimateStageOpen(viewingRow)
                       ? isLahorePr(viewingRow)
-                        ? "Waiting for rana.mehtab@ressichem.com to enter the estimated price. Then the assigned managers approve one at a time, then Lahore Finance (tahira@ressichem.com)."
+                        ? "Waiting for an estimated price. Rana Mehtab is assigned. salim@gmail.com, tahira@ressichem.com, hanif@ressichem.com, or ahabib@ressichem.com may also enter it. Then the assigned managers approve one at a time, then Lahore Finance (tahira@ressichem.com)."
                         : "Waiting for procurement (salim@gmail.com, hanif@ressichem.com, or ahabib@ressichem.com) to enter the estimated price. Then the assigned managers approve one at a time, then Finance."
                       : isLahorePr(viewingRow)
                         ? "Estimated price is saved. Managers approve one at a time, then Lahore Finance (tahira@ressichem.com)."
@@ -1770,7 +1795,7 @@ export function RequisitionsView({ section }: Props) {
                   Create PO for selected lines
                 </button>
               ) : null}
-              {canEnterEstimate(viewingRow) ? (
+              {canEditEstimate(viewingRow) ? (
                 <div className="flex w-full flex-col items-end gap-2">
                   <label className="w-full text-sm font-semibold text-blue-950 dark:text-blue-50">
                     Remarks (optional)
@@ -1778,7 +1803,7 @@ export function RequisitionsView({ section }: Props) {
                       className={`${procurementFieldClass} mt-1`}
                       value={estimateRemarks}
                       onChange={(e) => setEstimateRemarks(e.target.value)}
-                      placeholder="Estimated prices entered"
+                      placeholder={canReviseEstimate(viewingRow) ? "Estimated prices revised" : "Estimated prices entered"}
                     />
                   </label>
                   <button
@@ -1787,7 +1812,7 @@ export function RequisitionsView({ section }: Props) {
                     disabled={savingEstimate}
                     onClick={() => void saveEstimatedPrices()}
                   >
-                    {savingEstimate ? "Saving…" : "Save estimated prices"}
+                    {savingEstimate ? "Saving…" : canReviseEstimate(viewingRow) ? "Save price changes" : "Save estimated prices"}
                   </button>
                 </div>
               ) : null}

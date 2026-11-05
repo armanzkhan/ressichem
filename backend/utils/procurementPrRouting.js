@@ -68,9 +68,24 @@ const LAHORE_FINAL_APPROVER_EMAIL = "tahira@ressichem.com";
 const HUB_ESTIMATE_EMAILS = ["salim@gmail.com", "hanif@ressichem.com", "ahabib@ressichem.com"];
 /** Lahore purchase requisitions are priced by Rana before the Lahore approvers. */
 const LAHORE_ESTIMATE_EMAIL = "rana.mehtab@ressichem.com";
+/**
+ * These accounts may also enter a Lahore estimated price.
+ * The requisition stays assigned to Rana until someone saves the price.
+ */
+const LAHORE_ESTIMATE_ALSO_EMAILS = [
+  "salim@gmail.com",
+  "tahira@ressichem.com",
+  "hanif@ressichem.com",
+  "ahabib@ressichem.com",
+];
 
 function estimateEmailsForPr(pr) {
   return isLahorePr(pr) ? [LAHORE_ESTIMATE_EMAIL] : HUB_ESTIMATE_EMAILS;
+}
+
+function canAlsoEnterLahoreEstimate(email) {
+  const value = normalizeEmail(email);
+  return LAHORE_ESTIMATE_ALSO_EMAILS.some((item) => normalizeEmail(item) === value);
 }
 
 /** Finance stage for Lahore — always tahira@. */
@@ -397,6 +412,16 @@ async function ensureUserDepartment(user) {
   return user;
 }
 
+/** Lahore requisitions that are still waiting for an estimated price. */
+function lahoreOpenEstimateClause() {
+  return {
+    $and: [
+      lahorePurchaseRequisitionClause(),
+      { approvals: { $elemMatch: { stage: "estimate", status: { $in: ["pending", "held"] } } } },
+    ],
+  };
+}
+
 /** Mongo clause matching Lahore-tagged purchase requisitions. */
 function lahorePurchaseRequisitionClause() {
   return {
@@ -568,11 +593,13 @@ function applyPurchaseRequisitionVisibility(query, user) {
 
   // Corporate finals/lab/Lahore finance must stay scoped — do not expand to company-wide via admin flag.
   if (isCorporatePipelineApproverUser(user)) {
-    query.$or = [
+    const or = [
       { requestedBy: user._id },
       { assignedApprover: user._id },
       { "approvals.approver": user._id },
     ];
+    if (canAlsoEnterLahoreEstimate(userEmail(user))) or.push(lahoreOpenEstimateClause());
+    query.$or = or;
     return query;
   }
 
@@ -597,6 +624,7 @@ function applyPurchaseRequisitionVisibility(query, user) {
       { "approvals.approver": user._id },
     ];
     if (canCreatePurchaseOrders(user)) or.push({ status: "approved" });
+    if (canAlsoEnterLahoreEstimate(userEmail(user))) or.push(lahoreOpenEstimateClause());
     query.$or = or;
     return applyLahorePlantScopeToPrQuery(query, user);
   }
@@ -628,7 +656,10 @@ module.exports = {
   LAHORE_FINAL_APPROVER_EMAIL,
   HUB_ESTIMATE_EMAILS,
   LAHORE_ESTIMATE_EMAIL,
+  LAHORE_ESTIMATE_ALSO_EMAILS,
   estimateEmailsForPr,
+  canAlsoEnterLahoreEstimate,
+  lahoreOpenEstimateClause,
   normalizeDepartment,
   normalizeEmail,
   isLahoreLocation,
