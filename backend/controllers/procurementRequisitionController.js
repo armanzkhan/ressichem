@@ -23,6 +23,7 @@ const {
   ensureUserDepartment,
   lahoreFinalApproverEmail,
   labApproverEmail,
+  requesterApprovesOwnDepartments,
 } = require("../utils/procurementPrRouting");
 const {
   collectDepartmentsFromPr,
@@ -628,9 +629,9 @@ exports.submit = async (req, res) => {
         approvals = overridden.approvals;
       }
 
-      // Lab creates the PR and approves it. Other departments' mapped approvers
-      // still apply when someone else is the requester.
-      if (requesterEmail === labApproverEmail() && req.user?._id) {
+      // Lab and Khuzema approve a PR they created. Other people's PRs
+      // still go to the mapped department approver.
+      if (requesterApprovesOwnDepartments(requesterEmail) && req.user?._id) {
         approvals = assignDepartmentApprovalsToRequester(approvals, req.user._id);
       }
 
@@ -765,13 +766,8 @@ exports.saveEstimatedPrices = async (req, res) => {
         message: "Only procurement can enter the estimated price for this requisition",
       });
     }
-    const actionable = actionableApprovalRows(approvals, req.user, stageOpts);
-    if (!revising && !actionable.length && !lahoreAssist) {
-      return res.status(403).json({
-        success: false,
-        message: "This estimated price is assigned to another procurement user",
-      });
-    }
+    // Any account already allowed for this requisition may save the price,
+    // including when their own estimate row was not created.
 
     const prices = req.body?.lineUnitPrices;
     const items = existing.items || [];

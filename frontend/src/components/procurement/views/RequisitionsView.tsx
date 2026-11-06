@@ -114,7 +114,6 @@ function approvalChainKey(row: PurchaseDocument) {
   return "standard";
 }
 
-/** Lahore may be sticky flag, location, title, or department (e.g. "Administration (Lahore)"). */
 function pricesFromRequisition(row: PurchaseDocument) {
   const next: Record<number, string> = {};
   (row.items || []).forEach((item, index) => {
@@ -124,6 +123,15 @@ function pricesFromRequisition(row: PurchaseDocument) {
   return next;
 }
 
+/** Accept 1500, 1,500, and 1500.50. A comma is a thousands separator, not a decimal. */
+function parseEstimatePrice(raw: string) {
+  const cleaned = String(raw || "").replace(/,/g, "").replace(/\s/g, "");
+  if (!cleaned) return NaN;
+  const value = Number(cleaned);
+  return Number.isFinite(value) ? value : NaN;
+}
+
+/** Lahore may be sticky flag, location, title, or department (e.g. "Administration (Lahore)"). */
 function isLahorePr(row?: {
   location?: string;
   title?: string;
@@ -452,6 +460,7 @@ export function RequisitionsView({ section }: Props) {
   const canOpenEditForm = (row: PurchaseDocument) => canEditOrSubmitPr(row) || canApproverAmendPr(row);
   const [viewingRow, setViewingRow] = useState<PurchaseDocument | null>(null);
   const [estimatePrices, setEstimatePrices] = useState<Record<number, string>>({});
+  const [estimateNotice, setEstimateNotice] = useState("");
   const [estimateRemarks, setEstimateRemarks] = useState("");
   const [savingEstimate, setSavingEstimate] = useState(false);
   const [reviewAction, setReviewAction] = useState<{
@@ -557,6 +566,7 @@ export function RequisitionsView({ section }: Props) {
         if (cancelled) return;
         setViewingRow(res.data);
         setEstimatePrices(pricesFromRequisition(res.data));
+        setEstimateNotice("");
         setEstimateRemarks("");
         setShowForm(false);
         setEditingId(null);
@@ -649,6 +659,7 @@ export function RequisitionsView({ section }: Props) {
       const res = await procurementApi.getRequisition(row._id);
       setViewingRow(res.data);
       setEstimatePrices(pricesFromRequisition(res.data));
+      setEstimateNotice("");
       setEstimateRemarks("");
       const next: Record<number, boolean> = {};
       (res.data.items || []).forEach((item, i) => {
@@ -666,24 +677,28 @@ export function RequisitionsView({ section }: Props) {
   const saveEstimatedPrices = async () => {
     if (!viewingRow || savingEstimate) return;
     const items = viewingRow.items || [];
-    const lineUnitPrices = items.map((_, index) => Number(estimatePrices[index]));
+    const lineUnitPrices = items.map((_, index) => parseEstimatePrice(estimatePrices[index] || ""));
     if (lineUnitPrices.some((price) => !(price > 0))) {
+      setEstimateNotice("");
       setError("Enter an estimated unit price greater than 0 on every line");
       return;
     }
     setSavingEstimate(true);
     setError("");
+    setEstimateNotice("");
     try {
       const res = await procurementApi.saveRequisitionEstimate(viewingRow._id, {
         lineUnitPrices,
         remarks: estimateRemarks,
       });
-      setViewingRow(null);
-      setEstimateRemarks("");
+      setViewingRow(res.data);
+      setEstimatePrices(pricesFromRequisition(res.data));
+      setEstimateNotice(res.message || "Estimated prices saved.");
       await load();
-      if (res.message) setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the estimated prices");
+      const message = err instanceof Error ? err.message : "Could not save the estimated prices";
+      setError(message);
+      setEstimateNotice("");
     } finally {
       setSavingEstimate(false);
     }
@@ -1507,14 +1522,18 @@ export function RequisitionsView({ section }: Props) {
                         <label className="mt-2 block text-sm font-semibold text-blue-950 dark:text-blue-50">
                           Estimated unit price ({viewingRow.purchaseType === "foreign" ? viewingRow.currency || "USD" : "PKR"})
                           <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            className={`${procurementFieldClass} mt-1`}
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            enterKeyHint="done"
+                            className={`${procurementFieldClass} mt-1 !text-base sm:!text-sm min-h-11`}
                             value={estimatePrices[i] ?? ""}
-                            onChange={(e) =>
-                              setEstimatePrices((prev) => ({ ...prev, [i]: e.target.value }))
-                            }
+                            placeholder="0.00"
+                            onChange={(e) => {
+                              const raw = e.target.value.replace(/,/g, "").replace(/\s/g, "");
+                              if (raw !== "" && !/^\d*\.?\d*$/.test(raw)) return;
+                              setEstimatePrices((prev) => ({ ...prev, [i]: raw }));
+                            }}
                           />
                         </label>
                       ) : Number(item.unitPrice) > 0 ? (
@@ -1780,6 +1799,24 @@ export function RequisitionsView({ section }: Props) {
               </ul>
             </div>
             <footer className="flex flex-wrap justify-end gap-2 pt-2">
+              {canEditOrSubmitPr(viewingRow) ? (
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg bg-blue-700 text-white text-sm"
+                  onClick={async () => {
+                    setError("");
+                    try {
+                      await procurementApi.submitRequisition(viewingRow._id);
+                      setViewingRow(null);
+                      await load();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Submit failed");
+                    }
+                  }}
+                >
+                  {viewingRow.status === "rejected" ? "Resubmit" : "Submit"}
+                </button>
+              ) : null}
               {canConvertToPo(viewingRow) ? (
                 <button
                   type="button"
@@ -1801,6 +1838,16 @@ export function RequisitionsView({ section }: Props) {
               ) : null}
               {canEditEstimate(viewingRow) ? (
                 <div className="flex w-full flex-col items-end gap-2">
+                  {estimateNotice ? (
+                    <p className="w-full rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-100">
+                      {estimateNotice}
+                    </p>
+                  ) : null}
+                  {error ? (
+                    <p className="w-full rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-900 dark:border-red-700 dark:bg-red-950/40 dark:text-red-100">
+                      {error}
+                    </p>
+                  ) : null}
                   <label className="w-full text-sm font-semibold text-blue-950 dark:text-blue-50">
                     Remarks (optional)
                     <input

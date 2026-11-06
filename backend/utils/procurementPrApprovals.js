@@ -309,8 +309,8 @@ function approvalStage(entry) {
 }
 
 /**
- * Lab may approve a requisition they created. Department mappings (for example
- * Maintenance HUB → Adnaan) do not take that PR away from them.
+ * Lab and Khuzema may approve a requisition they created. Department mappings
+ * (for example Maintenance HUB → Adnaan) do not take that PR away from them.
  */
 function assignDepartmentApprovalsToRequester(approvals, requesterId) {
   if (!requesterId) return approvals;

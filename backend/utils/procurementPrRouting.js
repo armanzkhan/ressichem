@@ -167,6 +167,17 @@ function labApproverEmail() {
   return normalizeEmail(process.env.PROCUREMENT_LAB_APPROVER_EMAIL) || "lab@ressichem.com";
 }
 
+/**
+ * These requesters approve the department step on a PR they created.
+ * Other people's PRs still follow the department mapping.
+ */
+function requesterApprovesOwnDepartments(email) {
+  const value = normalizeEmail(email);
+  if (!value) return false;
+  if (value === labApproverEmail()) return true;
+  return value === "khuzema@ressichem.com";
+}
+
 function requesterApprovalChain(email) {
   const key = normalizeEmail(email);
   if (!key) return null;
@@ -667,6 +678,7 @@ module.exports = {
   isLahorePr,
   lahoreFinalApproverEmail,
   labApproverEmail,
+  requesterApprovesOwnDepartments,
   approverEmailForDepartment,
   resolveApproverEmail,
   requesterApprovalChain,
