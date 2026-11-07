@@ -121,6 +121,13 @@ const REQUESTER_APPROVAL_CHAINS = {
     departmentApproverEmail: "adnaan.malak@ressichem.com",
     bossApproverEmail: "khuzema@ressichem.com",
   },
+  // Any PR this account creates: estimated price, then Khuzema, then finance@.
+  // Not the Lab step used for other Maintenance requisitions.
+  "maintenance@ressichem.com": {
+    skipFinance: false,
+    departmentApproverEmail: "khuzema@ressichem.com",
+    financeApproverEmail: "finance@ressichem.com",
+  },
 };
 
 /** Full view/edit/delete/reject on all PRs (approved or not). */
@@ -259,6 +266,13 @@ function resolveApprovalChainForSubmit(requesterEmail, departments = [], locatio
   const tahira = lahore ? lahoreFinalApproverEmail() : null;
 
   const chain = requesterApprovalChain(requesterEmail);
+  if (chain?.departmentApproverEmail && !chain.skipFinance) {
+    return {
+      key: "standard",
+      options: {},
+      requesterChain: chain,
+    };
+  }
   if (chain?.skipFinance) {
     return {
       key: "skip_finance",

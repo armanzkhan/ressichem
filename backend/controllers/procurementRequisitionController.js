@@ -672,11 +672,14 @@ exports.submit = async (req, res) => {
           approvalChain: resolvedChain.key,
           skipFinanceApproval: resolvedChain.key === "skip_finance",
           // Sticky: Lahore final stays tahira@ even if title/location is edited later
-          lahoreFinalApproval: Boolean(
-            isLahorePr(existing, departments) ||
-              stageOpts?.lahoreFinalApproval ||
-              normalizeEmail(stageOpts?.financeApproverEmail) === lahoreFinalApproverEmail()
-          ),
+          lahoreFinalApproval:
+            requesterChain?.departmentApproverEmail && !requesterChain?.skipFinance
+              ? false
+              : Boolean(
+                  isLahorePr(existing, departments) ||
+                    stageOpts?.lahoreFinalApproval ||
+                    normalizeEmail(stageOpts?.financeApproverEmail) === lahoreFinalApproverEmail()
+                ),
           slaDueAt: computeSlaDueAt(new Date()),
           slaReminderSentAt: null,
           slaRemindersSent: [],

@@ -30,6 +30,10 @@ async function resolveUserIdByEmail(company_id, email) {
 function approvalOptionsFromPr(pr, requesterEmail) {
   const chainKey = String(pr?.approvalChain || "").toLowerCase();
   const chain = requesterApprovalChain(requesterEmail);
+  // maintenance@ : price → Khuzema → finance@. Location must not switch this to Lab or Tahira.
+  if (chain?.departmentApproverEmail && !chain.skipFinance) {
+    return { skipFinance: false, labThenFinance: false };
+  }
   // Sticky flag from submit wins; also re-detect from location/title/dept.
   const lahore = Boolean(pr?.lahoreFinalApproval) || isLahorePr(pr);
   const tahira = lahoreFinalApproverEmail();
@@ -46,6 +50,9 @@ function approvalOptionsFromPr(pr, requesterEmail) {
     return {
       labThenFinance: true,
       skipFinance: false,
+      // Khuzema is the maintenance approver. A PR he creates and approves
+      // does not wait for a second Lab approval.
+      requesterSkipsLab: normalizeEmail(requesterEmail) === "khuzema@ressichem.com",
       ...(lahore ? lahoreOpts : {}),
     };
   }
@@ -458,6 +465,18 @@ async function advanceCorporateApprovalStages(company_id, approvals = [], option
     return { approvals: next, newlyAdded };
   }
 
+  const labSkipReason =
+    "Maintenance approver created and approved this requisition — no separate Lab approval";
+  if (options.requesterSkipsLab) {
+    for (const row of next) {
+      if (approvalStage(row) !== "lab") continue;
+      if (row.status !== "pending" && row.status !== "held") continue;
+      row.status = "approved";
+      row.actedAt = new Date();
+      row.reason = labSkipReason;
+    }
+  }
+
   for (let i = 0; i < stages.length; i += 1) {
     const stageDef = stages[i];
     const existing = next.find((a) => approvalStage(a) === stageDef.stage);
@@ -495,22 +514,26 @@ async function advanceCorporateApprovalStages(company_id, approvals = [], option
     const alreadyCoveredBySameApprover =
       deptsApprovedBySameUser &&
       ((stageDef.stage === "finance" && stages[0]?.stage === "finance") || stageDef.stage === "lab");
+    const maintenanceRequesterCoveredLab = Boolean(options.requesterSkipsLab) && stageDef.stage === "lab";
+    const alreadyCovered = alreadyCoveredBySameApprover || maintenanceRequesterCoveredLab;
 
     const row = {
       department: stageDef.department,
       departmentKey: normalizeDepartment(stageDef.department),
       stage: stageDef.stage,
       approver: resolved.userId,
-      status: alreadyCoveredBySameApprover ? "approved" : "pending",
-      reason: alreadyCoveredBySameApprover
-        ? stageDef.stage === "lab"
-          ? "Requester is the Lab approver — no second Lab approval"
-          : "Department approver is Lahore Finance — no second approval"
+      status: alreadyCovered ? "approved" : "pending",
+      reason: alreadyCovered
+        ? maintenanceRequesterCoveredLab
+          ? labSkipReason
+          : stageDef.stage === "lab"
+            ? "Requester is the Lab approver — no second Lab approval"
+            : "Department approver is Lahore Finance — no second approval"
         : "",
-      ...(alreadyCoveredBySameApprover ? { actedAt: new Date() } : {}),
+      ...(alreadyCovered ? { actedAt: new Date() } : {}),
     };
     next.push(row);
-    if (alreadyCoveredBySameApprover) continue;
+    if (alreadyCovered) continue;
     newlyAdded.push(row);
     break; // unlock one corporate stage at a time
   }

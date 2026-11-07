@@ -168,11 +168,20 @@ function hasEstimateStage(row?: PurchaseDocument) {
 }
 
 /** Corporate steps that unlock after departments (shown even before rows exist). */
+function requesterEmailOf(row?: PurchaseDocument) {
+  const owner = row?.requestedBy;
+  if (!owner || typeof owner === "string") return "";
+  return String(owner.email || "").trim().toLowerCase();
+}
+
 function plannedCorporateStages(row: PurchaseDocument): Array<{
   stage: string;
   department: string;
   email: string;
 }> {
+  if (requesterEmailOf(row) === "maintenance@ressichem.com") {
+    return [{ stage: "finance", department: "Finance Manager", email: "finance@ressichem.com" }];
+  }
   const chain = approvalChainKey(row);
   const lahore = isLahorePr(row);
   const finance = lahore
@@ -1739,15 +1748,20 @@ export function RequisitionsView({ section }: Props) {
                 {hasEstimateStage(viewingRow) ? (
                   <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                     {estimateStageOpen(viewingRow)
-                      ? isLahorePr(viewingRow)
+                      ? requesterEmailOf(viewingRow) === "maintenance@ressichem.com"
+                        ? "Waiting for an estimated price from salim@gmail.com, hanif@ressichem.com, or ahabib@ressichem.com. Then Khuzema (khuzema@ressichem.com) approves, then Finance (finance@ressichem.com)."
+                        : isLahorePr(viewingRow)
                         ? "Waiting for an estimated price. Rana Mehtab is assigned. salim@gmail.com, tahira@ressichem.com, hanif@ressichem.com, or ahabib@ressichem.com may also enter it. Then the assigned managers approve one at a time, then Lahore Finance (tahira@ressichem.com)."
                         : "Waiting for procurement (salim@gmail.com, hanif@ressichem.com, or ahabib@ressichem.com) to enter the estimated price. Then the assigned managers approve one at a time, then Finance."
-                      : isLahorePr(viewingRow)
+                      : requesterEmailOf(viewingRow) === "maintenance@ressichem.com"
+                        ? "Estimated price is saved. Khuzema (khuzema@ressichem.com) approves, then Finance (finance@ressichem.com)."
+                        : isLahorePr(viewingRow)
                         ? "Estimated price is saved. Managers approve one at a time, then Lahore Finance (tahira@ressichem.com)."
                         : "Estimated price is saved. Managers approve one at a time, then Finance."}
                   </p>
                 ) : null}
-                {approvalChainKey(viewingRow) === "lab_then_finance" ? (
+                {approvalChainKey(viewingRow) === "lab_then_finance" &&
+                requesterEmailOf(viewingRow) !== "maintenance@ressichem.com" ? (
                   !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "lab") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                       After department manager approves → Lab, then{" "}
