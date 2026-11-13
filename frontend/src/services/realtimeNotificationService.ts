@@ -735,10 +735,48 @@ class RealtimeNotificationService {
     }
   }
 
+  /** Which system the open page belongs to. */
+  private currentPortal(): "procurement" | "qc" | "production" | "customer" | "dashboard" {
+    if (typeof window === "undefined") return "dashboard";
+    const path = window.location.pathname;
+    if (path.startsWith("/procurement")) return "procurement";
+    if (path.startsWith("/qc")) return "qc";
+    if (path.startsWith("/production")) return "production";
+    if (path.startsWith("/customer")) return "customer";
+    return "dashboard";
+  }
+
+  /** Which system a notice belongs to. Untagged order and sales notices stay on the main dashboard. */
+  private notificationPortal(notification: RealtimeNotification): "procurement" | "qc" | "production" | "customer" | "dashboard" | "chat" {
+    const type = String(notification.type || "").toLowerCase();
+    if (type === "chat_message") return "chat";
+    const data = (notification.data || {}) as { module?: string; entityType?: string };
+    const moduleName = String(data.module || "").toLowerCase();
+    if (moduleName === "procurement" || moduleName === "qc" || moduleName === "production" || moduleName === "customer") {
+      return moduleName;
+    }
+    const entity = String(data.entityType || "").toLowerCase();
+    if (type.includes("procurement") || entity.includes("procurement") || entity.includes("requisition")) return "procurement";
+    if (type.startsWith("qc") || entity.startsWith("qc")) return "qc";
+    if (type.startsWith("production") || entity.includes("production")) return "production";
+    if (type.includes("order")) return "customer";
+    return "dashboard";
+  }
+
+  /** Chat follows the person. Every other notice stays inside its own module. */
+  private notificationBelongsOnThisScreen(notification: RealtimeNotification) {
+    const owner = this.notificationPortal(notification);
+    if (owner === "chat") return true;
+    const here = this.currentPortal();
+    if (owner === "customer") return here === "customer" || here === "dashboard";
+    return owner === here;
+  }
+
   /**
    * Show popup notification for all events
    */
   private async showPopupNotification(notification: RealtimeNotification) {
+    if (!this.notificationBelongsOnThisScreen(notification)) return;
     try {
       console.log('🔔 showPopupNotification called with:', notification);
       console.log('🔔 Number of listeners:', this.listeners.length);

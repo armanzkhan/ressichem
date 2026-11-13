@@ -150,10 +150,10 @@ async getUserNotifications(userId, companyId, limit = 10) {
       notification.delivery_stats.total_recipients = userIds.length;
       await notification.save();
 
-      // Send real-time notification to connected users
+      // Send real-time notification only to the users this notice is for.
       try {
-        console.log('📡 Sending real-time notification to connected users');
-        realtimeService.sendToCompany(notification.company_id, {
+        const recipientIds = targetUsers.flatMap((user) => [user.user_id, user._id].filter(Boolean).map(String));
+        realtimeService.sendToUsers(recipientIds, {
           type: 'notification',
           notification: {
             _id: notification._id,
@@ -166,7 +166,6 @@ async getUserNotifications(userId, companyId, limit = 10) {
             sender_name: notification.sender_name
           }
         });
-        console.log('✅ Real-time notification sent');
       } catch (realtimeError) {
         console.error('❌ Real-time notification error:', realtimeError);
       }

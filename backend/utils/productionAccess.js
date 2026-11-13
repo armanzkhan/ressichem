@@ -43,6 +43,8 @@ function isProductionAdmin(user) {
   if (!user) return false;
   if (user.isSuperAdmin || user.isCompanyAdmin) return true;
   const role = String(user.role || "").toLowerCase();
+  // "Procurement Admin" contains "admin" but is not a production account.
+  if (!role.includes("production")) return false;
   if (role.includes("qc")) return false;
   return role.includes("admin");
 }

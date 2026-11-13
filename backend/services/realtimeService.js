@@ -161,6 +161,24 @@ class RealtimeService {
     }
   }
 
+  // One delivery per open connection, matching either the business user id or the Mongo id.
+  sendToUsers(userIds, data) {
+    const targets = new Set((userIds || []).filter(Boolean).map((id) => String(id)));
+    if (!targets.size) return 0;
+    const payload = JSON.stringify(data);
+    let sent = 0;
+    for (const [ws, connection] of this.connections) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const aliases = [connection.userId, ...(connection.userIds || [])]
+        .filter(Boolean)
+        .map((id) => String(id));
+      if (!aliases.some((id) => targets.has(id))) continue;
+      ws.send(payload);
+      sent += 1;
+    }
+    return sent;
+  }
+
   // Send updates to all users in a company
   sendToCompany(companyId, data) {
     for (const [ws, connection] of this.connections) {

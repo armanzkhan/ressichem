@@ -336,6 +336,7 @@ export function RequisitionsView({ section }: Props) {
       );
       const current =
         firstDepartment ||
+        approvals.find((entry) => entry.stage === "lab" && isOpenStatus(entry.status)) ||
         approvals.find((entry) => entry.stage === "finance" && isOpenStatus(entry.status)) ||
         approvals.find((entry) => entry.stage === "boss" && isOpenStatus(entry.status));
       const id = approvalActorId(current?.approver);
