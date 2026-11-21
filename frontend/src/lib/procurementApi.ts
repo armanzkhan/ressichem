@@ -241,6 +241,8 @@ export type PurchaseDocument = {
   skipFinanceApproval?: boolean;
   /** Sticky: Lahore PRs use tahira@ as Finance Manager */
   lahoreFinalApproval?: boolean;
+  /** Chosen when the estimated price is saved. Empty on older requisitions. */
+  procureFrom?: "" | "karachi" | "lahore" | string;
   slaDueAt?: string | Date | null;
   slaStatus?: string;
   slaLabel?: string;
@@ -737,7 +739,10 @@ export const procurementApi = {
       method: "POST",
       body: JSON.stringify({ remarks: String(remarks || "").trim() }),
     }),
-  saveRequisitionEstimate: (id: string, body: { lineUnitPrices: number[]; remarks?: string }) =>
+  saveRequisitionEstimate: (
+    id: string,
+    body: { lineUnitPrices: number[]; remarks?: string; procureFrom?: "karachi" | "lahore" }
+  ) =>
     request<{ success: boolean; data: PurchaseDocument; message?: string }>(
       `/api/procurement/requisitions/${id}/estimate`,
       { method: "POST", body: JSON.stringify(body) }

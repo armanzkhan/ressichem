@@ -170,6 +170,38 @@ function sanitizeLineItems(items = []) {
   return (items || []).map(sanitizeLineItem);
 }
 
+/**
+ * A generic edit has no price field and sends 0. Keep a rate already stored
+ * on the same item. A different item does not inherit the old rate.
+ */
+function preserveStoredUnitPrices(existingItems = [], incomingItems = []) {
+  const existing = (existingItems || []).map((line) =>
+    typeof line?.toObject === "function" ? line.toObject() : { ...line }
+  );
+  const used = new Set();
+  return (incomingItems || []).map((line, index) => {
+    if ((Number(line?.unitPrice) || 0) > 0) return line;
+    const itemId = String(line?.item || "");
+    if (!itemId) return line;
+    const sameItem = (row) => String(row?.item || "") === itemId && (Number(row?.unitPrice) || 0) > 0;
+    let match = -1;
+    if (existing[index] && !used.has(index) && sameItem(existing[index])) {
+      match = index;
+    } else {
+      const qty = Number(line?.quantity) || 0;
+      match = existing.findIndex(
+        (row, i) => !used.has(i) && sameItem(row) && (Number(row?.quantity) || 0) === qty
+      );
+      if (match < 0) {
+        match = existing.findIndex((row, i) => !used.has(i) && sameItem(row));
+      }
+    }
+    if (match < 0) return line;
+    used.add(match);
+    return { ...line, unitPrice: Number(existing[match].unitPrice) };
+  });
+}
+
 function computeLineTotals(items = [], exchangeRate = 1) {
   const normalized = (items || []).map((line) => {
     const cleaned = sanitizeLineItem(line);
@@ -243,6 +275,7 @@ module.exports = {
   nextItemCode,
   sanitizeLineItem,
   sanitizeLineItems,
+  preserveStoredUnitPrices,
   computeLineTotals,
   buildDocumentTotals,
   commercialFieldsFromDoc,

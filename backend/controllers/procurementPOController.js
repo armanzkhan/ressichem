@@ -13,7 +13,7 @@ const {
   canCreateRequisitions,
   isProcurementAdminUser,
   isLahorePlantScopedUser,
-  isLahorePr,
+  recordedProcureIsLahore,
   ensureUserDepartment,
   applyPurchaseOrderVisibility,
 } = require("../utils/procurementPrRouting");
@@ -58,7 +58,7 @@ async function assertLahoreBuyerCanAccessPo(user, po, company_id) {
   const prId = po?.requisition?._id || po?.requisition;
   if (!prId) return false;
   const pr = await PurchaseRequisition.findOne({ _id: prId, company_id }).lean();
-  return Boolean(pr && (pr.lahoreFinalApproval || isLahorePr(pr)));
+  return Boolean(pr && recordedProcureIsLahore(pr));
 }
 
 exports.list = async (req, res) => {
@@ -135,7 +135,7 @@ exports.create = async (req, res) => {
       plantScope = "lahore";
       if (body.requisition) {
         const pr = await PurchaseRequisition.findOne({ _id: body.requisition, company_id }).lean();
-        if (!pr || (!pr.lahoreFinalApproval && !isLahorePr(pr))) {
+        if (!pr || !recordedProcureIsLahore(pr)) {
           return res.status(403).json({
             success: false,
             message: "Lahore buyers can only create purchase orders for Lahore requisitions",

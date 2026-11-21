@@ -12,7 +12,8 @@ import {
   type ProductionFactory,
 } from "@/lib/productionApi";
 import { procurementFieldClass, procurementLabelClass, procurementPanelClass, procurementSecondaryButtonClass } from "@/components/procurement/procurementTheme";
-import { ProcessSheetEditor } from "@/components/production/ProcessSheets";
+import { ProcessSheetEditor, SheetRecordDialog } from "@/components/production/ProcessSheets";
+import { ProductionImportModal } from "@/components/production/ProductionImportModal";
 
 type FormState = {
   factory: ProductionFactory | "";
@@ -171,6 +172,9 @@ export function ProductionLog({ department }: { department: ProductionDepartment
   const [error, setError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<ProductionEntry | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [filters, setFilters] = useState({
     factory: "",
@@ -215,6 +219,7 @@ export function ProductionLog({ department }: { department: ProductionDepartment
   }, []);
 
   useEffect(() => {
+    setSelected([]);
     void load(query);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
@@ -225,6 +230,22 @@ export function ProductionLog({ department }: { department: ProductionDepartment
     meta.packing && Number(form.kitSizeKg) > 0 && Number(form.kitQuantity) > 0
       ? Math.round(Number(form.kitSizeKg) * Number(form.kitQuantity) * 1000) / 1000
       : null;
+
+  const deactivate = async (row: ProductionEntry) => {
+    const label = row.batchNumber || row.resinBatch || row.grade || "this record";
+    if (!window.confirm(`Deactivate ${label}? It will be removed from this log. The daily report will no longer include it.`)) return;
+    setError("");
+    try {
+      await productionApi.remove(row._id);
+      if (editingId === row._id) {
+        setFormOpen(false);
+        setEditingId(null);
+      }
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not deactivate this record");
+    }
+  };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -270,13 +291,24 @@ export function ProductionLog({ department }: { department: ProductionDepartment
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button type="button" className={procurementSecondaryButtonClass} onClick={() => setImportOpen(true)}>
+            Import
+          </button>
           <button
             type="button"
             className={procurementSecondaryButtonClass}
-            onClick={() => productionApi.exportCsv(query).catch((err) => setError(err.message))}
+            onClick={() => productionApi.exportLog(selected.length ? `${query}&ids=${selected.join(",")}` : query, "xlsx").catch((err) => setError(err.message))}
           >
-            Export
+            Export Excel
           </button>
+          <button
+            type="button"
+            className={procurementSecondaryButtonClass}
+            onClick={() => productionApi.exportLog(selected.length ? `${query}&ids=${selected.join(",")}` : query, "csv").catch((err) => setError(err.message))}
+          >
+            Export CSV
+          </button>
+          <span className="self-center text-sm text-blue-800 dark:text-blue-100">{selected.length ? `${selected.length} selected` : "Tick rows to export a selection"}</span>
           <button
             type="button"
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white"
@@ -370,6 +402,14 @@ export function ProductionLog({ department }: { department: ProductionDepartment
         <table className="min-w-full text-left text-sm">
           <thead className="bg-blue-50 text-xs uppercase tracking-wide text-blue-800 dark:bg-slate-800 dark:text-blue-100">
             <tr>
+              <th className="px-3 py-2">
+                <input
+                  type="checkbox"
+                  aria-label="Select all records"
+                  checked={rows.length > 0 && selected.length === rows.length}
+                  onChange={() => setSelected(selected.length === rows.length ? [] : rows.map((row) => row._id))}
+                />
+              </th>
               <th className="px-3 py-2">{meta.dateLabel}</th>
               <th className="px-3 py-2">Factory</th>
               <th className="px-3 py-2">Grade</th>
@@ -395,19 +435,31 @@ export function ProductionLog({ department }: { department: ProductionDepartment
           <tbody>
             {loading ? (
               <tr>
-                <td className="px-3 py-6 text-blue-700" colSpan={10}>
+                <td className="px-3 py-6 text-blue-700" colSpan={11}>
                   Loading records…
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td className="px-3 py-6 text-blue-700 dark:text-blue-200" colSpan={10}>
+                <td className="px-3 py-6 text-blue-700 dark:text-blue-200" colSpan={11}>
                   No records for these filters.
                 </td>
               </tr>
             ) : (
               rows.map((row) => (
-                <tr key={row._id} className="border-t border-blue-100 dark:border-slate-800">
+                <tr
+                  key={row._id}
+                  className="cursor-pointer border-t border-blue-100 hover:bg-blue-50 dark:border-slate-800 dark:hover:bg-slate-800/80"
+                  onClick={() => setViewing(row)}
+                >
+                  <td className="px-3 py-2" onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${row.batchNumber || row.grade || "record"}`}
+                      checked={selected.includes(row._id)}
+                      onChange={() => setSelected((current) => (current.includes(row._id) ? current.filter((id) => id !== row._id) : [...current, row._id]))}
+                    />
+                  </td>
                   <td className="px-3 py-2 whitespace-nowrap">{dateLabel(row.recordDate)}</td>
                   <td className="px-3 py-2">{FACTORY_LABEL[row.factory] || row.factory}</td>
                   <td className="px-3 py-2 font-medium">{row.grade}</td>
@@ -431,17 +483,31 @@ export function ProductionLog({ department }: { department: ProductionDepartment
                     {row.qcSource === "laboratory" ? " · laboratory" : ""}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
-                    <button
-                      type="button"
-                      className="text-xs text-blue-700 dark:text-blue-300"
-                      onClick={() => {
-                        setEditingId(row._id);
-                        setForm(entryToForm(row));
-                        setFormOpen(true);
-                      }}
-                    >
-                      Edit
-                    </button>
+                    <span className="flex gap-2">
+                      <button
+                        type="button"
+                        className="text-xs text-blue-700 dark:text-blue-300"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setViewing(null);
+                          setEditingId(row._id);
+                          setForm(entryToForm(row));
+                          setFormOpen(true);
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs text-red-600"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void deactivate(row);
+                        }}
+                      >
+                        Deactivate
+                      </button>
+                    </span>
                   </td>
                 </tr>
               ))
@@ -449,6 +515,30 @@ export function ProductionLog({ department }: { department: ProductionDepartment
           </tbody>
         </table>
       </div>
+
+      {viewing ? (
+        <SheetRecordDialog
+          entry={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={() => {
+            setEditingId(viewing._id);
+            setForm(entryToForm(viewing));
+            setViewing(null);
+            setFormOpen(true);
+          }}
+        />
+      ) : null}
+
+      {importOpen ? (
+        <ProductionImportModal
+          department={department}
+          initialFactory={filters.factory}
+          onClose={() => setImportOpen(false)}
+          onImported={() => {
+            void load();
+          }}
+        />
+      ) : null}
 
       {formOpen ? (
         <ProcessSheetEditor

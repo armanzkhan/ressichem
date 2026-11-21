@@ -19,6 +19,8 @@ export type RequisitionLine = {
   unit: string;
   description: string;
   department: string;
+  /** Kept across edits. The form does not show this field. */
+  unitPrice?: number;
 };
 
 type Props = {
@@ -58,10 +60,12 @@ export function RequisitionLineEditor({
 
   const pickItem = (index: number, itemId: string) => {
     const catalog = items.find((x) => x._id === itemId);
+    const sameItem = itemId === lines[index]?.item;
     updateLine(index, {
       item: itemId,
       unit: catalog?.unit || DEFAULT_ITEM_UNIT,
       description: catalog?.name || lines[index]?.description || "",
+      unitPrice: sameItem ? lines[index]?.unitPrice : undefined,
     });
   };
 

@@ -72,6 +72,16 @@ const purchaseRequisitionSchema = new mongoose.Schema(
      * even if location/title is edited later.
      */
     lahoreFinalApproval: { type: Boolean, default: false },
+    /**
+     * Chosen when the estimated price is saved. Empty on older requisitions,
+     * which keep the route they already had. Karachi is the Hub path.
+     * Lahore sends the finance step to tahira@.
+     */
+    procureFrom: {
+      type: String,
+      enum: ["", "karachi", "lahore"],
+      default: "",
+    },
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     approvedAt: { type: Date },
     rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },

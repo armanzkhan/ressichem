@@ -141,12 +141,32 @@ export function storedProductionDepartments(): ProductionDepartment[] {
   return ALL_DEPARTMENTS;
 }
 
-function headers(): HeadersInit {
+function authHeaders(json = true): Record<string, string> {
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
   const company = typeof window !== "undefined" ? localStorage.getItem("company_id") || "RESSICHEM" : "RESSICHEM";
-  const h: Record<string, string> = { "Content-Type": "application/json", "x-company-id": company };
+  const h: Record<string, string> = { "x-company-id": company };
+  if (json) h["Content-Type"] = "application/json";
   if (token) h.Authorization = `Bearer ${token}`;
   return h;
+}
+
+function headers(): HeadersInit {
+  return authHeaders(true);
+}
+
+async function downloadFile(path: string, filename: string) {
+  const response = await fetch(`${getBackendUrl()}${path}`, { headers: authHeaders(false), cache: "no-store" });
+  if (!response.ok) {
+    const json = await response.json().catch(() => ({}));
+    throw new Error((json as { message?: string }).message || "Download failed");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -197,24 +217,45 @@ export const productionApi = {
     request<{ success: boolean; data: { production: ProductionEntry[]; packing: ProductionEntry[] } }>(
       `/api/production/trace?q=${encodeURIComponent(q)}`
     ),
-  async exportCsv(query: string) {
-    const response = await fetch(`${getBackendUrl()}/api/production/entries/export${query}`, { headers: headers() });
-    if (!response.ok) {
-      const json = await response.json().catch(() => ({}));
-      throw new Error((json as { message?: string }).message || "Export failed");
-    }
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "production-log.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+  exportLog(query: string, format: "xlsx" | "csv" = "xlsx") {
+    const joiner = query.includes("?") ? "&" : "?";
+    const suffix = query ? `${query}${joiner}format=${format}` : `?format=${format}`;
+    return downloadFile(`/api/production/entries/export${suffix}`, `production-log.${format}`);
+  },
+  exportCsv(query: string) {
+    return productionApi.exportLog(query, "csv");
+  },
+  importTemplate(department: ProductionDepartment, format: "xlsx" | "csv") {
+    return downloadFile(`/api/production/entries/import-template?department=${department}&format=${format}`, `production-${department}-template.${format}`);
+  },
+  async importFile(department: ProductionDepartment, file: File, factory: string) {
+    const body = new FormData();
+    body.set("department", department);
+    body.set("factory", factory);
+    body.set("file", file);
+    const response = await fetch(`${getBackendUrl()}/api/production/entries/import`, {
+      method: "POST",
+      headers: authHeaders(false),
+      body,
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error((json as { message?: string }).message || "Import failed");
+    return json as { success: boolean; createdCount: number; skippedCount: number; errorCount: number; errors: { row: number; message: string }[] };
+  },
+  exportDpr(query: string, format: "xlsx" | "csv" = "xlsx") {
+    const joiner = query.includes("?") ? "&" : "?";
+    const suffix = query ? `${query}${joiner}format=${format}` : `?format=${format}`;
+    return downloadFile(`/api/production/dpr/export${suffix}`, `daily-production-report.${format}`);
   },
 };
 
 export type DprRow = {
   date: string;
+  period?: string;
+  dateStart?: string;
+  dateEnd?: string;
+  batch?: string;
+  reactor?: string;
   factory: ProductionFactory;
   department: ProductionDepartment;
   shift: string;

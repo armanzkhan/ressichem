@@ -89,6 +89,41 @@ function canAlsoEnterLahoreEstimate(email) {
   return LAHORE_ESTIMATE_ALSO_EMAILS.some((item) => normalizeEmail(item) === value);
 }
 
+function normalizeProcureFrom(value) {
+  const chosen = String(value || "").trim().toLowerCase();
+  if (chosen === "karachi" || chosen === "khi") return "karachi";
+  if (chosen === "lahore" || chosen === "lhr") return "lahore";
+  return "";
+}
+
+/** maintenance@ stays on Khuzema → finance@ no matter which plant is chosen. */
+function requesterChainIgnoresProcureFrom(email) {
+  const chain = requesterApprovalChain(email);
+  return Boolean(chain?.departmentApproverEmail && !chain.skipFinance);
+}
+
+/**
+ * Approval route after a price is saved.
+ * An explicit Karachi or Lahore choice wins over the department name.
+ * Until a choice is stored, older requisitions keep the location-based route.
+ */
+function approvalRouteIsLahore(pr, requesterEmail) {
+  const email = normalizeEmail(requesterEmail || pr?.requestedBy?.email);
+  if (requesterChainIgnoresProcureFrom(email)) return false;
+  const chosen = normalizeProcureFrom(pr?.procureFrom);
+  if (chosen === "lahore") return true;
+  if (chosen === "karachi") return false;
+  return Boolean(pr?.lahoreFinalApproval) || isLahorePr(pr);
+}
+
+/** Where the goods are bought. Used for the purchase order plant, including maintenance@. */
+function recordedProcureIsLahore(pr) {
+  const chosen = normalizeProcureFrom(pr?.procureFrom);
+  if (chosen === "lahore") return true;
+  if (chosen === "karachi") return false;
+  return Boolean(pr?.lahoreFinalApproval) || isLahorePr(pr);
+}
+
 /** Finance stage for Lahore — always tahira@. */
 function lahoreFinanceStageDef() {
   return {
@@ -690,6 +725,10 @@ module.exports = {
   normalizeEmail,
   isLahoreLocation,
   isLahorePr,
+  normalizeProcureFrom,
+  approvalRouteIsLahore,
+  recordedProcureIsLahore,
+  requesterChainIgnoresProcureFrom,
   lahoreFinalApproverEmail,
   labApproverEmail,
   requesterApprovesOwnDepartments,

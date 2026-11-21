@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { DEPARTMENT_META, FACTORY_LABEL, productionApi, storedProductionDepartments, type ProductionDepartment, type ProductionFactory } from "@/lib/productionApi";
 import { procurementPanelClass } from "@/components/procurement/procurementTheme";
 
@@ -11,6 +12,7 @@ export default function ProductionDashboardPage() {
   >([]);
   const [error, setError] = useState("");
   const [departments, setDepartments] = useState<ProductionDepartment[]>(["zrs", "lms", "drymix", "bfs"]);
+  const router = useRouter();
 
   useEffect(() => {
     setDepartments(storedProductionDepartments());
@@ -79,7 +81,11 @@ export default function ProductionDashboardPage() {
               </tr>
             ) : (
               rows.map((row) => (
-                <tr key={`${row._id.factory}-${row._id.department}`} className="border-t border-blue-100 dark:border-slate-800">
+                <tr
+                  key={`${row._id.factory}-${row._id.department}`}
+                  className="cursor-pointer border-t border-blue-100 hover:bg-blue-50 dark:border-slate-800 dark:hover:bg-slate-800/80"
+                  onClick={() => router.push(`/production/${row._id.department}`)}
+                >
                   <td className="px-3 py-2">{FACTORY_LABEL[row._id.factory]}</td>
                   <td className="px-3 py-2">{DEPARTMENT_META[row._id.department]?.label}</td>
                   <td className="px-3 py-2">{row.count}</td>

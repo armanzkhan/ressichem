@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  DEPARTMENT_META,
   FACTORY_LABEL,
   productionApi,
   type LabRecord,
@@ -10,6 +11,11 @@ import {
   type ProductionEntry,
   type ProductionFactory,
 } from "@/lib/productionApi";
+import { ZRS_MATERIALS } from "@/data/zrsMaterials";
+import { LMS_MATERIALS } from "@/data/lmsMaterials";
+import { BFS_MATERIALS } from "@/data/bfsMaterials";
+import { MaterialPicker } from "@/components/production/MaterialPicker";
+import { Modal } from "@/components/procurement/procurement-ui";
 
 export const SHEET_META: Record<ProductionDepartment, { formatNo: string; title: string }> = {
   zrs: { formatNo: "PRD/FRM-001-01", title: "Process Log Sheet Reactors" },
@@ -20,7 +26,7 @@ export const SHEET_META: Record<ProductionDepartment, { formatNo: string; title:
 
 const PACK_TYPES = ["Can", "Bag", "Drum", "Bottle", "Bucket", "Set", "Kit"];
 
-type Line = { name: string; lotNumber: string; recipe: string; actual: string };
+type Line = { name: string; code: string; lotNumber: string; recipe: string; actual: string };
 type Temp = { time: string; reactorTemp: string; heatingTemp: string; coolingTemp: string; setPoint: string; pressure: string; remarks: string };
 
 type Draft = {
@@ -60,33 +66,61 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 function blankLine(): Line {
-  return { name: "", lotNumber: "", recipe: "", actual: "" };
+  return { name: "", code: "", lotNumber: "", recipe: "", actual: "" };
 }
 function blankTemp(): Temp {
   return { time: "", reactorTemp: "", heatingTemp: "", coolingTemp: "", setPoint: "", pressure: "", remarks: "" };
 }
-function pad<T>(rows: T[], size: number, make: () => T): T[] {
-  const next = rows.slice(0, size);
+function atLeast<T>(rows: T[], size: number, make: () => T): T[] {
+  const next = rows.slice();
   while (next.length < size) next.push(make());
   return next;
 }
+function extraMaterials(lines: Line[], catalog: { name: string }[]) {
+  const known = new Set(catalog.map((item) => item.name.trim().toLowerCase()));
+  return lines
+    .filter((line) => line.name.trim() && !known.has(line.name.trim().toLowerCase()))
+    .map((line) => ({ name: line.name.trim(), code: line.code || "" }));
+}
+
+function MaterialNameCell({
+  line,
+  items,
+  extras,
+  readOnly,
+  onChange,
+}: {
+  line: Line;
+  items: { name: string; code: string }[];
+  extras: { name: string; code: string }[];
+  readOnly?: boolean;
+  onChange: (next: { name: string; code: string }) => void;
+}) {
+  if (readOnly) {
+    return (
+      <span className="block px-1 py-0.5">
+        {line.name}
+        {line.code ? <span className="block text-[10px] leading-none text-slate-500">{line.code}</span> : null}
+      </span>
+    );
+  }
+  return <MaterialPicker name={line.name} code={line.code} items={items} extras={extras} onChange={onChange} />;
+}
+
 function dateOnly(value?: string) {
   if (!value) return "";
   return String(value).slice(0, 10);
 }
 
 function draftFromEntry(department: ProductionDepartment, entry?: ProductionEntry | null): Draft {
-  const lineCount = department === "lms" ? 15 : 6;
-  const lines = pad(
-    (entry?.materials || []).map((line) => ({
-      name: line.name || "",
-      lotNumber: line.lotNumber || "",
-      recipe: line.recipe || "",
-      actual: line.actual || (line.qtyConsumed ? String(line.qtyConsumed) : ""),
-    })),
-    lineCount,
-    blankLine
-  );
+  const mappedLines = (entry?.materials || []).map((line) => ({
+    name: line.name || "",
+    code: line.code || "",
+    lotNumber: line.lotNumber || "",
+    recipe: line.recipe || "",
+    actual: line.actual || (line.qtyConsumed ? String(line.qtyConsumed) : ""),
+  }));
+  const lines = department === "lms" ? atLeast(mappedLines, 15, blankLine) : atLeast(mappedLines, 10, blankLine);
   return {
     factory: entry?.factory || "hub",
     recordDate: dateOnly(entry?.recordDate) || today(),
@@ -112,7 +146,19 @@ function draftFromEntry(department: ProductionDepartment, entry?: ProductionEntr
     kitSizeKg: entry?.kitSizeKg ? String(entry.kitSizeKg) : "",
     kitQuantity: entry?.kitQuantity ? String(entry.kitQuantity) : "",
     lines,
-    tempLog: pad(entry?.tempLog || [], 8, blankTemp),
+    tempLog: atLeast(
+      (entry?.tempLog || []).map((row) => ({
+        time: row.time || "",
+        reactorTemp: row.reactorTemp || "",
+        heatingTemp: row.heatingTemp || "",
+        coolingTemp: row.coolingTemp || "",
+        setPoint: row.setPoint || "",
+        pressure: row.pressure || "",
+        remarks: row.remarks || "",
+      })),
+      8,
+      blankTemp
+    ),
     rawWeights: {
       mr: "", bg: "", ws: "", ws2: "", sg03: "", sg: "", mp: "", mPowder: "", massaNo: "",
       ...(entry?.rawWeights || {}),
@@ -274,6 +320,36 @@ export function ProcessSheetView({ entry }: { entry: ProductionEntry }) {
   );
 }
 
+export function SheetRecordDialog({
+  entry,
+  onClose,
+  onEdit,
+}: {
+  entry: ProductionEntry;
+  onClose: () => void;
+  onEdit?: () => void;
+}) {
+  const title = [
+    DEPARTMENT_META[entry.department]?.label,
+    FACTORY_LABEL[entry.factory],
+    entry.grade || entry.batchNumber || entry.resinBatch || "Record",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <Modal sheet title={title} onClose={onClose}>
+      {onEdit ? (
+        <div className="no-print mb-2 flex justify-end">
+          <button type="button" className="rounded bg-blue-700 px-3 py-1 text-sm text-white" onClick={onEdit}>
+            Edit
+          </button>
+        </div>
+      ) : null}
+      <ProcessSheetView entry={entry} />
+    </Modal>
+  );
+}
+
 export function ProcessSheetEditor({
   department,
   catalog,
@@ -378,6 +454,7 @@ export function ProcessSheetEditor({
         .filter((line) => line.name || line.lotNumber || line.recipe || line.actual)
         .map((line) => ({
           name: line.name,
+          code: line.code,
           lotNumber: line.lotNumber,
           recipe: line.recipe,
           actual: line.actual,
@@ -457,6 +534,7 @@ function ReactorBody({
     const lines = draft.lines.map((line, i) => (i === index ? { ...line, ...patch } : line));
     onChange?.({ lines });
   };
+  const customMaterials = extraMaterials(draft.lines, ZRS_MATERIALS);
   const setTemp = (index: number, patch: Partial<Temp>) => {
     const tempLog = draft.tempLog.map((row, i) => (i === index ? { ...row, ...patch } : row));
     onChange?.({ tempLog });
@@ -499,38 +577,56 @@ function ReactorBody({
             <tr><td className="border border-slate-500 px-2 py-1">W.O #</td><td className="border border-slate-500">{readOnly ? draft.workOrderNo || "—" : <input className={cellIn} value={draft.workOrderNo} onChange={(e) => onChange?.({ workOrderNo: e.target.value })} />}</td></tr>
           </tbody>
         </table>
-        <table className={`${box} w-full text-sm`}>
-          <thead><tr><th className="border border-slate-500 px-2 py-1">Material</th><th className="border border-slate-500 px-2 py-1">Recipe</th><th className="border border-slate-500 px-2 py-1">Actual</th></tr></thead>
-          <tbody>
-            {draft.lines.map((line, i) => (
-              <tr key={i}>
-                <td className="border border-slate-500">{readOnly ? line.name : <input className={cellIn} value={line.name} onChange={(e) => setLine(i, { name: e.target.value })} />}</td>
-                <td className="border border-slate-500">{readOnly ? line.recipe : <input className={cellIn} value={line.recipe} onChange={(e) => setLine(i, { recipe: e.target.value })} />}</td>
-                <td className="border border-slate-500">{readOnly ? line.actual : <input className={cellIn} value={line.actual} onChange={(e) => setLine(i, { actual: e.target.value })} />}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div>
+          <table className={`${box} w-full text-sm`}>
+            <thead><tr><th className="border border-slate-500 px-2 py-1">Item / Material Name</th><th className="border border-slate-500 px-2 py-1">Recipe</th><th className="border border-slate-500 px-2 py-1">Actual</th></tr></thead>
+            <tbody>
+              {draft.lines.map((line, i) => (
+                <tr key={i}>
+                  <td className="border border-slate-500">
+                    <MaterialNameCell
+                      line={line}
+                      items={ZRS_MATERIALS}
+                      extras={customMaterials}
+                      readOnly={readOnly}
+                      onChange={(next) => setLine(i, { name: next.name, code: next.code })}
+                    />
+                  </td>
+                  <td className="border border-slate-500">{readOnly ? line.recipe : <input className={cellIn} value={line.recipe} onChange={(e) => setLine(i, { recipe: e.target.value })} />}</td>
+                  <td className="border border-slate-500">{readOnly ? line.actual : <input className={cellIn} value={line.actual} onChange={(e) => setLine(i, { actual: e.target.value })} />}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!readOnly ? (
+            <button
+              type="button"
+              className="no-print mt-1 text-sm font-medium text-blue-800 underline"
+              onClick={() => onChange?.({ lines: [...draft.lines, blankLine()] })}
+            >
+              Add row
+            </button>
+          ) : null}
+        </div>
       </div>
       <table className={`${box} mt-2 w-full text-sm`}>
         <thead>
           <tr>
             <th className="border border-slate-500 px-2 py-1" rowSpan={2}>Time hh:mm</th>
-            <th className="border border-slate-500 px-2 py-1" colSpan={4}>Temperature °C</th>
+            <th className="border border-slate-500 px-2 py-1" colSpan={3}>Temperature °C</th>
             <th className="border border-slate-500 px-2 py-1" rowSpan={2}>Pressure mm Hg</th>
             <th className="border border-slate-500 px-2 py-1" rowSpan={2}>Remarks</th>
           </tr>
           <tr>
-            <th className="border border-slate-500 px-2 py-1">Reactor</th>
+            <th className="border border-slate-500 px-2 py-1">Reactor Temperature</th>
             <th className="border border-slate-500 px-2 py-1">Heating</th>
             <th className="border border-slate-500 px-2 py-1">Cooling</th>
-            <th className="border border-slate-500 px-2 py-1">Set Point</th>
           </tr>
         </thead>
         <tbody>
           {draft.tempLog.map((row, i) => (
             <tr key={i}>
-              {(["time", "reactorTemp", "heatingTemp", "coolingTemp", "setPoint", "pressure", "remarks"] as const).map((key) => (
+              {(["time", "reactorTemp", "heatingTemp", "coolingTemp", "pressure", "remarks"] as const).map((key) => (
                 <td key={key} className="border border-slate-500">
                   {readOnly ? row[key] : <input className={cellIn} value={row[key]} onChange={(e) => setTemp(i, { [key]: e.target.value })} />}
                 </td>
@@ -539,6 +635,15 @@ function ReactorBody({
           ))}
         </tbody>
       </table>
+      {!readOnly ? (
+        <button
+          type="button"
+          className="no-print mt-1 text-sm font-medium text-blue-800 underline"
+          onClick={() => onChange?.({ tempLog: [...draft.tempLog, blankTemp()] })}
+        >
+          Add row
+        </button>
+      ) : null}
       {!readOnly ? (
         <>
           <datalist id="sheet-grades">{(grades || []).map((g) => <option key={g} value={g} />)}</datalist>
@@ -554,6 +659,7 @@ function LmsBody({ draft, grades, onChange, readOnly }: { draft: Draft; grades?:
     const lines = draft.lines.map((line, i) => (i === index ? { ...line, ...patch } : line));
     onChange?.({ lines });
   };
+  const customMaterials = extraMaterials(draft.lines, LMS_MATERIALS);
   const field = (value: string, key: keyof Draft, list?: string) =>
     readOnly ? value || "—" : <input className="border-b border-slate-400 bg-transparent outline-none" list={list} value={value} onChange={(e) => onChange?.({ [key]: e.target.value })} />;
   return (
@@ -570,7 +676,7 @@ function LmsBody({ draft, grades, onChange, readOnly }: { draft: Draft; grades?:
         <thead>
           <tr>
             <th className="w-10 border border-slate-500 px-2 py-1">#</th>
-            <th className="border border-slate-500 px-2 py-1">Chemical Name</th>
+            <th className="border border-slate-500 px-2 py-1">Item / Material Name</th>
             <th className="border border-slate-500 px-2 py-1">Batch No</th>
             <th className="border border-slate-500 px-2 py-1">Recipe</th>
             <th className="border border-slate-500 px-2 py-1">Actual</th>
@@ -580,7 +686,15 @@ function LmsBody({ draft, grades, onChange, readOnly }: { draft: Draft; grades?:
           {draft.lines.map((line, i) => (
             <tr key={i}>
               <td className="border border-slate-500 px-2 text-center">{i + 1}</td>
-              <td className="border border-slate-500">{readOnly ? line.name : <input className={cellIn} value={line.name} onChange={(e) => setLine(i, { name: e.target.value })} />}</td>
+              <td className="border border-slate-500">
+                <MaterialNameCell
+                  line={line}
+                  items={LMS_MATERIALS}
+                  extras={customMaterials}
+                  readOnly={readOnly}
+                  onChange={(next) => setLine(i, { name: next.name, code: next.code })}
+                />
+              </td>
               <td className="border border-slate-500">{readOnly ? line.lotNumber : <input className={cellIn} value={line.lotNumber} onChange={(e) => setLine(i, { lotNumber: e.target.value })} />}</td>
               <td className="border border-slate-500">{readOnly ? line.recipe : <input className={cellIn} value={line.recipe} onChange={(e) => setLine(i, { recipe: e.target.value })} />}</td>
               <td className="border border-slate-500">{readOnly ? line.actual : <input className={cellIn} value={line.actual} onChange={(e) => setLine(i, { actual: e.target.value })} />}</td>
@@ -588,12 +702,26 @@ function LmsBody({ draft, grades, onChange, readOnly }: { draft: Draft; grades?:
           ))}
         </tbody>
       </table>
+      {!readOnly ? (
+        <button
+          type="button"
+          className="no-print mt-1 text-sm font-medium text-blue-800 underline"
+          onClick={() => onChange?.({ lines: [...draft.lines, blankLine()] })}
+        >
+          Add row
+        </button>
+      ) : null}
       {!readOnly ? <datalist id="lms-grades">{(grades || []).map((g) => <option key={g} value={g} />)}</datalist> : null}
     </>
   );
 }
 
 function DrymixBody({ draft, grades, onChange, readOnly }: { draft: Draft; grades?: string[]; onChange?: (patch: Partial<Draft>) => void; readOnly?: boolean }) {
+  const customMaterials = extraMaterials(draft.lines, LMS_MATERIALS);
+  const setLine = (index: number, patch: Partial<Line>) => {
+    const lines = draft.lines.map((line, i) => (i === index ? { ...line, ...patch } : line));
+    onChange?.({ lines });
+  };
   const w = (key: string) =>
     readOnly ? draft.rawWeights[key] || "" : (
       <input className="w-16 border-b border-slate-500 bg-transparent text-center outline-none" value={draft.rawWeights[key] || ""} onChange={(e) => onChange?.({ rawWeights: { ...draft.rawWeights, [key]: e.target.value } })} />
@@ -647,6 +775,39 @@ function DrymixBody({ draft, grades, onChange, readOnly }: { draft: Draft; grade
           <p>Remarks {q("remarks")}</p>
         </div>
       </div>
+      <table className={`${box} w-full text-sm`}>
+        <thead>
+          <tr>
+            <th className="w-10 border border-slate-500 px-2 py-1">#</th>
+            <th className="border border-slate-500 px-2 py-1">Item / Material Name</th>
+            <th className="border border-slate-500 px-2 py-1">Recipe</th>
+            <th className="border border-slate-500 px-2 py-1">Actual</th>
+          </tr>
+        </thead>
+        <tbody>
+          {draft.lines.map((line, i) => (
+            <tr key={i}>
+              <td className="border border-slate-500 px-2 text-center">{i + 1}</td>
+              <td className="border border-slate-500">
+                <MaterialNameCell
+                  line={line}
+                  items={LMS_MATERIALS}
+                  extras={customMaterials}
+                  readOnly={readOnly}
+                  onChange={(next) => setLine(i, { name: next.name, code: next.code })}
+                />
+              </td>
+              <td className="border border-slate-500">{readOnly ? line.recipe : <input className={cellIn} value={line.recipe} onChange={(e) => setLine(i, { recipe: e.target.value })} />}</td>
+              <td className="border border-slate-500">{readOnly ? line.actual : <input className={cellIn} value={line.actual} onChange={(e) => setLine(i, { actual: e.target.value })} />}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!readOnly ? (
+        <button type="button" className="no-print text-sm font-medium text-blue-800 underline" onClick={() => onChange?.({ lines: [...draft.lines, blankLine()] })}>
+          Add row
+        </button>
+      ) : null}
       <div className={`${box} p-2`}>
         <p className="mb-2 font-semibold">Packaging Detail</p>
         <div className="mb-2 flex flex-wrap gap-3">
@@ -707,6 +868,7 @@ function BfsBody({
     const lines = draft.lines.map((line, i) => (i === index ? { ...line, ...patch } : line));
     onChange?.({ lines });
   };
+  const customMaterials = extraMaterials(draft.lines, BFS_MATERIALS);
   const text = (value: string, key: keyof Draft, list?: string) =>
     readOnly ? value || "—" : <input className={cellIn} list={list} value={value} onChange={(e) => onChange?.({ [key]: e.target.value })} />;
   const output =
@@ -778,7 +940,7 @@ function BfsBody({
         <thead>
           <tr>
             <th className="w-10 border border-slate-500 px-2 py-1">#</th>
-            <th className="border border-slate-500 px-2 py-1">Material</th>
+            <th className="border border-slate-500 px-2 py-1">Item / Material Name</th>
             <th className="border border-slate-500 px-2 py-1">Lot / batch</th>
             <th className="border border-slate-500 px-2 py-1">Recipe</th>
             <th className="border border-slate-500 px-2 py-1">Actual</th>
@@ -788,7 +950,15 @@ function BfsBody({
           {draft.lines.map((line, i) => (
             <tr key={i}>
               <td className="border border-slate-500 px-2 text-center">{i + 1}</td>
-              <td className="border border-slate-500">{readOnly ? line.name : <input className={cellIn} value={line.name} onChange={(e) => setLine(i, { name: e.target.value })} />}</td>
+              <td className="border border-slate-500">
+                <MaterialNameCell
+                  line={line}
+                  items={BFS_MATERIALS}
+                  extras={customMaterials}
+                  readOnly={readOnly}
+                  onChange={(next) => setLine(i, { name: next.name, code: next.code })}
+                />
+              </td>
               <td className="border border-slate-500">{readOnly ? line.lotNumber : <input className={cellIn} value={line.lotNumber} onChange={(e) => setLine(i, { lotNumber: e.target.value })} />}</td>
               <td className="border border-slate-500">{readOnly ? line.recipe : <input className={cellIn} value={line.recipe} onChange={(e) => setLine(i, { recipe: e.target.value })} />}</td>
               <td className="border border-slate-500">{readOnly ? line.actual : <input className={cellIn} value={line.actual} onChange={(e) => setLine(i, { actual: e.target.value })} />}</td>
@@ -796,6 +966,15 @@ function BfsBody({
           ))}
         </tbody>
       </table>
+      {!readOnly ? (
+        <button
+          type="button"
+          className="no-print mt-1 text-sm font-medium text-blue-800 underline"
+          onClick={() => onChange?.({ lines: [...draft.lines, blankLine()] })}
+        >
+          Add row
+        </button>
+      ) : null}
       {!readOnly ? (
         <>
           <datalist id="bfs-grades">{(grades || []).map((g) => <option key={g} value={g} />)}</datalist>

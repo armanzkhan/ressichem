@@ -10,6 +10,7 @@ const {
   corporateStagesForOptions,
   requesterApprovalChain,
   isLahorePr,
+  approvalRouteIsLahore,
   lahoreFinalApproverEmail,
   estimateEmailsForPr,
 } = require("./procurementPrRouting");
@@ -29,13 +30,14 @@ async function resolveUserIdByEmail(company_id, email) {
 
 function approvalOptionsFromPr(pr, requesterEmail) {
   const chainKey = String(pr?.approvalChain || "").toLowerCase();
-  const chain = requesterApprovalChain(requesterEmail);
+  const email = normalizeEmail(requesterEmail || pr?.requestedBy?.email);
+  const chain = requesterApprovalChain(email);
   // maintenance@ : price → Khuzema → finance@. Location must not switch this to Lab or Tahira.
   if (chain?.departmentApproverEmail && !chain.skipFinance) {
     return { skipFinance: false, labThenFinance: false };
   }
-  // Sticky flag from submit wins; also re-detect from location/title/dept.
-  const lahore = Boolean(pr?.lahoreFinalApproval) || isLahorePr(pr);
+  // A saved Karachi/Lahore choice wins. Older requisitions still follow location.
+  const lahore = approvalRouteIsLahore(pr, email);
   const tahira = lahoreFinalApproverEmail();
   const lahoreOpts = lahore
     ? {
@@ -52,7 +54,7 @@ function approvalOptionsFromPr(pr, requesterEmail) {
       skipFinance: false,
       // Khuzema is the maintenance approver. A PR he creates and approves
       // does not wait for a second Lab approval.
-      requesterSkipsLab: normalizeEmail(requesterEmail) === "khuzema@ressichem.com",
+      requesterSkipsLab: email === "khuzema@ressichem.com",
       ...(lahore ? lahoreOpts : {}),
     };
   }

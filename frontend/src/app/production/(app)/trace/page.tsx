@@ -3,8 +3,60 @@
 import React, { useEffect, useState } from "react";
 import { DEPARTMENT_META, FACTORY_LABEL, productionApi, type ProductionEntry } from "@/lib/productionApi";
 import { procurementFieldClass, procurementPanelClass } from "@/components/procurement/procurementTheme";
+import { SheetRecordDialog } from "@/components/production/ProcessSheets";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-function LineList({ title, rows }: { title: string; rows: ProductionEntry[] }) {
+function outputBy(rows: ProductionEntry[], key: (row: ProductionEntry) => string) {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const name = key(row) || "—";
+    map.set(name, (map.get(name) || 0) + (Number(row.outputKg) || 0));
+  }
+  return [...map.entries()]
+    .map(([name, Output]) => ({ name, Output }))
+    .sort((a, b) => b.Output - a.Output)
+    .slice(0, 12);
+}
+
+function TraceCharts({ title, rows }: { title: string; rows: ProductionEntry[] }) {
+  const byDept = outputBy(rows, (row) => DEPARTMENT_META[row.department]?.short || row.department);
+  const byGrade = outputBy(rows, (row) => row.grade || row.batchNumber || "—");
+  if (!rows.length) return null;
+  return (
+    <div className="grid gap-3 lg:grid-cols-2">
+      <section className={`${procurementPanelClass} p-3`}>
+        <h3 className="mb-2 text-sm font-semibold text-blue-950 dark:text-blue-50">{title} by department</h3>
+        <div className="h-64 overflow-hidden">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={byDept}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip />
+              <Bar dataKey="Output" fill="#1d4ed8" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+      <section className={`${procurementPanelClass} p-3`}>
+        <h3 className="mb-2 text-sm font-semibold text-blue-950 dark:text-blue-50">{title} by grade</h3>
+        <div className="overflow-hidden" style={{ height: Math.max(220, byGrade.length * 36) }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={byGrade} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.3} horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11 }} />
+              <YAxis type="category" dataKey="name" width={148} tick={{ fontSize: 11 }} />
+              <Tooltip />
+              <Bar dataKey="Output" fill="#0f766e" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function LineList({ title, rows, onOpen }: { title: string; rows: ProductionEntry[]; onOpen: (row: ProductionEntry) => void }) {
   return (
     <section className={`${procurementPanelClass} p-3`}>
       <h3 className="mb-2 font-semibold text-blue-950 dark:text-blue-50">
@@ -15,7 +67,12 @@ function LineList({ title, rows }: { title: string; rows: ProductionEntry[] }) {
       ) : (
         <ul className="space-y-2">
           {rows.map((row) => (
-            <li key={row._id} className="rounded-lg border border-blue-100 px-3 py-2 text-sm dark:border-slate-700">
+            <li key={row._id}>
+              <button
+                type="button"
+                className="w-full rounded-lg border border-blue-100 px-3 py-2 text-left text-sm hover:bg-blue-50 dark:border-slate-700 dark:hover:bg-slate-800"
+                onClick={() => onOpen(row)}
+              >
               <p className="font-semibold text-blue-950 dark:text-blue-50">
                 {DEPARTMENT_META[row.department]?.label} · {FACTORY_LABEL[row.factory]} · {row.grade}
               </p>
@@ -50,6 +107,7 @@ function LineList({ title, rows }: { title: string; rows: ProductionEntry[] }) {
                 </p>
               ) : null}
               {row.processNotes ? <p className="mt-1 text-xs text-blue-700 dark:text-blue-200">{row.processNotes}</p> : null}
+              </button>
             </li>
           ))}
         </ul>
@@ -64,6 +122,7 @@ export default function TraceabilityPage() {
   const [recent, setRecent] = useState<ProductionEntry[]>([]);
   const [production, setProduction] = useState<ProductionEntry[] | null>(null);
   const [packing, setPacking] = useState<ProductionEntry[] | null>(null);
+  const [viewing, setViewing] = useState<ProductionEntry | null>(null);
 
   useEffect(() => {
     productionApi
@@ -138,15 +197,17 @@ export default function TraceabilityPage() {
         <p className="text-sm text-blue-700 dark:text-blue-200">No saved batches to trace yet.</p>
       )}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {production ? <TraceCharts title="Traced output" rows={production} /> : <TraceCharts title="Saved output" rows={recent} />}
       {!production && !packing && !error ? (
         <p className="text-sm text-blue-700 dark:text-blue-200">Choose a saved batch, or type a batch, lot, grade, or material, then press Trace.</p>
       ) : null}
       {production && packing ? (
         <>
-          <LineList title="Production batches" rows={production} />
-          <LineList title="Packing entries" rows={packing} />
+          <LineList title="Production batches" rows={production} onOpen={setViewing} />
+          <LineList title="Packing entries" rows={packing} onOpen={setViewing} />
         </>
       ) : null}
+      {viewing ? <SheetRecordDialog entry={viewing} onClose={() => setViewing(null)} /> : null}
     </div>
   );
 }

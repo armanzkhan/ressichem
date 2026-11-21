@@ -3,6 +3,7 @@ const path = require("path");
 const ProductionEntry = require("../models/ProductionEntry");
 const { productionDepartmentsForUser } = require("../utils/productionAccess");
 const { attachLabLinks, loadLabByBatch, applyLaboratoryResult, countsAsPendingLab } = require("../services/productionLabLink");
+const sheetFile = require("../utils/productionSpreadsheet");
 
 const DEPARTMENTS = new Set(["zrs", "lms", "drymix", "bfs"]);
 const FACTORIES = new Set(["hub", "site", "lahore"]);
@@ -47,6 +48,38 @@ function dayKey(date) {
   return d.toISOString().slice(0, 10);
 }
 
+function monthKey(date) {
+  return dayKey(date).slice(0, 7);
+}
+
+function dmy(iso) {
+  const [year, month, day] = String(iso || "").split("-");
+  return year && month && day ? `${day}-${month}-${year}` : "";
+}
+
+function weekBounds(date) {
+  const day = dayKey(date);
+  if (!day) return { start: "", end: "" };
+  const utc = new Date(`${day}T00:00:00Z`);
+  const weekday = utc.getUTCDay() || 7;
+  const start = new Date(utc);
+  start.setUTCDate(utc.getUTCDate() - (weekday - 1));
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+}
+
+function weekLabel(date) {
+  const bounds = weekBounds(date);
+  if (!bounds.start) return "";
+  return `${dmy(bounds.start)} to ${dmy(bounds.end)}`;
+}
+
+function reportMode(req) {
+  const mode = String(req.query.group || "daily");
+  return ["daily", "batch", "reactor", "grade", "reactor-batch", "weekly", "monthly"].includes(mode) ? mode : "daily";
+}
+
 const SCOPE_MESSAGE = "This account cannot open that production log.";
 
 function guardProduction(req, res, department) {
@@ -89,6 +122,12 @@ function listFilter(req) {
     q.hardenerBatch = new RegExp(String(hardenerBatch).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
   }
   if (kitSize) q.kitSizeKg = num(kitSize);
+  const ids = String(req.query.ids || "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => /^[a-f0-9]{24}$/i.test(id))
+    .slice(0, 500);
+  if (ids.length) q._id = { $in: ids };
   const start = parseDate(from);
   const end = parseDate(to);
   if (start || end) {
@@ -446,66 +485,156 @@ exports.summary = async (req, res) => {
   }
 };
 
+async function buildDpr(req) {
+  const filter = listFilter(req);
+  const allowed = productionDepartmentsForUser(req.user);
+  if (typeof filter.department === "string" && !allowed.includes(filter.department)) {
+    const error = new Error(SCOPE_MESSAGE);
+    error.status = 403;
+    throw error;
+  }
+  if (!filter.department) filter.department = { $in: allowed };
+  const company_id = getCompanyId(req);
+  const rows = await ProductionEntry.find(filter).sort({ recordDate: 1 }).lean();
+  const linked = await attachLabLinks(company_id, rows);
+  const mode = reportMode(req);
+  const groups = new Map();
+  for (const row of linked) {
+    const batch = row.department === "bfs" ? [row.resinBatch, row.hardenerBatch].filter(Boolean).join(" / ") || "—" : row.batchNumber || "—";
+    const reactor = row.reactor || "—";
+    const grade = row.grade || "—";
+    const machine = row.machine || "—";
+    const operatorName = String(row.operator || row.chargingOperator || "").trim();
+    const shift = row.shift || "—";
+    const day = dayKey(row.recordDate);
+    const week = weekBounds(row.recordDate);
+    const month = monthKey(row.recordDate);
+    const place = row.department === "zrs" ? reactor : machine;
+    let key = [day, row.factory, row.department, shift, grade, place].join("|");
+    let period = day;
+    if (mode === "batch") key = [row.factory, row.department, batch].join("|");
+    if (mode === "reactor") key = [row.factory, row.department, reactor].join("|");
+    if (mode === "grade") key = [row.factory, row.department, grade].join("|");
+    if (mode === "reactor-batch") key = [row.factory, row.department, reactor, batch, grade].join("|");
+    if (mode === "weekly") {
+      key = [week.start, row.factory, row.department, reactor].join("|");
+      period = weekLabel(row.recordDate);
+    }
+    if (mode === "monthly") {
+      key = [month, row.factory, row.department].join("|");
+      period = month;
+    }
+    if (!groups.has(key)) {
+      groups.set(key, {
+        period,
+        dateStart: mode === "weekly" ? week.start : day,
+        dateEnd: mode === "weekly" ? week.end : day,
+        factory: row.factory,
+        department: row.department,
+        shiftList: [],
+        gradeList: [],
+        batchList: [],
+        reactorList: [],
+        machineList: [],
+        records: 0,
+        plannedQtyKg: 0,
+        outputKg: 0,
+        packingKg: 0,
+        materialConsumed: 0,
+        wastageKg: 0,
+        rejectedKg: 0,
+        reworkKg: 0,
+        downtimeMinutes: 0,
+        wipOpeningKg: 0,
+        wipClosingKg: 0,
+        pendingQc: 0,
+        operators: [],
+      });
+    }
+    const g = groups.get(key);
+    if (mode !== "weekly") {
+      if (day && (!g.dateStart || day < g.dateStart)) g.dateStart = day;
+      if (day && day > g.dateEnd) g.dateEnd = day;
+    }
+    if (shift !== "—" && !g.shiftList.includes(shift)) g.shiftList.push(shift);
+    if (grade !== "—" && !g.gradeList.includes(grade)) g.gradeList.push(grade);
+    if (batch !== "—" && !g.batchList.includes(batch)) g.batchList.push(batch);
+    if (reactor !== "—" && !g.reactorList.includes(reactor)) g.reactorList.push(reactor);
+    if (machine !== "—" && !g.machineList.includes(machine)) g.machineList.push(machine);
+    if (operatorName && !g.operators.includes(operatorName)) g.operators.push(operatorName);
+    g.records += 1;
+    g.plannedQtyKg += num(row.plannedQtyKg);
+    g.outputKg += num(row.outputKg);
+    if (row.department === "bfs") g.packingKg += num(row.outputKg);
+    g.materialConsumed += (row.materials || []).reduce((sum, line) => sum + num(line.qtyConsumed), 0);
+    g.wastageKg += num(row.wastageKg);
+    g.rejectedKg += num(row.rejectedKg);
+    g.reworkKg += num(row.reworkKg);
+    g.downtimeMinutes += num(row.downtimeMinutes);
+    g.wipOpeningKg += num(row.wipOpeningKg);
+    g.wipClosingKg += num(row.wipClosingKg);
+    if (countsAsPendingLab(row.qcStatus)) g.pendingQc += 1;
+  }
+  return [...groups.values()].map((g) => {
+    const span = g.dateStart && g.dateEnd && g.dateStart !== g.dateEnd ? `${g.dateStart} – ${g.dateEnd}` : g.dateStart || g.period;
+    return {
+      date: mode === "weekly" || mode === "monthly" ? g.period : mode === "daily" ? g.period : span,
+      period: g.period,
+      dateStart: g.dateStart,
+      dateEnd: g.dateEnd,
+      factory: g.factory,
+      department: g.department,
+      shift: g.shiftList.join(", ") || "—",
+      grade: g.gradeList.join(", ") || "—",
+      batch: g.batchList.join(", ") || "—",
+      reactor: g.reactorList.join(", ") || "—",
+      machine: g.machineList.join(", ") || "—",
+      records: g.records,
+      plannedQtyKg: g.plannedQtyKg,
+      outputKg: g.outputKg,
+      packingKg: g.packingKg,
+      materialConsumed: g.materialConsumed,
+      wastageKg: g.wastageKg,
+      rejectedKg: g.rejectedKg,
+      reworkKg: g.reworkKg,
+      downtimeMinutes: g.downtimeMinutes,
+      wipOpeningKg: g.wipOpeningKg,
+      wipClosingKg: g.wipClosingKg,
+      pendingQc: g.pendingQc,
+      operators: g.operators,
+      yieldPct: g.plannedQtyKg > 0 ? Math.round((g.outputKg / g.plannedQtyKg) * 1000) / 10 : null,
+    };
+  }).sort((a, b) => {
+    if (mode !== "weekly" && mode !== "monthly" && mode !== "daily") return 0;
+    return String(a.dateStart || "").localeCompare(String(b.dateStart || "")) || String(a.department).localeCompare(String(b.department));
+  });
+}
+
 exports.dpr = async (req, res) => {
   try {
     const allowed = guardProduction(req, res);
     if (!allowed) return;
-    const filter = listFilter(req);
-    if (typeof filter.department === "string" && !allowed.includes(filter.department)) {
-      return res.status(403).json({ success: false, message: SCOPE_MESSAGE });
-    }
-    if (!filter.department) filter.department = { $in: allowed };
-    const company_id = getCompanyId(req);
-    const rows = await ProductionEntry.find(filter).sort({ recordDate: 1 }).lean();
-    const linked = await attachLabLinks(company_id, rows);
-    const groups = new Map();
-    for (const row of linked) {
-      const key = [dayKey(row.recordDate), row.factory, row.department, row.shift || "—", row.grade || "—", row.machine || row.reactor || "—"].join("|");
-      if (!groups.has(key)) {
-        groups.set(key, {
-          date: dayKey(row.recordDate),
-          factory: row.factory,
-          department: row.department,
-          shift: row.shift || "—",
-          grade: row.grade || "—",
-          machine: row.machine || row.reactor || "—",
-          records: 0,
-          plannedQtyKg: 0,
-          outputKg: 0,
-          packingKg: 0,
-          materialConsumed: 0,
-          wastageKg: 0,
-          rejectedKg: 0,
-          reworkKg: 0,
-          downtimeMinutes: 0,
-          wipOpeningKg: 0,
-          wipClosingKg: 0,
-          pendingQc: 0,
-          operators: [],
-        });
-      }
-      const g = groups.get(key);
-      g.records += 1;
-      g.plannedQtyKg += num(row.plannedQtyKg);
-      g.outputKg += num(row.outputKg);
-      if (row.department === "bfs") g.packingKg += num(row.outputKg);
-      g.materialConsumed += (row.materials || []).reduce((sum, line) => sum + num(line.qtyConsumed), 0);
-      g.wastageKg += num(row.wastageKg);
-      g.rejectedKg += num(row.rejectedKg);
-      g.reworkKg += num(row.reworkKg);
-      g.downtimeMinutes += num(row.downtimeMinutes);
-      g.wipOpeningKg += num(row.wipOpeningKg);
-      g.wipClosingKg += num(row.wipClosingKg);
-      if (countsAsPendingLab(row.qcStatus)) g.pendingQc += 1;
-      if (row.operator && !g.operators.includes(row.operator)) g.operators.push(row.operator);
-    }
-    const data = [...groups.values()].map((g) => ({
-      ...g,
-      yieldPct: g.plannedQtyKg > 0 ? Math.round((g.outputKg / g.plannedQtyKg) * 1000) / 10 : null,
-    }));
+    const data = await buildDpr(req);
     return res.json({ success: true, data });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+    return res.status(err.status || 500).json({ success: false, message: err.message });
+  }
+};
+
+exports.exportDpr = async (req, res) => {
+  try {
+    const allowed = guardProduction(req, res);
+    if (!allowed) return;
+    const format = String(req.query.format || "xlsx").toLowerCase() === "csv" ? "csv" : "xlsx";
+    const mode = reportMode(req);
+    const data = await buildDpr(req);
+    const buffer = sheetFile.buildSpreadsheetBuffer(sheetFile.dprRows(data), "Production report", format);
+    const type = format === "csv" ? "text/csv; charset=utf-8" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    res.setHeader("Content-Type", type);
+    res.setHeader("Content-Disposition", `attachment; filename=production-report-${mode}.${format}`);
+    return res.send(buffer);
+  } catch (err) {
+    return res.status(err.status || 500).json({ success: false, message: err.message });
   }
 };
 
@@ -558,65 +687,101 @@ exports.exportCsv = async (req, res) => {
       company_id,
       await ProductionEntry.find(filter).sort({ recordDate: -1 }).limit(5000).lean()
     );
-    const headers = [
-      "Date",
-      "Factory",
-      "Department",
-      "Grade",
-      "Batch",
-      "Reactor",
-      "Output KG",
-      "Planned KG",
-      "Shift",
-      "Operator",
-      "Supervisor",
-      "Resin batch",
-      "Hardener batch",
-      "Kit size KG",
-      "Kit quantity",
-      "QC status",
-      "Specification check",
-      "Laboratory report",
-      "Wastage KG",
-      "Rejected KG",
-      "Downtime min",
-      "Created by",
-    ];
-    const csv = [headers.join(",")]
-      .concat(
-        rows.map((row) =>
-          [
-            dayKey(row.recordDate),
-            row.factory,
-            row.department,
-            row.grade,
-            row.batchNumber,
-            row.reactor,
-            row.outputKg,
-            row.plannedQtyKg,
-            row.shift,
-            row.operator,
-            row.supervisor,
-            row.resinBatch,
-            row.hardenerBatch,
-            row.kitSizeKg,
-            row.kitQuantity,
-            row.qcStatus,
-            row.specCheck,
-            row.labReportRef,
-            row.wastageKg,
-            row.rejectedKg,
-            row.downtimeMinutes,
-            row.createdByName,
-          ]
-            .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
-            .join(",")
-        )
-      )
-      .join("\n");
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", "attachment; filename=production-log.csv");
-    return res.send(`\uFEFF${csv}`);
+    const format = String(req.query.format || "xlsx").toLowerCase() === "csv" ? "csv" : "xlsx";
+    const department = typeof filter.department === "string" ? filter.department : "";
+    const buffer = department
+      ? sheetFile.buildDepartmentBuffer(department, rows, format)
+      : sheetFile.buildSpreadsheetBuffer(rows.map(sheetFile.entryToRow), "Production log", format);
+    const type = format === "csv" ? "text/csv; charset=utf-8" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    const filename = department ? `production-${department}.${format}` : `production-log.${format}`;
+    res.setHeader("Content-Type", type);
+    res.setHeader("Content-Disposition", `attachment; filename=${filename}`);
+    return res.send(buffer);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.importTemplate = async (req, res) => {
+  try {
+    const department = String(req.query.department || "zrs");
+    const allowed = guardProduction(req, res, sheetFile.DEPARTMENTS.has(department) ? department : undefined);
+    if (!allowed) return;
+    const format = String(req.query.format || "xlsx").toLowerCase() === "csv" ? "csv" : "xlsx";
+    const sampleDepartment = sheetFile.DEPARTMENTS.has(department) ? department : "zrs";
+    const buffer = sheetFile.templateBuffer(sampleDepartment, format);
+    const type = format === "csv" ? "text/csv; charset=utf-8" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    res.setHeader("Content-Type", type);
+    res.setHeader("Content-Disposition", `attachment; filename=production-${sampleDepartment}-template.${format}`);
+    return res.send(buffer);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.importEntries = async (req, res) => {
+  try {
+    const allowed = guardProduction(req, res);
+    if (!allowed) return;
+    if (!req.file?.buffer) return res.status(400).json({ success: false, message: "Choose a CSV or Excel file" });
+    const fallbackDepartment = String(req.body?.department || req.query.department || "");
+    const fallbackFactory = String(req.body?.factory || req.query.factory || "");
+    const parsed = sheetFile.parseSpreadsheetBuffer(req.file.buffer, fallbackDepartment);
+    if (!parsed.length) return res.status(400).json({ success: false, message: "The file has no data rows" });
+    const company_id = getCompanyId(req);
+    const errors = [];
+    let createdCount = 0;
+    let skippedCount = 0;
+    for (const raw of parsed) {
+      const mapped = sheetFile.rowToEntry(raw, fallbackDepartment, fallbackFactory);
+      if (mapped.blank) continue;
+      if (mapped.example) {
+        skippedCount += 1;
+        continue;
+      }
+      if (!mapped.body.department || !allowed.includes(mapped.body.department)) {
+        errors.push({ row: mapped.__row, message: "Department is missing or this account cannot import that log" });
+        continue;
+      }
+      const message = validatePayload(mapped.body);
+      if (message) {
+        errors.push({ row: mapped.__row, message });
+        continue;
+      }
+      const recordDate = parseDate(mapped.body.recordDate);
+      const dayStart = new Date(recordDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(recordDate);
+      dayEnd.setHours(23, 59, 59, 999);
+      const duplicateQuery = {
+        company_id,
+        isActive: { $ne: false },
+        department: mapped.body.department,
+        recordDate: { $gte: dayStart, $lte: dayEnd },
+      };
+      if (mapped.body.department === "bfs") {
+        duplicateQuery.resinBatch = mapped.body.resinBatch;
+        duplicateQuery.hardenerBatch = mapped.body.hardenerBatch;
+      } else {
+        duplicateQuery.batchNumber = mapped.body.batchNumber;
+      }
+      const existing = await ProductionEntry.findOne(duplicateQuery).select("_id").lean();
+      if (existing) {
+        skippedCount += 1;
+        errors.push({ row: mapped.__row, message: "A record for this batch and date already exists" });
+        continue;
+      }
+      await ProductionEntry.create({
+        ...toDoc(mapped.body),
+        company_id,
+        createdBy: req.user?._id || req.user?.id,
+        createdByName: actorName(req.user),
+        updatedBy: req.user?._id || req.user?.id,
+        updatedByName: actorName(req.user),
+      });
+      createdCount += 1;
+    }
+    return res.json({ success: true, createdCount, skippedCount, errorCount: errors.length, errors });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }

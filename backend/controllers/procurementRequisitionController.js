@@ -1,5 +1,10 @@
 const PurchaseRequisition = require("../models/PurchaseRequisition");
-const { getCompanyId, nextDocumentNumber, computeLineTotals } = require("../utils/procurementHelpers");
+const {
+  getCompanyId,
+  nextDocumentNumber,
+  computeLineTotals,
+  preserveStoredUnitPrices,
+} = require("../utils/procurementHelpers");
 const {
   canApproveRequisitions,
   canCreatePurchaseOrders,
@@ -19,6 +24,9 @@ const {
   canAlsoEnterLahoreEstimate,
   corporateApproverStageForUser,
   isLahorePr,
+  normalizeProcureFrom,
+  approvalRouteIsLahore,
+  recordedProcureIsLahore,
   isLahorePlantScopedUser,
   ensureUserDepartment,
   lahoreFinalApproverEmail,
@@ -53,6 +61,7 @@ const {
   stripObsoleteBossApprovals,
   ensureHubFinanceApprover,
   approvalOptionsFromPr,
+  resolveRequesterEmail,
 } = require("../utils/procurementPrApprovals");
 const procurementPrNotificationService = require("../services/procurementPrNotificationService");
 const PurchaseOrder = require("../models/PurchaseOrder");
@@ -160,9 +169,7 @@ exports.list = async (req, res) => {
           corporateStage === "finance" &&
           normalizeEmail(req.user?.email) === lahoreFinalApproverEmail()
         ) {
-          const lahore =
-            Boolean(opts.lahoreFinalApproval || opts.lahoreFinalBoss) || isLahorePr(row);
-          if (!lahore) continue;
+          if (!approvalRouteIsLahore(row, row.requestedBy?.email)) continue;
         }
         data.push(row);
         seen.add(String(row._id));
@@ -177,13 +184,15 @@ exports.list = async (req, res) => {
       if (!open || !(row.approvals || []).length) continue;
       try {
         const hadSticky = Boolean(row.lahoreFinalApproval);
-        const isLahore = hadSticky || isLahorePr(row);
-        if (isLahore) row.lahoreFinalApproval = true;
+        const routeLahore = approvalRouteIsLahore(row, row.requestedBy?.email);
+        const explicitKarachi = normalizeProcureFrom(row.procureFrom) === "karachi";
+        if (routeLahore) row.lahoreFinalApproval = true;
+        else if (explicitKarachi) row.lahoreFinalApproval = false;
         const stageOpts = await approvalOptionsForPrDoc(row);
         let approvals = row.approvals;
         let changed = false;
 
-        if (isLahore) {
+        if (routeLahore) {
           const repaired = await ensureLahoreBossApprover(company_id, approvals, stageOpts);
           approvals = repaired.approvals;
           changed = changed || repaired.reassigned;
@@ -196,8 +205,9 @@ exports.list = async (req, res) => {
           changed = changed || hubFinance.reassigned;
         }
 
-        const needsSticky = isLahore && !hadSticky;
-        if (!changed && !needsSticky) continue;
+        const needsSticky = routeLahore && !hadSticky;
+        const clearSticky = explicitKarachi && hadSticky;
+        if (!changed && !needsSticky && !clearSticky) continue;
 
         const nextStatus = deriveStatusAfterApprovals(approvals, stageOpts);
         const nextAssigned =
@@ -210,7 +220,8 @@ exports.list = async (req, res) => {
                 assignedApprover: nextAssigned,
               }
             : {}),
-          ...(needsSticky || isLahore ? { lahoreFinalApproval: true } : {}),
+          ...(needsSticky ? { lahoreFinalApproval: true } : {}),
+          ...(clearSticky ? { lahoreFinalApproval: false } : {}),
         };
         if (changed && nextStatus === "approved" && row.status !== "approved") {
           patch.status = "approved";
@@ -408,7 +419,8 @@ exports.update = async (req, res) => {
     delete updates.submittedAt;
     delete updates.requestedBy;
     if (body.items) {
-      const { items, subtotal } = computeLineTotals(body.items, body.exchangeRate ?? existing.exchangeRate);
+      const pricedItems = preserveStoredUnitPrices(existing.items, body.items);
+      const { items, subtotal } = computeLineTotals(pricedItems, body.exchangeRate ?? existing.exchangeRate);
       updates.items = items;
       updates.subtotal = subtotal;
       updates.taxAmount = Number(body.taxAmount) || 0;
@@ -787,9 +799,59 @@ exports.saveEstimatedPrices = async (req, res) => {
       });
     }
 
-    const remarks =
+    const requesterEmail = await resolveRequesterEmail(existing);
+    const rawSource = req.body?.procureFrom;
+    const rawText = rawSource === undefined || rawSource === null ? "" : String(rawSource).trim();
+    const incoming = normalizeProcureFrom(rawText);
+    if (rawText && !incoming) {
+      return res.status(400).json({
+        success: false,
+        message: "Procure from must be Karachi or Lahore",
+      });
+    }
+    const currentSource = normalizeProcureFrom(existing.procureFrom);
+    const sourceLocked = approvals.some((row) => {
+      if (approvalStage(row) === "estimate") return false;
+      return ["approved", "held", "rejected"].includes(String(row.status || "").toLowerCase());
+    });
+    let procureFrom = currentSource;
+    if (!revising) {
+      if (!incoming) {
+        return res.status(400).json({
+          success: false,
+          message: "Choose where this requisition will be procured: Karachi or Lahore",
+        });
+      }
+      procureFrom = incoming;
+    } else if (incoming && incoming !== currentSource) {
+      if (!currentSource) {
+        procureFrom = currentSource;
+      } else if (sourceLocked) {
+        return res.status(400).json({
+          success: false,
+          message: "Procure from is fixed after the next approver has acted",
+        });
+      } else {
+        procureFrom = incoming;
+      }
+    }
+    const chain = requesterApprovalChain(requesterEmail);
+    const ignoresLocation = Boolean(chain?.departmentApproverEmail && !chain.skipFinance);
+    let lahoreFinalApproval = Boolean(existing.lahoreFinalApproval);
+    if (procureFrom && ignoresLocation) lahoreFinalApproval = false;
+    else if (procureFrom) lahoreFinalApproval = procureFrom === "lahore";
+    const sourceChanged =
+      procureFrom !== currentSource || lahoreFinalApproval !== Boolean(existing.lahoreFinalApproval);
+    const sourceLabel = procureFrom === "lahore" ? "Lahore" : procureFrom === "karachi" ? "Karachi" : "";
+    const baseRemarks =
       String(req.body?.remarks || "").trim() ||
       (revising ? "Estimated prices revised" : "Estimated prices entered");
+    const remarks = sourceChanged && sourceLabel ? `${baseRemarks}. Procure from ${sourceLabel}` : baseRemarks;
+    const routedOpts = approvalOptionsFromPr(
+      { ...existing.toObject(), procureFrom, lahoreFinalApproval },
+      requesterEmail
+    );
+    const sourcePatch = sourceChanged ? { procureFrom, lahoreFinalApproval } : {};
     const pricedItems = items.map((line, index) => {
       const plain = typeof line.toObject === "function" ? line.toObject() : { ...line };
       const qty = Number(plain.quantity) || 0;
@@ -814,6 +876,7 @@ exports.saveEstimatedPrices = async (req, res) => {
               subtotal,
               total: Math.round((subtotal + taxAmount) * 100) / 100,
               ...(existing.purchaseType === "local" ? { currency: "PKR" } : {}),
+              ...sourcePatch,
             },
             $push: {
               decisionLog: {
@@ -833,7 +896,9 @@ exports.saveEstimatedPrices = async (req, res) => {
       return res.json({
         success: true,
         data,
-        message: "Estimated prices updated.",
+        message: sourceChanged && sourceLabel
+          ? `Estimated prices updated. Procure from ${sourceLabel}.`
+          : "Estimated prices updated.",
       });
     }
     for (const row of approvals) {
@@ -850,7 +915,7 @@ exports.saveEstimatedPrices = async (req, res) => {
       }
     }
 
-    const nextStatus = deriveStatusAfterApprovals(approvals, stageOpts);
+    const nextStatus = deriveStatusAfterApprovals(approvals, routedOpts);
     const data = await populateRequisitionAudit(
       PurchaseRequisition.findOneAndUpdate(
         { _id: existing._id, company_id },
@@ -860,9 +925,10 @@ exports.saveEstimatedPrices = async (req, res) => {
             subtotal,
             total: Math.round((subtotal + taxAmount) * 100) / 100,
             ...(existing.purchaseType === "local" ? { currency: "PKR" } : {}),
+            ...sourcePatch,
             approvals,
             status: nextStatus,
-            assignedApprover: firstPendingApproverId(approvals, stageOpts) || existing.assignedApprover,
+            assignedApprover: firstPendingApproverId(approvals, routedOpts) || existing.assignedApprover,
           },
           $push: {
             decisionLog: {
@@ -880,14 +946,16 @@ exports.saveEstimatedPrices = async (req, res) => {
       return res.status(400).json({ success: false, message: "Requisition not found or not waiting for a price" });
     }
 
-    const nextManager = firstPendingApproverId(approvals, stageOpts);
-    if (nextManager && getActionableApprovalStage(approvals, stageOpts) === "department") {
+    const nextManager = firstPendingApproverId(approvals, routedOpts);
+    if (nextManager && getActionableApprovalStage(approvals, routedOpts) === "department") {
       void procurementPrNotificationService.notifyPrSubmittedToApprovers(data, req.user, [nextManager]);
     }
     return res.json({
       success: true,
       data,
-      message: "Estimated prices saved. The requisition has moved to the next approver.",
+      message: sourceLabel
+        ? `Estimated prices saved. Procure from ${sourceLabel}. The requisition has moved to the next approver.`
+        : "Estimated prices saved. The requisition has moved to the next approver.",
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -967,9 +1035,7 @@ exports.approve = async (req, res) => {
 
     // Lahore → tahira@; Hub → drop obsolete Boss (zulfiqar@) rows.
     {
-      const isLahore =
-        Boolean(stageOpts.lahoreFinalBoss || stageOpts.lahoreFinalApproval) ||
-        isLahorePr(existing);
+      const isLahore = Boolean(stageOpts.lahoreFinalBoss || stageOpts.lahoreFinalApproval);
       if (isLahore) {
         const repaired = await ensureLahoreBossApprover(company_id, approvals, stageOpts);
         approvals = repaired.approvals;
@@ -1371,7 +1437,7 @@ exports.convertToPO = async (req, res) => {
       });
     }
 
-    if (isLahorePlantScopedUser(req.user) && !isLahorePr(pr) && !pr.lahoreFinalApproval) {
+    if (isLahorePlantScopedUser(req.user) && !recordedProcureIsLahore(pr)) {
       return res.status(403).json({
         success: false,
         message: "This buyer can only create purchase orders for Lahore requisitions",
@@ -1488,9 +1554,8 @@ exports.convertToPO = async (req, res) => {
 
     const poNumber = await nextDocumentNumber(PurchaseOrder, company_id, "PO");
     const lahorePo =
-      Boolean(pr.lahoreFinalApproval) ||
-      isLahorePr(pr) ||
-      isLahorePlantScopedUser(req.user);
+      recordedProcureIsLahore(pr) ||
+      (!String(pr.procureFrom || "").trim() && isLahorePlantScopedUser(req.user));
     const po = await PurchaseOrder.create({
       ...commercial,
       company_id,

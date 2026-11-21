@@ -79,7 +79,7 @@ function linesToPayload(lines: RequisitionLine[], items: ProcurementItem[]) {
       description: line.description,
       department: line.department.trim(),
       quantity: Number(line.quantity) || 0,
-      unitPrice: 0,
+      unitPrice: Number(line.unitPrice) || 0,
     };
   });
 }
@@ -174,6 +174,75 @@ function requesterEmailOf(row?: PurchaseDocument) {
   return String(owner.email || "").trim().toLowerCase();
 }
 
+function procureFromOf(row?: { procureFrom?: string }) {
+  const value = String(row?.procureFrom || "").trim().toLowerCase();
+  return value === "karachi" || value === "lahore" ? value : "";
+}
+
+function procureSourceLocked(row?: PurchaseDocument) {
+  return (row?.approvals || []).some((entry) => {
+    const stage = String(entry.stage || "department").toLowerCase();
+    if (stage === "estimate") return false;
+    const status = String(entry.status || "").toLowerCase();
+    return status === "approved" || status === "held" || status === "rejected";
+  });
+}
+
+/** Who may still choose Karachi or Lahore with the estimated price. */
+function canChooseProcureFrom(row?: PurchaseDocument) {
+  if (!row) return false;
+  if (estimateStageOpen(row)) return true;
+  return Boolean(procureFromOf(row) && !procureSourceLocked(row));
+}
+
+/**
+ * Approval route after the price. An explicit choice wins over the department name.
+ * maintenance@ stays on the Hub finance path.
+ */
+function approvalRouteIsLahore(row?: PurchaseDocument) {
+  if (requesterEmailOf(row) === "maintenance@ressichem.com") return false;
+  const chosen = procureFromOf(row);
+  if (chosen === "lahore") return true;
+  if (chosen === "karachi") return false;
+  return isLahorePr(row);
+}
+
+/** Khuzema and Lab approve a requisition they created, so Lab is not asked a second time. */
+function requesterCoversOwnLab(row?: PurchaseDocument) {
+  const email = requesterEmailOf(row);
+  return email === "khuzema@ressichem.com" || email === "lab@ressichem.com";
+}
+
+function procurePathNote(row: PurchaseDocument, choice: "" | "karachi" | "lahore") {
+  const email = requesterEmailOf(row);
+  if (email === "maintenance@ressichem.com") {
+    return "This requisition still goes to Khuzema, then finance@.";
+  }
+  const ownLab = requesterCoversOwnLab(row);
+  const who = email === "khuzema@ressichem.com" ? "Khuzema" : "Ali Baig";
+  if (!choice) {
+    return ownLab
+      ? `${who} approves the department on this requisition. Lab is not asked again. Karachi then goes to finance@. Lahore then goes to Tahira.`
+      : "Karachi follows the Hub path. Lahore follows the Lahore path.";
+  }
+  const lahore = choice === "lahore";
+  const chain = approvalChainKey(row);
+  if (chain === "skip_finance") {
+    return lahore ? "Final approval will be Tahira." : "Final approval will be Khuzema.";
+  }
+  if (ownLab) {
+    return lahore
+      ? `${who} approves the department he created. Lab is not asked again. Then Tahira.`
+      : `${who} approves the department he created. Lab is not asked again. Then finance@.`;
+  }
+  if (chain === "lab_then_finance") {
+    return lahore
+      ? "After the departments, Lab approves, then Tahira."
+      : "After the departments, Lab approves, then finance@.";
+  }
+  return lahore ? "After the departments, Tahira approves." : "After the departments, finance@ approves.";
+}
+
 function plannedCorporateStages(row: PurchaseDocument): Array<{
   stage: string;
   department: string;
@@ -183,7 +252,7 @@ function plannedCorporateStages(row: PurchaseDocument): Array<{
     return [{ stage: "finance", department: "Finance Manager", email: "finance@ressichem.com" }];
   }
   const chain = approvalChainKey(row);
-  const lahore = isLahorePr(row);
+  const lahore = approvalRouteIsLahore(row);
   const finance = lahore
     ? {
         stage: "finance",
@@ -195,7 +264,7 @@ function plannedCorporateStages(row: PurchaseDocument): Array<{
         department: "Finance Manager",
         email: "finance@ressichem.com",
       };
-  if (chain === "lab_then_finance") {
+  if (chain === "lab_then_finance" && !requesterCoversOwnLab(row)) {
     return [{ stage: "lab", department: "Lab", email: "lab@ressichem.com" }, finance];
   }
   if (chain === "skip_finance") {
@@ -239,6 +308,7 @@ function requisitionToForm(row: PurchaseDocument): {
       unit: item.unit || DEFAULT_ITEM_UNIT,
       description: item.description || item.itemName || "",
       department: item.department || (row.title || "").split(",")[0]?.trim() || "",
+      unitPrice: Number(item.unitPrice) > 0 ? Number(item.unitPrice) : undefined,
     })),
   };
 }
@@ -403,7 +473,7 @@ export function RequisitionsView({ section }: Props) {
     if (!canPriceThisPr(row) || estimateStageOpen(row) || !hasEstimateStage(row)) return false;
     const status = String(row.status || "").toLowerCase();
     if (!["submitted", "held", "partially_approved"].includes(status)) return false;
-    return (row.items || []).some((item) => Number(item.unitPrice) > 0);
+    return true;
   };
 
   const canEditEstimate = (row: PurchaseDocument) => canEnterEstimate(row) || canReviseEstimate(row);
@@ -473,6 +543,8 @@ export function RequisitionsView({ section }: Props) {
   const [estimateNotice, setEstimateNotice] = useState("");
   const [estimateRemarks, setEstimateRemarks] = useState("");
   const [savingEstimate, setSavingEstimate] = useState(false);
+  const [procurePrompt, setProcurePrompt] = useState(false);
+  const [procureChoice, setProcureChoice] = useState<"" | "karachi" | "lahore">("");
   const [reviewAction, setReviewAction] = useState<{
     id: string;
     type: "reject" | "hold" | "approve";
@@ -671,6 +743,8 @@ export function RequisitionsView({ section }: Props) {
       setEstimatePrices(pricesFromRequisition(res.data));
       setEstimateNotice("");
       setEstimateRemarks("");
+      setProcurePrompt(false);
+      setProcureChoice("");
       const next: Record<number, boolean> = {};
       (res.data.items || []).forEach((item, i) => {
         next[i] = lineOpenForPo(item);
@@ -684,13 +758,19 @@ export function RequisitionsView({ section }: Props) {
     }
   };
 
-  const saveEstimatedPrices = async () => {
+  const saveEstimatedPrices = async (procureFrom?: "karachi" | "lahore") => {
     if (!viewingRow || savingEstimate) return;
     const items = viewingRow.items || [];
     const lineUnitPrices = items.map((_, index) => parseEstimatePrice(estimatePrices[index] || ""));
     if (lineUnitPrices.some((price) => !(price > 0))) {
       setEstimateNotice("");
       setError("Enter an estimated unit price greater than 0 on every line");
+      return;
+    }
+    if (canChooseProcureFrom(viewingRow) && !procureFrom) {
+      setProcureChoice(procureFromOf(viewingRow));
+      setProcurePrompt(true);
+      setError("");
       return;
     }
     setSavingEstimate(true);
@@ -700,10 +780,12 @@ export function RequisitionsView({ section }: Props) {
       const res = await procurementApi.saveRequisitionEstimate(viewingRow._id, {
         lineUnitPrices,
         remarks: estimateRemarks,
+        ...(procureFrom ? { procureFrom } : {}),
       });
       setViewingRow(res.data);
       setEstimatePrices(pricesFromRequisition(res.data));
       setEstimateNotice(res.message || "Estimated prices saved.");
+      setProcurePrompt(false);
       await load();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not save the estimated prices";
@@ -1642,6 +1724,12 @@ export function RequisitionsView({ section }: Props) {
                 </p>
               ) : null}
             </div>
+            {procureFromOf(viewingRow) ? (
+              <p>
+                <span className="font-medium text-blue-900 dark:text-blue-200">Procure from:</span>{" "}
+                {procureFromOf(viewingRow) === "lahore" ? "Lahore" : "Karachi"}
+              </p>
+            ) : null}
             <p className="flex flex-wrap items-center gap-2">
               <span className="font-medium text-blue-900 dark:text-blue-200">Status:</span>{" "}
               <StatusBadge status={viewingRow.status} />
@@ -1686,14 +1774,18 @@ export function RequisitionsView({ section }: Props) {
               <div>
                 <p className="font-medium mb-2 text-blue-900 dark:text-blue-200">
                   {approvalChainKey(viewingRow) === "lab_then_finance"
-                    ? isLahorePr(viewingRow)
+                    ? requesterCoversOwnLab(viewingRow)
+                      ? approvalRouteIsLahore(viewingRow)
+                        ? "Approval chain (department → Lahore finance / Tahira). Lab is approved with the department."
+                        : "Approval chain (department → finance). Lab is approved with the department."
+                      : approvalRouteIsLahore(viewingRow)
                       ? "Approval chain (department → lab → Lahore finance / Tahira)"
                       : "Approval chain (department → lab → finance)"
                     : approvalChainKey(viewingRow) === "skip_finance"
-                      ? isLahorePr(viewingRow)
+                      ? approvalRouteIsLahore(viewingRow)
                         ? "Approval chain (department → Lahore final / Tahira)"
                         : "Approval chain (department → final approver)"
-                      : isLahorePr(viewingRow)
+                      : approvalRouteIsLahore(viewingRow)
                         ? "Approval chain (departments → Lahore finance / Tahira)"
                         : "Approval chain (departments → finance)"}
                 </p>
@@ -1750,30 +1842,35 @@ export function RequisitionsView({ section }: Props) {
                   <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                     {estimateStageOpen(viewingRow)
                       ? requesterEmailOf(viewingRow) === "maintenance@ressichem.com"
-                        ? "Waiting for an estimated price from salim@gmail.com, hanif@ressichem.com, or ahabib@ressichem.com. Then Khuzema (khuzema@ressichem.com) approves, then Finance (finance@ressichem.com)."
+                        ? "Waiting for an estimated price from salim@gmail.com, hanif@ressichem.com, or ahabib@ressichem.com. Saving the price asks Karachi or Lahore. Approval still goes to Khuzema, then finance@."
                         : isLahorePr(viewingRow)
-                        ? "Waiting for an estimated price. Rana Mehtab is assigned. salim@gmail.com, tahira@ressichem.com, hanif@ressichem.com, or ahabib@ressichem.com may also enter it. Then the assigned managers approve one at a time, then Lahore Finance (tahira@ressichem.com)."
-                        : "Waiting for procurement (salim@gmail.com, hanif@ressichem.com, or ahabib@ressichem.com) to enter the estimated price. Then the assigned managers approve one at a time, then Finance."
+                        ? "Waiting for an estimated price. Rana Mehtab is assigned. salim@gmail.com, tahira@ressichem.com, hanif@ressichem.com, or ahabib@ressichem.com may also enter it. Saving the price asks whether to procure from Karachi or Lahore."
+                        : "Waiting for procurement (salim@gmail.com, hanif@ressichem.com, or ahabib@ressichem.com) to enter the estimated price. Saving the price asks whether to procure from Karachi or Lahore."
                       : requesterEmailOf(viewingRow) === "maintenance@ressichem.com"
                         ? "Estimated price is saved. Khuzema (khuzema@ressichem.com) approves, then Finance (finance@ressichem.com)."
-                        : isLahorePr(viewingRow)
+                        : requesterCoversOwnLab(viewingRow)
+                        ? approvalRouteIsLahore(viewingRow)
+                          ? "Estimated price is saved. The creator approves the department. Lab is not asked again. Then Tahira (tahira@ressichem.com)."
+                          : "Estimated price is saved. The creator approves the department. Lab is not asked again. Then finance@."
+                        : approvalRouteIsLahore(viewingRow)
                         ? "Estimated price is saved. Managers approve one at a time, then Lahore Finance (tahira@ressichem.com)."
                         : "Estimated price is saved. Managers approve one at a time, then Finance."}
                   </p>
                 ) : null}
                 {approvalChainKey(viewingRow) === "lab_then_finance" &&
-                requesterEmailOf(viewingRow) !== "maintenance@ressichem.com" ? (
+                requesterEmailOf(viewingRow) !== "maintenance@ressichem.com" &&
+                !requesterCoversOwnLab(viewingRow) ? (
                   !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "lab") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                       After department manager approves → Lab, then{" "}
-                      {isLahorePr(viewingRow)
+                      {approvalRouteIsLahore(viewingRow)
                         ? "Lahore Finance (tahira@ressichem.com)."
                         : "Finance Manager."}
                     </p>
                   ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
                       After Lab approves →{" "}
-                      {isLahorePr(viewingRow)
+                      {approvalRouteIsLahore(viewingRow)
                         ? "Lahore Finance (tahira@ressichem.com) for final approval."
                         : "Finance Manager for final approval."}
                     </p>
@@ -1781,14 +1878,14 @@ export function RequisitionsView({ section }: Props) {
                 ) : approvalChainKey(viewingRow) === "skip_finance" ? (
                   !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "boss") ? (
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                      {isLahorePr(viewingRow)
+                      {approvalRouteIsLahore(viewingRow)
                         ? "After department approve → Lahore final (tahira@ressichem.com)."
                         : "After department approve → final approver (Finance skipped for this requester)."}
                     </p>
                   ) : null
                 ) : !viewingRow.approvals.some((a) => String(a.stage || "").toLowerCase() === "finance") ? (
                   <p className="mt-2 text-xs text-blue-600 dark:text-blue-300">
-                    {isLahorePr(viewingRow)
+                    {approvalRouteIsLahore(viewingRow)
                       ? "After all departments approve → Lahore Finance (tahira@ressichem.com)."
                       : "After all departments approve → Finance Manager (final)."}
                   </p>
@@ -1861,6 +1958,11 @@ export function RequisitionsView({ section }: Props) {
                   {error ? (
                     <p className="w-full rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-900 dark:border-red-700 dark:bg-red-950/40 dark:text-red-100">
                       {error}
+                    </p>
+                  ) : null}
+                  {canChooseProcureFrom(viewingRow) ? (
+                    <p className="w-full text-sm font-semibold text-blue-950 dark:text-blue-50">
+                      Saving asks where to procure this from: Karachi or Lahore.
                     </p>
                   ) : null}
                   <label className="w-full text-sm font-semibold text-blue-950 dark:text-blue-50">
@@ -2404,6 +2506,69 @@ export function RequisitionsView({ section }: Props) {
               </div>
             );
           })()}
+        </Modal>
+      ) : null}
+      {procurePrompt && viewingRow ? (
+        <Modal
+          title="Procure from"
+          stacked
+          onClose={() => {
+            if (!savingEstimate) setProcurePrompt(false);
+          }}
+        >
+          <div className="space-y-3">
+            <p className="text-sm text-blue-900 dark:text-blue-100">
+              Choose where this requisition will be procured. The next approver is notified after this choice.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {(["karachi", "lahore"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className={`rounded-lg border px-3 py-3 text-sm font-semibold ${
+                    procureChoice === option
+                      ? "border-blue-700 bg-blue-700 text-white"
+                      : "border-blue-300 bg-white text-blue-950 dark:border-slate-600 dark:bg-slate-900 dark:text-blue-50"
+                  }`}
+                  onClick={() => setProcureChoice(option)}
+                >
+                  {option === "karachi" ? "Karachi" : "Lahore"}
+                </button>
+              ))}
+            </div>
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              {procurePathNote(viewingRow, procureChoice)}
+            </p>
+            {error ? (
+              <p className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-900 dark:border-red-700 dark:bg-red-950/40 dark:text-red-100">
+                {error}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className={procurementSecondaryButtonClass}
+                disabled={savingEstimate}
+                onClick={() => setProcurePrompt(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-blue-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
+                disabled={savingEstimate || !procureChoice}
+                onClick={() => {
+                  if (procureChoice !== "karachi" && procureChoice !== "lahore") {
+                    setError("Choose Karachi or Lahore");
+                    return;
+                  }
+                  void saveEstimatedPrices(procureChoice);
+                }}
+              >
+                {savingEstimate ? "Saving…" : "Save and continue"}
+              </button>
+            </div>
+          </div>
         </Modal>
       ) : null}
       {followUpDraft ? (
