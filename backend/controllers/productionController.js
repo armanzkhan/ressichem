@@ -95,6 +95,36 @@ function guardProduction(req, res, department) {
   return allowed;
 }
 
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function exactText(value) {
+  return new RegExp(`^${escapeRegExp(String(value || "").trim())}$`, "i");
+}
+
+function uniqueSorted(values) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter((value) => value && value !== "—"))].sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+  );
+}
+
+function batchLabel(row) {
+  if (row?.department === "bfs") {
+    const pair = [row.resinBatch, row.hardenerBatch].map((value) => String(value || "").trim()).filter(Boolean).join(" / ");
+    return pair || String(row.batchNumber || "").trim();
+  }
+  return String(row?.batchNumber || "").trim();
+}
+
+function readCatalog() {
+  try {
+    return JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
 function listFilter(req) {
   const company_id = getCompanyId(req);
   const q = { company_id, isActive: { $ne: false } };
@@ -106,15 +136,31 @@ function listFilter(req) {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (grades.length === 1) q.grade = new RegExp(grades[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-  else if (grades.length > 1) q.grade = { $in: grades };
-  if (batch) q.batchNumber = new RegExp(String(batch).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  if (grades.length === 1) {
+    q.grade = req.query.gradeMatch === "partial" ? new RegExp(escapeRegExp(grades[0]), "i") : exactText(grades[0]);
+  } else if (grades.length > 1) q.grade = { $in: grades };
+  if (batch) {
+    const text = String(batch).trim();
+    const partial = req.query.batchMatch === "partial";
+    const pattern = (part) => (partial ? new RegExp(escapeRegExp(part), "i") : exactText(part));
+    if (text.includes(" / ")) {
+      const [resin, hardener] = text.split(" / ").map((part) => part.trim());
+      if (resin) q.resinBatch = pattern(resin);
+      if (hardener) q.hardenerBatch = pattern(hardener);
+    } else if (partial) {
+      const rx = pattern(text);
+      q.$or = [{ batchNumber: rx }, { resinBatch: rx }, { hardenerBatch: rx }];
+    } else {
+      q.batchNumber = pattern(text);
+    }
+  }
   const reactors = String(reactor || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (reactors.length === 1) q.reactor = reactors[0];
-  else if (reactors.length > 1) q.reactor = { $in: reactors };
+  if (reactors.length === 1) {
+    q.reactor = req.query.reactorMatch === "partial" ? new RegExp(escapeRegExp(reactors[0]), "i") : exactText(reactors[0]);
+  } else if (reactors.length > 1) q.reactor = { $in: reactors };
   if (shift) q.shift = String(shift);
   if (machine) q.machine = new RegExp(String(machine).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
   if (resinBatch) q.resinBatch = new RegExp(String(resinBatch).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
@@ -305,8 +351,45 @@ function cleanTempLog(rows) {
 
 exports.catalog = (_req, res) => {
   try {
-    const raw = fs.readFileSync(catalogPath, "utf8");
-    return res.json({ success: true, data: JSON.parse(raw) });
+    return res.json({ success: true, data: readCatalog() });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.filterChoices = async (req, res) => {
+  try {
+    const allowed = guardProduction(req, res);
+    if (!allowed) return;
+    const catalog = readCatalog();
+    const rows = await ProductionEntry.find({
+      company_id: getCompanyId(req),
+      isActive: { $ne: false },
+      department: { $in: allowed },
+    })
+      .select("department reactor grade batchNumber resinBatch hardenerBatch")
+      .lean();
+    const byDepartment = {};
+    for (const department of allowed) {
+      const own = rows.filter((row) => row.department === department);
+      const catalogGrades = Array.isArray(catalog.grades?.[department]) ? catalog.grades[department] : [];
+      const catalogReactors = department === "zrs" && Array.isArray(catalog.reactors) ? catalog.reactors : [];
+      byDepartment[department] = {
+        reactors: uniqueSorted([...catalogReactors, ...own.map((row) => row.reactor)]),
+        grades: uniqueSorted([...catalogGrades, ...own.map((row) => row.grade)]),
+        batches: uniqueSorted(own.map(batchLabel)),
+      };
+    }
+    const union = (key) => uniqueSorted(Object.values(byDepartment).flatMap((item) => item[key] || []));
+    return res.json({
+      success: true,
+      data: {
+        reactors: union("reactors"),
+        grades: union("grades"),
+        batches: union("batches"),
+        byDepartment,
+      },
+    });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -510,7 +593,8 @@ async function buildDpr(req) {
     const week = weekBounds(row.recordDate);
     const month = monthKey(row.recordDate);
     const place = row.department === "zrs" ? reactor : machine;
-    let key = [day, row.factory, row.department, shift, grade, place].join("|");
+    const kitLabel = num(row.kitSizeKg) > 0 ? String(num(row.kitSizeKg)) : "";
+    let key = [day, row.factory, row.department, shift, grade, place, kitLabel].join("|");
     let period = day;
     if (mode === "batch") key = [row.factory, row.department, batch].join("|");
     if (mode === "reactor") key = [row.factory, row.department, reactor].join("|");
@@ -536,6 +620,7 @@ async function buildDpr(req) {
         batchList: [],
         reactorList: [],
         machineList: [],
+        kitSizeList: [],
         records: 0,
         plannedQtyKg: 0,
         outputKg: 0,
@@ -561,6 +646,7 @@ async function buildDpr(req) {
     if (batch !== "—" && !g.batchList.includes(batch)) g.batchList.push(batch);
     if (reactor !== "—" && !g.reactorList.includes(reactor)) g.reactorList.push(reactor);
     if (machine !== "—" && !g.machineList.includes(machine)) g.machineList.push(machine);
+    if (kitLabel && !g.kitSizeList.includes(kitLabel)) g.kitSizeList.push(kitLabel);
     if (operatorName && !g.operators.includes(operatorName)) g.operators.push(operatorName);
     g.records += 1;
     g.plannedQtyKg += num(row.plannedQtyKg);
@@ -589,6 +675,7 @@ async function buildDpr(req) {
       batch: g.batchList.join(", ") || "—",
       reactor: g.reactorList.join(", ") || "—",
       machine: g.machineList.join(", ") || "—",
+      kitSize: g.kitSizeList.join(", ") || "—",
       records: g.records,
       plannedQtyKg: g.plannedQtyKg,
       outputKg: g.outputKg,

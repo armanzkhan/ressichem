@@ -295,6 +295,7 @@ function dprRows(groups) {
     Department: row.department,
     Shift: row.shift,
     Grade: row.grade,
+    "Kit size": row.kitSize && row.kitSize !== "—" ? row.kitSize : "",
     Batch: row.batch || "",
     Reactor: row.reactor || "",
     Machine: row.machine,

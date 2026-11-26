@@ -17,6 +17,8 @@ type Props = {
   className?: string;
   required?: boolean;
   disabled?: boolean;
+  /** Keep typed text that is not on the list, so the field can search as well as pick. */
+  freeText?: boolean;
 };
 
 export function SearchableSelect({
@@ -29,6 +31,7 @@ export function SearchableSelect({
   className = procurementControlClass,
   required,
   disabled,
+  freeText = false,
 }: Props) {
   const listId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,8 +41,10 @@ export function SearchableSelect({
   const selected = useMemo(() => options.find((o) => o.value === value), [options, value]);
 
   useEffect(() => {
-    setQuery(selected?.label || "");
-  }, [selected?.label, value]);
+    if (selected) setQuery(selected.label);
+    else if (freeText) setQuery(value || "");
+    else setQuery("");
+  }, [selected, value, freeText]);
 
   useEffect(() => {
     const onPointerDown = (e: MouseEvent) => {
@@ -70,16 +75,27 @@ export function SearchableSelect({
   const onInputChange = (text: string) => {
     setQuery(text);
     setOpen(true);
-    if (!text.trim()) onChange("");
+    if (!freeText) {
+      if (!text.trim()) onChange("");
+      return;
+    }
+    const match = options.find((option) => option.label.toLowerCase() === text.trim().toLowerCase());
+    onChange(match ? match.value : text);
   };
 
   const onBlur = () => {
     window.setTimeout(() => {
+      const typed = query.trim();
+      const match = options.find((o) => o.label.toLowerCase() === typed.toLowerCase());
+      if (freeText) {
+        onChange(match ? match.value : typed);
+        setOpen(false);
+        return;
+      }
       if (selected) {
         setQuery(selected.label);
-      } else if (value) {
-        const match = options.find((o) => o.label.toLowerCase() === query.trim().toLowerCase());
-        if (match) onChange(match.value);
+      } else if (value && match) {
+        onChange(match.value);
       } else {
         setQuery("");
       }
@@ -106,9 +122,11 @@ export function SearchableSelect({
         onBlur={onBlur}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
-            e.preventDefault();
             if (open && filtered.length === 1) {
+              e.preventDefault();
               pick(filtered[0].value);
+            } else if (!freeText) {
+              e.preventDefault();
             }
             return;
           }

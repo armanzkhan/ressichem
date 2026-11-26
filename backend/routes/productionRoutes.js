@@ -17,6 +17,7 @@ const upload = multer({
 router.use(authMiddleware);
 
 router.get("/catalog", ctrl.catalog);
+router.get("/filters", ctrl.filterChoices);
 router.get("/lab", ctrl.lab);
 router.get("/summary", ctrl.summary);
 router.get("/dpr", ctrl.dpr);

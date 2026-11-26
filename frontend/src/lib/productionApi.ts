@@ -185,6 +185,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const productionApi = {
   catalog: () => request<{ success: boolean; data: ProductionCatalog }>("/api/production/catalog"),
+  filters: () =>
+    request<{
+      success: boolean;
+      data: {
+        reactors: string[];
+        grades: string[];
+        batches: string[];
+        byDepartment: Record<string, { reactors: string[]; grades: string[]; batches: string[] }>;
+      };
+    }>("/api/production/filters"),
   me: () => request<{ success: boolean; data: { email: string; departments: ProductionDepartment[] } }>("/api/production/auth/me"),
   lab: (query: { department: ProductionDepartment; batchNumber?: string; resinBatch?: string; hardenerBatch?: string }) => {
     const p = new URLSearchParams();
@@ -261,6 +271,7 @@ export type DprRow = {
   shift: string;
   grade: string;
   machine: string;
+  kitSize?: string;
   records: number;
   plannedQtyKg: number;
   outputKg: number;

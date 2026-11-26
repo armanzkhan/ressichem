@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { DEPARTMENT_META, FACTORY_LABEL, productionApi, storedProductionDepartments, type DprRow, type ProductionDepartment, type ProductionEntry } from "@/lib/productionApi";
 import { procurementFieldClass, procurementLabelClass, procurementPanelClass } from "@/components/procurement/procurementTheme";
+import { SearchableSelect } from "@/components/procurement/SearchableSelect";
 import { Modal } from "@/components/procurement/procurement-ui";
 import { SheetRecordDialog } from "@/components/production/ProcessSheets";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -14,13 +15,13 @@ const REPORTS = [
   { id: "grade", label: "Grade-wise" },
   { id: "reactor-batch", label: "Reactor and batch" },
   { id: "weekly", label: "Weekly" },
-  { id: "monthly", label: "Monthly" },
+  // { id: "monthly", label: "Monthly" },
 ] as const;
 
 type ReportMode = (typeof REPORTS)[number]["id"];
 
 const LEAD: Record<ReportMode, string[]> = {
-  daily: ["Date", "Factory", "Dept", "Grade", "Reactor / Machine", "Operator"],
+  daily: ["Date", "Factory", "Dept", "Grade", "Reactor / Machine", "Operator", "Kit size"],
   batch: ["Dates", "Dept", "Batch", "Grade", "Reactor", "Operator"],
   reactor: ["Dates", "Dept", "Reactor", "Grade", "Operator"],
   grade: ["Dates", "Dept", "Grade", "Operator"],
@@ -96,12 +97,27 @@ function leadValues(report: ReportMode, row: DprRow) {
   if (report === "reactor-batch") return [row.date, dept, reactor, row.batch || "—", row.grade, operator];
   if (report === "weekly") return [row.date, dept, reactor, row.grade, operator];
   if (report === "monthly") return [row.date, dept, row.grade, operator];
-  return [row.date, factory, dept, row.grade, place, operator];
+  return [row.date, factory, dept, row.grade, place, operator, row.kitSize && row.kitSize !== "—" ? row.kitSize : "—"];
 }
 
 export default function DailyProductionReportPage() {
   const [report, setReport] = useState<ReportMode>("daily");
-  const [filters, setFilters] = useState({ factory: "", department: "", from: "", to: "", shift: "" });
+  const [filters, setFilters] = useState({
+    factory: "",
+    department: "",
+    from: "",
+    to: "",
+    shift: "",
+    reactor: "",
+    grade: "",
+    batch: "",
+  });
+  const [filterLists, setFilterLists] = useState<{
+    reactors: string[];
+    grades: string[];
+    batches: string[];
+    byDepartment: Record<string, { reactors: string[]; grades: string[]; batches: string[] }>;
+  }>({ reactors: [], grades: [], batches: [], byDepartment: {} });
   const [rows, setRows] = useState<DprRow[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -113,9 +129,18 @@ export default function DailyProductionReportPage() {
   const reportQuery = (mode: ReportMode) => {
     const p = new URLSearchParams();
     p.set("group", mode);
+    const activeLists =
+      filters.department && filterLists.byDepartment[filters.department]
+        ? filterLists.byDepartment[filters.department]
+        : filterLists;
+    const listed = (options: string[], value: string) =>
+      options.some((option) => option.toLowerCase() === value.trim().toLowerCase());
     Object.entries(filters).forEach(([key, value]) => {
       if (value) p.set(key, value);
     });
+    if (filters.reactor && !listed(activeLists.reactors, filters.reactor)) p.set("reactorMatch", "partial");
+    if (filters.grade && !listed(activeLists.grades, filters.grade)) p.set("gradeMatch", "partial");
+    if (filters.batch && !listed(activeLists.batches, filters.batch)) p.set("batchMatch", "partial");
     return `?${p.toString()}`;
   };
 
@@ -139,10 +164,26 @@ export default function DailyProductionReportPage() {
     const mode = REPORTS.some((item) => item.id === requested) ? (requested as ReportMode) : "daily";
     setReport(mode);
     setDepartments(storedProductionDepartments());
+    productionApi
+      .filters()
+      .then((res) => setFilterLists(res.data))
+      .catch(() => setFilterLists({ reactors: [], grades: [], batches: [], byDepartment: {} }));
     void run(undefined, mode);
     // Load the report once. Later runs use the filters and report the user submits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const lists =
+    filters.department && filterLists.byDepartment[filters.department]
+      ? filterLists.byDepartment[filters.department]
+      : filterLists;
+  const keepSearch = (value: string, previous: string[], next: string[]) => {
+    const typed = value.trim();
+    if (!typed) return "";
+    const wasListed = previous.some((option) => option.toLowerCase() === typed.toLowerCase());
+    if (!wasListed) return value;
+    return next.some((option) => option.toLowerCase() === typed.toLowerCase()) ? value : "";
+  };
 
   const sum = (key: keyof DprRow) => rows.reduce((total, row) => total + Number(row[key] || 0), 0);
   const outputBars = barsFor(report, rows);
@@ -175,6 +216,9 @@ export default function DailyProductionReportPage() {
       }
       if ((report === "reactor" || report === "reactor-batch" || report === "weekly") && row.reactor && row.reactor !== "—" && !row.reactor.includes(",")) {
         params.set("reactor", row.reactor);
+      }
+      if (report === "daily" && row.kitSize && row.kitSize !== "—" && !row.kitSize.includes(",")) {
+        params.set("kitSize", row.kitSize);
       }
       const res = await productionApi.list(`?${params.toString()}`);
       const matched = (res.data || []).filter((entry) => {
@@ -238,7 +282,7 @@ export default function DailyProductionReportPage() {
           </button>
         ) : null}
       </div>
-      <form onSubmit={run} className={`${procurementPanelClass} no-print grid grid-cols-2 gap-3 p-3 md:grid-cols-6`}>
+      <form onSubmit={run} className={`${procurementPanelClass} no-print grid grid-cols-2 gap-3 p-3 md:grid-cols-4 xl:grid-cols-5`}>
         <label className={procurementLabelClass}>
           Factory
           <select className={procurementFieldClass} value={filters.factory} onChange={(e) => setFilters({ ...filters, factory: e.target.value })}>
@@ -250,7 +294,21 @@ export default function DailyProductionReportPage() {
         </label>
         <label className={procurementLabelClass}>
           Department
-          <select className={procurementFieldClass} value={filters.department} onChange={(e) => setFilters({ ...filters, department: e.target.value })}>
+          <select
+            className={procurementFieldClass}
+            value={filters.department}
+            onChange={(e) => {
+              const department = e.target.value;
+              const next = department && filterLists.byDepartment[department] ? filterLists.byDepartment[department] : filterLists;
+              setFilters({
+                ...filters,
+                department,
+                reactor: keepSearch(filters.reactor, lists.reactors, next.reactors),
+                grade: keepSearch(filters.grade, lists.grades, next.grades),
+                batch: keepSearch(filters.batch, lists.batches, next.batches),
+              });
+            }}
+          >
             <option value="">All</option>
             {departments.map((id) => (
               <option key={id} value={id}>
@@ -266,6 +324,39 @@ export default function DailyProductionReportPage() {
         <label className={procurementLabelClass}>
           To
           <input type="date" className={procurementFieldClass} value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
+        </label>
+        <label className={procurementLabelClass}>
+          Reactor
+          <SearchableSelect
+            freeText
+            className={procurementFieldClass}
+            placeholder="Type a reactor…"
+            value={filters.reactor}
+            options={lists.reactors.map((reactor) => ({ value: reactor, label: reactor }))}
+            onChange={(reactor) => setFilters({ ...filters, reactor })}
+          />
+        </label>
+        <label className={procurementLabelClass}>
+          Grade
+          <SearchableSelect
+            freeText
+            className={procurementFieldClass}
+            placeholder="Type a grade…"
+            value={filters.grade}
+            options={lists.grades.map((grade) => ({ value: grade, label: grade }))}
+            onChange={(grade) => setFilters({ ...filters, grade })}
+          />
+        </label>
+        <label className={procurementLabelClass}>
+          Batch no.
+          <SearchableSelect
+            freeText
+            className={procurementFieldClass}
+            placeholder="Type a batch no…"
+            value={filters.batch}
+            options={lists.batches.map((batch) => ({ value: batch, label: batch }))}
+            onChange={(batch) => setFilters({ ...filters, batch })}
+          />
         </label>
         <label className={procurementLabelClass}>
           Shift
@@ -348,7 +439,7 @@ export default function DailyProductionReportPage() {
             ) : (
               rows.map((row) => (
                 <tr
-                  key={`${report}-${row.date}-${row.factory}-${row.department}-${row.shift}-${row.grade}-${row.batch}-${row.reactor}-${row.machine}`}
+                  key={`${report}-${row.date}-${row.factory}-${row.department}-${row.shift}-${row.grade}-${row.batch}-${row.reactor}-${row.machine}-${row.kitSize}`}
                   className="cursor-pointer border-t border-blue-100 hover:bg-blue-50 dark:border-slate-800 dark:hover:bg-slate-800/80"
                   onClick={() => void openGroup(row)}
                 >
